@@ -1,4 +1,3 @@
-use std::mem;
 use proc_macro::TokenStream;
 use syn::{Expr, parse_macro_input};
 
