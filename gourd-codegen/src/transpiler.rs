@@ -21,7 +21,7 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Call(e)      => transpile_call(e),
         Expr::Paren(e)     => transpile_paren(e),
         Expr::Group(e)     => go_to_rust(&e.expr),
-        Expr::Block(e)     => transpile_block(&e),
+        Expr::Block(e)     => transpile_block(e),
         Expr::If(e)        => transpile_if(e),
         Expr::Range(e)     => transpile_range(e),
         Expr::Index(e)     => transpile_index(e),
@@ -149,14 +149,12 @@ fn transpile_return(input: &syn::ExprReturn) -> TokenStream {
 /// Go `len(slice)` or `cap(slice)` r Rust `slice.len() as i32``
 fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(go_to_rust).collect();
-    if let Expr::Path(path) = &*input.func {
-        if let Some(name) = path.path.get_ident() {
-            let n = name.to_string();
-            if n == "len" || n == "cap" {
-                let arg = args[0].clone();
-                return quote! { #arg.len() as i32 };
-            }
-        }
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && matches!(name.to_string().as_str(), "len" | "cap")
+    {
+        let arg = args[0].clone();
+        return quote! { #arg.len() as i32 };
     }
     let func = go_to_rust(&input.func);
     quote! { #func( #(#args),* ) }
@@ -275,11 +273,11 @@ struct GoFnInputs {
 struct GoParam {
     id: Ident,
     ty: Option<Box<syn::Type>>,
-    slice_elem: Option<Box<syn::Type>>,
+    slice_elem: Option<syn::Type>,
 }
 
 struct GoFnOutput {
-    tys: Vec<Box<syn::Type>>,
+    tys: Vec<syn::Type>,
 }
 
 struct GoFn {
@@ -344,10 +342,10 @@ impl Parse for GoFnInputs {
                     // Non-empty brackets: `[T` — try to parse from inside
                     content.parse()?
                 };
-                let elem_type: Box<syn::Type> = Box::new(syn::Type::Path(syn::TypePath {
+                let elem_type = syn::Type::Path(syn::TypePath {
                     path: elem_path,
                     qself: None,
-                }));
+                });
                 // Push in correct order: first param (`id`) first, then remaining group_ids
                 args.push(GoParam { id: id.clone(), ty: ty.clone(), slice_elem: Some(elem_type.clone()) });
                 for param_id in &group_ids {
@@ -378,7 +376,7 @@ impl Parse for GoFnOutput {
         // If it's a tuple or single type, parse it. Then check for Go-style
         // additional comma-separated types (multi-return).
         if !input.peek(syn::token::Brace) {
-            let t: Box<syn::Type> = input.parse()?;
+            let t = input.parse()?;
             tys.push(t);
             // Go-style: `() (int, error)` or `(int, error)` — multi-returns
             // A comma means another return type (Go multi-return)
@@ -387,7 +385,7 @@ impl Parse for GoFnOutput {
                 if input.peek(syn::token::Brace) {
                     break;
                 }
-                let t: Box<syn::Type> = input.parse()?;
+            let t = input.parse()?;
                 tys.push(t);
             }
         }
@@ -504,7 +502,7 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                 if output.tys.is_empty() {
                     quote! {}
                 } else {
-                    let mapped: Vec<_> = output.tys.iter().map(|t| map_go_types(t.as_ref())).collect();
+                    let mapped: Vec<_> = output.tys.iter().map(map_go_types).collect();
                     match mapped.len() {
                         1 => {
                             let m = &mapped[0];
@@ -525,11 +523,11 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                         all_params.push(quote! { #id });
                     }
                     (_, Some(slice_inner)) => {
-                        let mapped = map_go_types(slice_inner.as_ref());
+                        let mapped = map_go_types(slice_inner);
                         all_params.push(quote! { #id: &[ #mapped ]});
                     }
                     (Some(ty), None) => {
-                        let mapped = map_go_types(ty.as_ref());
+                        let mapped = map_go_types(ty);
                         all_params.push(quote! { #id: #mapped });
                     }
                 }
@@ -556,6 +554,6 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body
             }
         }
-        Err(e) => e.to_compile_error().into(),
+        Err(e) => e.to_compile_error(),
     }
 }
