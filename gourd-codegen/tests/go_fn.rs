@@ -116,3 +116,16 @@ fn test_slice_type() {
     let b = vec![3];
     assert_eq!(go_slice_subindex(&a, &b), 1);
 }
+
+// ── String conversion builtin ────────────────────────────────────────────
+go! {
+    fn go_str(bytes []byte) string {
+        string(bytes)
+    }
+}
+
+#[test]
+fn test_string_builtin() {
+    let bytes = vec![72, 101, 108, 108, 111];  // "Hello"
+    assert_eq!(go_str(&bytes), "Hello");
+}

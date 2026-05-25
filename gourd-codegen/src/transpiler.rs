@@ -156,6 +156,13 @@ fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         let arg = args[0].clone();
         return quote! { #arg.len() as i32 };
     }
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string().as_str() == "string"
+    {
+        let arg = args[0].clone();
+        return quote! { std::str::from_utf8(&#arg).unwrap_or("").to_string() };
+    }
     let func = go_to_rust(&input.func);
     quote! { #func( #(#args),* ) }
 }
