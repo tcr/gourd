@@ -166,5 +166,5 @@ fn parentheses() {
 #[test]
 fn len_call() {
     let v: Vec<i32> = vec![1, 2, 3];
-    assert_eq!(go_expr! {  len(v)  }, 3usize);
+    assert_eq!(go_expr! {  len(v)  }, 3i32);
 }

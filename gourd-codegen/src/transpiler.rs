@@ -32,6 +32,11 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::MethodCall(c)=> transpile_method_call(c),
         Expr::Field(e)     => transpile_field(e),
         Expr::Let(e)       => transpile_let(e),
+        Expr::Tuple(e)     => transpile_tuple(e),
+        Expr::Cast(e)      => transpile_cast(e),
+        Expr::Assign(e)     => transpile_assign(e),
+        Expr::Break(e)      => transpile_break(e),
+        Expr::Return(e)     => transpile_return(e),
         _                  => emit_todo("unsupported Go form"),
     }
 }
@@ -99,7 +104,49 @@ fn transpile_let(input: &syn::ExprLet) -> TokenStream {
     quote! { let #pat = #expr }
 }
 
-/// Go `len(slice)` or `cap(slice)` r Rust `slice.len()`
+/// Go tuple `(a, b)` → Rust tuple `(a, b)`
+fn transpile_tuple(input: &syn::ExprTuple) -> TokenStream {
+    let elems: Vec<_> = input.elems.iter().map(go_to_rust).collect();
+    match elems.len() {
+        0 => quote! { () },
+        _ => quote! { ( #(#elems),* ) },
+    }
+}
+
+/// Go `x as T` → Rust `x as T`
+fn transpile_cast(input: &syn::ExprCast) -> TokenStream {
+    let expr = go_to_rust(&input.expr);
+    let ty = &input.ty;
+    quote! { #expr as #ty }
+}
+
+/// Go assignment `x = y` → Rust `x = y` (for mutation after `let mut`)
+fn transpile_assign(input: &syn::ExprAssign) -> TokenStream {
+    let lhs = go_to_rust(&input.left);
+    let rhs = go_to_rust(&input.right);
+    quote! { #lhs = #rhs }
+}
+
+/// Go `break` labels/expressions
+fn transpile_break(input: &syn::ExprBreak) -> TokenStream {
+    let label = input.label.as_ref().map(|l| quote! { #l });
+    let expr = input.expr.as_ref().map(|e| go_to_rust(e));
+    match expr {
+        Some(e) => quote! { break #label #e },
+        None => quote! { break #label },
+    }
+}
+
+/// Go `return` → Rust `return expr`
+fn transpile_return(input: &syn::ExprReturn) -> TokenStream {
+    let expr = input.expr.as_ref().map(|e| go_to_rust(e));
+    match expr {
+        Some(e) => quote! { return #e },
+        None => quote! { return },
+    }
+}
+
+/// Go `len(slice)` or `cap(slice)` r Rust `slice.len() as i32``
 fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(go_to_rust).collect();
     if let Expr::Path(path) = &*input.func {
@@ -107,7 +154,7 @@ fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             let n = name.to_string();
             if n == "len" || n == "cap" {
                 let arg = args[0].clone();
-                return quote! { #arg.len() };
+                return quote! { #arg.len() as i32 };
             }
         }
     }
@@ -202,11 +249,12 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
             syn::Stmt::Expr(val_expr, _)  => {
                 outputs.push(go_to_rust(val_expr));
             }
-            syn::Stmt::Local(local)  => {
-                let local_pat  = &local.pat;
-                let local_val  = local.init.as_ref().map(|v| go_to_rust(&v.expr));
-                outputs.push(quote! { let #local_pat = #local_val; });
-            }
+                    syn::Stmt::Local(local)  => {
+                        let local_pat  = &local.pat;
+                        let local_val  = local.init.as_ref().map(|v| go_to_rust(&v.expr));
+                        // Convert `mut x` from Go pattern: the Pat already has mut binding stored in it
+                        outputs.push(quote! { let #local_pat = #local_val; });
+                    }
             _  => {
                 return emit_todo("statement not yet supported");
             }
@@ -227,6 +275,7 @@ struct GoFnInputs {
 struct GoParam {
     id: Ident,
     ty: Option<Box<syn::Type>>,
+    slice_elem: Option<Box<syn::Type>>,
 }
 
 struct GoFnOutput {
@@ -248,38 +297,68 @@ impl Parse for GoFnInputs {
             let id: Ident = input.parse()?;
             let mut group = Punctuated::<Ident, token::Comma>::new();
             group.push_value(id.clone());
-            let mut ty: Option<Box<syn::Type>> = None;
+            let ty: Option<Box<syn::Type>> = None;
             // Check for comma + more ids in the group (Go shorthand: `a, b int`)
             let mut group_commas: Vec<token::Comma> = Vec::new();
             while input.peek(token::Comma) {
                 let peek_fork = input.fork();
                 let _ = peek_fork.parse::<token::Comma>();
-                // If next token is an Ident, this comma is a group comma (Go shorthand)
-                // Otherwise it's a separator between params
+                // If next token after comma is an Ident (more group ids), this is a group comma
+                // If it's '[' (slice type start), this is a param separator — stop grouping
                 if peek_fork.peek(Ident) {
                     group_commas.push(input.parse()?);
                 } else {
                     break;
                 }
             }
-            // Push the collected group identifiers and their commas into `params`
+            // Push the collected group identifiers
+            let mut group_ids: Vec<Ident> = Vec::new();
             for _ in 0..group_commas.len() {
                 let next_id: Ident = input.parse()?;
-                group.push_value(next_id);
+                group_ids.push(next_id);
             }
             // Re-emit the commas that were consumed from group_commas
-            // (they're part of the group punctuation)
-            // Check for type
-            if input.peek(syn::Ident) {
-                let typ: Box<syn::Type> = input.parse()?;
-                ty = Some(typ);
-            } else if input.peek(syn::token::Colon) {
-                // Rust-style: `name: Type`
+            // Check for type: peek what's next (fall through all paths)
+            let fork = input.fork();
+            let is_slice_like = fork.peek(syn::token::Bracket);
+            let mut ty_from_ident: Option<Box<syn::Type>> = None;
+            
+            // If not a slice, check for other type forms
+            if !is_slice_like && fork.peek(syn::Ident) {
+                ty_from_ident = Some(input.parse()?);
+            } else if !is_slice_like && fork.peek(syn::token::Colon) {
                 let _colon: syn::token::Colon = input.parse()?;
-                let typ: Box<syn::Type> = input.parse()?;
-                ty = Some(typ);
+                ty_from_ident = Some(input.parse()?);
             }
-            args.push(GoParam { id, ty: ty.clone() });
+            
+            if is_slice_like {
+                // Try to consume `[...]` as a slice type marker
+                let content;
+                let _ = syn::bracketed!(content in input);
+                // For `[]int`, content is empty (Go's `[]` has nothing inside), so parse element type T from the stream AFTER the bracket
+                // For `[T]` (array-style), parse T from inside content
+                let elem_path: syn::Path = if content.is_empty() {
+                    // Empty brackets: `[]T` — parse type from after the brackets
+                    input.parse()?
+                } else {
+                    // Non-empty brackets: `[T` — try to parse from inside
+                    content.parse()?
+                };
+                let elem_type: Box<syn::Type> = Box::new(syn::Type::Path(syn::TypePath {
+                    path: elem_path,
+                    qself: None,
+                }));
+                // Push in correct order: first param (`id`) first, then remaining group_ids
+                args.push(GoParam { id: id.clone(), ty: ty.clone(), slice_elem: Some(elem_type.clone()) });
+                for param_id in &group_ids {
+                    args.push(GoParam { id: param_id.clone(), ty: ty.clone(), slice_elem: Some(elem_type.clone()) });
+                }
+            } else {
+                args.push(GoParam { id: id.clone(), ty: ty_from_ident.clone(), slice_elem: None });
+                for param_id in group_ids {
+                    args.push(GoParam { id: param_id, ty: ty.clone(), slice_elem: None });
+                }
+            }
             if input.peek(token::Comma) {
                 input.parse::<token::Comma>()?;
             }
@@ -391,7 +470,7 @@ fn map_go_types(ty: &syn::Type) -> TokenStream {
         }
         syn::Type::Slice(type_array) => {
             let elem = map_go_types(&type_array.elem);
-            quote! { [ #elem ] }
+            quote! { &[ #elem ]}
         }
         syn::Type::Array(a) => {
             let elem = map_go_types(&a.elem);
@@ -441,19 +520,37 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
             let mut all_params = Vec::<TokenStream>::new();
             for param in &go_fn.inputs.args {
                 let id = &param.id;
-                match &param.ty {
-                    None => {
-                        // No type — pass through as individual
+                match (&param.ty, &param.slice_elem) {
+                    (None, None) => {
                         all_params.push(quote! { #id });
                     }
-                    Some(ty) => {
+                    (_, Some(slice_inner)) => {
+                        let mapped = map_go_types(slice_inner.as_ref());
+                        all_params.push(quote! { #id: &[ #mapped ]});
+                    }
+                    (Some(ty), None) => {
                         let mapped = map_go_types(ty.as_ref());
                         all_params.push(quote! { #id: #mapped });
                     }
                 }
             }
 
-            let body = &go_fn.block;
+            // Transpile block statements
+            let mut stmts = Vec::new();
+            for stm in &go_fn.block.stmts {
+                match stm {
+                    syn::Stmt::Expr(val_expr, _) => {
+                        stmts.push(go_to_rust(val_expr));
+                    }
+                    syn::Stmt::Local(local) => {
+                        let local_pat = &local.pat;
+                        let local_val = local.init.as_ref().map(|v| go_to_rust(&v.expr));
+                        stmts.push(quote! { let #local_pat = #local_val; });
+                    }
+                    _ => stmts.push(emit_todo("statement not yet supported")),
+                }
+            }
+            let body: Box<syn::ExprBlock> = syn::parse_quote! {{ #(#stmts);* }};
 
             quote! {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body

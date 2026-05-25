@@ -95,3 +95,26 @@ fn test_fn_no_return() {
     let result = go_incr();
     assert_eq!(result, 42);
 }
+
+// ── Slice type shorthand ─────────────────────────────────────────────
+go! {
+    fn go_slice_len(a []int) int {
+        len(a)
+    }
+}
+
+// ── Slice type shorthand (2 params) ──────────────────────────────────
+go! {
+    fn go_slice_subindex(a, b []int) int {
+        len(a) - len(b)
+    }
+}
+
+#[test]
+fn test_slice_type() {
+    let data = vec![10, 20, 30];
+    assert_eq!(go_slice_len(&data), 3);
+    let a = vec![1, 2];
+    let b = vec![3];
+    assert_eq!(go_slice_subindex(&a, &b), 1);
+}

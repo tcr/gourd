@@ -15,6 +15,12 @@ Prioritised by effort/value to the user experience.
       parentheses, ranges, loops).
 - [x] **`go!`**: Function declaration entry point (type name mapping for
       `int` / `bool` / etc.), return type mapping, parameter shaping.
+- [x] **Go-style slice type shorthand** (`[]T` → `&[T]`): Slice detection and
+      parameter generation, group-aware slicing in `[]T` (shorthand `a, b []int`
+      → `a: &[i32], b: &[i32]`), `len()` returns `as i32` cast.
+- [x] **Block transpilation**: Statement-level handling (expressions, locals,
+      `let mut`, `break`, `return`). Tuple literals, cast expressions, and
+      assignments—all transpiled inside function blocks.
 
 ## Current features (`go_expr!`)
 
@@ -33,6 +39,10 @@ Prioritised by effort/value to the user experience.
 | Field access | `pt.0`, `s.field` |
 | Short decl | `x := y` → `let x = y` |
 | Blocks | `{ stmt; expr }` (final expression is the value) |
+| Tuple literals | `(a, b)` — multis |
+| Cast expressions | `x as T` |
+| Assignments | `x = y` (mutable assignment after `let mut`) |
+| Return / Break | `return expr`, `break` |
 
 ## Undone (kept as `compile_error!` sinks)
 
@@ -67,6 +77,8 @@ Prioritised by effort/value to the user experience.
 - [ ] `Stmt::Loop`
 - [x] `Stmt::Expr`
 - [x] `Stmt::Local`
+- [x] `Stmt::Break` (via `Expr::Break`)
+- [x] `Stmt::Return` (via `Expr::Return`)
 - [ ] assertion statements
 - [ ] function declarations (recursively handled — [TODO])
 - [ ] struct declarations (recursively handled — [TODO])
@@ -108,7 +120,7 @@ fn foo(a: i32, b: i32, c: i32) -> String {
 
 ### 2. Slice type shorthand
 
-**Status:** NOT YET IMPLEMENTED
+**Status: ✅ IMPLEMENTED**
 
 **Goal:** Complex Go type `[]T` (slice → `&[T]` (reference slice syntax).
 
@@ -120,9 +132,11 @@ go! {
 }
 // Transpiles to:
 fn go_len(a: &[i32]) -> i32 {
-    len(a)
+    a.len() as i32
 }
 ```
+
+Also supports Go-style parameter grouping: `a, b []int` → `a: &[i32], b: &[i32]`.
 
 **Effort:** Low (edit `map_GO_types` to handle `[]T` type alias)
 **Value:** Medium (common Go pattern)
