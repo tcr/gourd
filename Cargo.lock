@@ -19,13 +19,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gourd-embed-tests"
-version = "0.1.0"
-dependencies = [
- "gourd-codegen",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
