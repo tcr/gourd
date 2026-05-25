@@ -1,8 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::parse::{Parse, ParseStream};
-use syn::parse::discouraged::Speculative;
+use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
@@ -301,7 +300,7 @@ impl Parse for GoFnInputs {
         let mut args = Vec::new();
         while !input.is_empty() {
             let id: Ident = input.parse()?;
-            let mut ty: Option<Box<syn::Type>> = None;
+            let _ty: Option<Box<syn::Type>> = None;
             let mut group_ids: Vec<Ident> = Vec::new();
 
             // Collect group names: look for comma + named params sharing a type.

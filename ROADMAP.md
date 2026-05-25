@@ -95,13 +95,9 @@ Prioritised by effort/value to the user experience.
 
 ### 1. Go-style parameter shorthand
 
-**Status:** NOT YET IMPLEMENTED
+**Status: ✅ IMPLEMENTED**
 
 **Goal:** Transform Go syntax `func foo(a, b, c int)` → Rust `fn foo(a: i32, b: i32, c: i32)`.
-
-Currently `go!` maps each `FnArg` individually — you must write
-`a: i32, b: i32` one at a time. The Go convention allows sharing
-a trailing type spec across multiple parameter names:
 
 ```go
 go! {
@@ -113,7 +109,13 @@ go! {
 fn foo(a: i32, b: i32, c: i32) -> String {
     a + b + c
 }
-```
+
+Also handles Go-style parameter grouping: `a, b int` → `a: i32, b: i32`,
+including any number of grouped parameters (not limited to 2). The parser
+uses fork-based lookahead: when the name after a group-comma is a known
+Go type keyword (e.g. `int`, `string`), the comma is treated as a
+parameter separator rather than a group-member, enabling correct parsing
+for arbitrarily many grouped params (e.g. `a, b, c, d int`).
 
 **Effort:** Medium (requires splitting one `syn::Pat` into several)
 **Value:** High (common Go pattern, very easy to break missing)
