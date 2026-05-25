@@ -129,3 +129,15 @@ fn test_string_builtin() {
     let bytes = vec![72, 101, 108, 108, 111];  // "Hello"
     assert_eq!(go_str(&bytes), "Hello");
 }
+
+// ── Go-style parameter shorthand: group multiple params with shared type ────
+go! {
+    fn go_shorthand(a, b, c int) int {
+        a + b + c
+    }
+}
+
+#[test]
+fn test_param_grouping() {
+    assert_eq!(go_shorthand(1, 2, 3), 6);
+}

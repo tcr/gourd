@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
+use syn::parse::discouraged::Speculative;
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
@@ -300,70 +301,73 @@ impl Parse for GoFnInputs {
         let mut args = Vec::new();
         while !input.is_empty() {
             let id: Ident = input.parse()?;
-            let mut group = Punctuated::<Ident, token::Comma>::new();
-            group.push_value(id.clone());
-            let ty: Option<Box<syn::Type>> = None;
-            // Check for comma + more ids in the group (Go shorthand: `a, b int`)
-            let mut group_commas: Vec<token::Comma> = Vec::new();
+            let mut ty: Option<Box<syn::Type>> = None;
+            let mut group_ids: Vec<Ident> = Vec::new();
+
+            // Collect group names: look for comma + named params sharing a type.
+            // Stop if the name after the comma is a known Go type keyword.
             while input.peek(token::Comma) {
                 let peek_fork = input.fork();
                 let _ = peek_fork.parse::<token::Comma>();
-                // If next token after comma is an Ident (more group ids), this is a group comma
-                // If it's '[' (slice type start), this is a param separator — stop grouping
                 if peek_fork.peek(Ident) {
-                    group_commas.push(input.parse()?);
+                    let name = peek_fork.parse::<Ident>()?;
+                    let name_str = name.to_string();
+                    let known_go_type = matches!(name_str.as_str(),
+                        "bool" | "string" | "int" | "int8" | "int16" | "int32" | "int64"
+                        | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr"
+                        | "byte" | "rune" | "float32" | "float64" | "error"
+                    );
+                    if known_go_type {
+                        // This comma is a param separator, not a group comma. Rollback.
+                        input.advance_to(&peek_fork);
+                        break;
+                    }
+                    // It's a group name: consume the comma and the name.
+                    input.parse::<token::Comma>()?;
+                    let param_name: Ident = input.parse()?;
+                    group_ids.push(param_name);
                 } else {
+                    // `[` (slice type) — stop grouping.
                     break;
                 }
             }
-            // Push the collected group identifiers
-            let mut group_ids: Vec<Ident> = Vec::new();
-            for _ in 0..group_commas.len() {
-                let next_id: Ident = input.parse()?;
-                group_ids.push(next_id);
-            }
-            // Re-emit the commas that were consumed from group_commas
-            // Check for type: peek what's next (fall through all paths)
+
+            // Parse the type that follows (for non-slice cases).
             let fork = input.fork();
             let is_slice_like = fork.peek(syn::token::Bracket);
+
             let mut ty_from_ident: Option<Box<syn::Type>> = None;
-            
-            // If not a slice, check for other type forms
             if !is_slice_like && fork.peek(syn::Ident) {
                 ty_from_ident = Some(input.parse()?);
             } else if !is_slice_like && fork.peek(syn::token::Colon) {
                 let _colon: syn::token::Colon = input.parse()?;
                 ty_from_ident = Some(input.parse()?);
             }
-            
+
             if is_slice_like {
-                // Try to consume `[...]` as a slice type marker
+                // Slice type: `[]T` — parse element type from what follows the brackets.
                 let content;
                 let _ = syn::bracketed!(content in input);
-                // For `[]int`, content is empty (Go's `[]` has nothing inside), so parse element type T from the stream AFTER the bracket
-                // For `[T]` (array-style), parse T from inside content
                 let elem_path: syn::Path = if content.is_empty() {
-                    // Empty brackets: `[]T` — parse type from after the brackets
                     input.parse()?
                 } else {
-                    // Non-empty brackets: `[T` — try to parse from inside
                     content.parse()?
                 };
                 let elem_type = syn::Type::Path(syn::TypePath {
                     path: elem_path,
                     qself: None,
                 });
-                // Push in correct order: first param (`id`) first, then remaining group_ids
-                args.push(GoParam { id: id.clone(), ty: ty.clone(), slice_elem: Some(elem_type.clone()) });
-                for param_id in &group_ids {
-                    args.push(GoParam { id: param_id.clone(), ty: ty.clone(), slice_elem: Some(elem_type.clone()) });
+                args.push(GoParam { id: id.clone(), ty: None, slice_elem: Some(elem_type.clone()) });
+                for param_id in group_ids {
+                    args.push(GoParam { id: param_id, ty: None, slice_elem: Some(elem_type.clone()) });
                 }
             } else {
                 args.push(GoParam { id: id.clone(), ty: ty_from_ident.clone(), slice_elem: None });
                 for param_id in group_ids {
-                    args.push(GoParam { id: param_id, ty: ty.clone(), slice_elem: None });
+                    args.push(GoParam { id: param_id, ty: ty_from_ident.clone(), slice_elem: None });
                 }
             }
+
             if input.peek(token::Comma) {
                 input.parse::<token::Comma>()?;
             }
