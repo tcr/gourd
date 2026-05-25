@@ -222,7 +222,6 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
 /// Parse type Name along w/ and shared type spec.
 struct GoFnInputs {
     args: Vec<GoParam>,
-    params: Vec<Punctuated<Ident, token::Comma>>,
 }
 
 struct GoParam {
@@ -245,7 +244,6 @@ struct GoFn {
 impl Parse for GoFnInputs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut args = Vec::new();
-        let mut params = Vec::new();
         while !input.is_empty() {
             let id: Ident = input.parse()?;
             let mut group = Punctuated::<Ident, token::Comma>::new();
@@ -282,12 +280,11 @@ impl Parse for GoFnInputs {
                 ty = Some(typ);
             }
             args.push(GoParam { id, ty: ty.clone() });
-            params.push(group);
             if input.peek(token::Comma) {
                 input.parse::<token::Comma>()?;
             }
         }
-        Ok(GoFnInputs { args, params })
+        Ok(GoFnInputs { args })
     }
 }
 
@@ -326,7 +323,7 @@ impl Parse for GoFn {
         // Parse function name
         let ident: Ident = input.parse()?;
         // Parse generics
-        let mut generics = Punctuated::<syn::GenericParam, token::Comma>::new();
+        let generics = Punctuated::<syn::GenericParam, token::Comma>::new();
         if input.peek(syn::token::Bracket) {
             let content;
             let _bracketed = syn::bracketed!(content in input);
