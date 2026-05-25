@@ -1,0 +1,7 @@
+[package]
+name = "gourd-embed-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gourd-codegen = { path = "../gourd-codegen" }

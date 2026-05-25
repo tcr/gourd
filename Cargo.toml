@@ -1,0 +1,3 @@
+[workspace]
+members = ["gourd-codegen", "gourd", "gourd-embed-tests"]
+resolver = "2"
