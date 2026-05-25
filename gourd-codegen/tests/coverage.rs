@@ -83,3 +83,22 @@ fn ordinary_call() {
     let r = go! { String::from("hello") };
     assert_eq!(r.as_str(), "hello");
 }
+
+// ── If expressions ──────────────────────────────────────────────────
+
+#[test]
+fn if_else() {
+    assert_eq!(go! { if true { 1 } else { 2 } }, 1i32);
+    assert_eq!(go! { if false { 1 } else { 2 } }, 2i32);
+}
+
+#[test]
+fn if_without_else() {
+    go! { if true { drop(42i32) }};
+}
+
+#[test]
+fn if_else_value() {
+    assert_eq!(go! { if true { 1 } else { 2 } }, 1i32);
+    assert_eq!(go! { if false { 1 } else { 2 } }, 2i32);
+}

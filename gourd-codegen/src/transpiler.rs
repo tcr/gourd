@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, BinOp, UnOp};
+use syn::{Expr, BinOp, ExprBlock, ExprIf, UnOp};
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -16,11 +16,13 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Path(e)     => transpile_path(e),
         Expr::Call(e)     => transpile_call(e),
         Expr::Paren(e)    => transpile_paren(e),
-        Expr::Group(e)    => go_to_rust(&e.expr),
+        Expr::Group(e)          => go_to_rust(&e.expr),
+        Expr::If(e)             => transpile_if(e),
+        Expr::Block(e)    => transpile_block(e),
         // Go = Rust: let
-        Expr::Let(e)      => transpile_let(e),
+        Expr::Let(e)        => transpile_let(e),
         // Unsupported
-        _ => emit_todo("unsupported Go form"),
+        _                   => emit_todo("unsupported Go form"),
     }
 }
 
@@ -106,5 +108,40 @@ fn transpile_call(input: &syn::ExprCall) -> TokenStream {
 /// `(x)  →  (x)`
 fn transpile_paren(input: &syn::ExprParen) -> TokenStream {
     let inner = go_to_rust(&input.expr);
-    quote! {  ( #inner ) }
+    quote! { ( #inner ) }
+}
+
+fn transpile_if(input: &ExprIf) -> TokenStream {
+    let cond = go_to_rust(&input.cond);
+    let then_block = &input.then_branch;
+    let else_block = input.else_branch.as_ref().map(|(_, e)| {
+        let e = go_to_rust(e);
+        quote! { else { #e } }
+    });
+    quote! { if #cond #then_block #else_block }
+}
+
+/// An `{ ... }` block: transpile each statement; the final expression
+/// becomes the block's value.
+fn transpile_block(input: &ExprBlock) -> TokenStream {
+    if input.block.stmts.is_empty() {
+        return quote! { { } };
+    }
+    let mut outputs = Vec::new();
+    for stm in input.block.stmts.iter() {
+        match stm {
+            syn::Stmt::Expr(val_expr, _semicolon)  => {
+                outputs.push(go_to_rust(val_expr));
+            }
+            syn::Stmt::Local(local)          => {
+                let local_pat = &local.pat;
+                let local_val = local.init.as_ref().map(|v| go_to_rust(&v.expr));
+                outputs.push(quote! { let #local_pat = #local_val; });
+            }
+            _                                => {
+                return emit_todo("statement not yet supported");
+            }
+        }
+    }
+    quote! { { #(#outputs);* } }
 }
