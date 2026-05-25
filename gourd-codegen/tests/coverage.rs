@@ -124,6 +124,18 @@ fn index_in_if() {
     assert_eq!(go! { if v[0] < v[1] { v[1] } else { v[0] } }, 10i32);
 }
 
+// ── Field access:  Go pt.Field → Rust pt.Field (identical syntax) ──
+
+#[test]
+fn field_access() {
+    let pt = (10, 20);
+    assert_eq!(pt.0, go! { (pt).0 });
+    assert_eq!(pt.1, go! { (pt).1 });
+}
+
+// Ranged patterns go! { for-range } are control-flow statements.
+// Single-line field access transpiles: go! { pt.Field } → pt.Field
+
 #[test]
 fn if_else_value() {
     assert_eq!(go! { if true { 1 } else { 2 } }, 1i32);

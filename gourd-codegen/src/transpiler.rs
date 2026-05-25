@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, BinOp, ExprBlock, ExprIf, ExprIndex, UnOp};
+use syn::{Expr, BinOp, ExprBlock, ExprField, ExprIf, ExprIndex, ExprMethodCall, ExprGroup, UnOp};
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -17,9 +17,11 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Call(e)     => transpile_call(e),
         Expr::Paren(e)    => transpile_paren(e),
         Expr::Group(e)          => go_to_rust(&e.expr),
+        Expr::Block(e)          => transpile_block(&e),
         Expr::If(e)             => transpile_if(e),
-        Expr::Block(e)    => transpile_block(e),
         Expr::Index(e)    => transpile_index(e),
+        Expr::MethodCall(c)  => transpile_method_call(c),
+        Expr::Field(e)         => transpile_field(e),
         // Go = Rust: let
         Expr::Let(e)        => transpile_let(e),
         // Unsupported
@@ -116,6 +118,19 @@ fn transpile_index(input: &ExprIndex) -> TokenStream {
     let seq = go_to_rust(&input.expr);
     let idx = go_to_rust(&input.index);
     quote! { #seq[ #idx ] }
+}
+
+fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
+    let receiver = go_to_rust(&input.receiver);
+    let method_name = &input.method;
+    let args: Vec<_> = input.args.iter().map(go_to_rust).collect();
+    quote! { #receiver.#method_name( #(#args),* ) }
+}
+
+fn transpile_field(input: &ExprField) -> TokenStream {
+    let base = go_to_rust(&input.base);
+    let field = &input.member;
+    quote! { #base.#field }
 }
 
 fn transpile_if(input: &ExprIf) -> TokenStream {
