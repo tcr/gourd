@@ -1,6 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, BinOp, ExprBlock, ExprArray, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, UnOp};
+use syn::ext::IdentExt;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::token;
+use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -209,4 +213,255 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
         }
     }
     quote! {{  { #(#outputs);* }  }}
+}
+
+// ──────────────────────────────────────────────
+// Go function declaration → Rust fn (the `go!` macro)
+// ──────────────────────────────────────────────
+
+/// Parse type Name along w/ and shared type spec.
+struct GoFnInputs {
+    args: Vec<GoParam>,
+    params: Vec<Punctuated<Ident, token::Comma>>,
+}
+
+struct GoParam {
+    id: Ident,
+    ty: Option<Box<syn::Type>>,
+}
+
+struct GoFnOutput {
+    tys: Vec<Box<syn::Type>>,
+}
+
+struct GoFn {
+    ident: Ident,
+    generics: Punctuated<syn::GenericParam, token::Comma>,
+    inputs: GoFnInputs,
+    output: Option<GoFnOutput>,
+    block: Block,
+}
+
+impl Parse for GoFnInputs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut args = Vec::new();
+        let mut params = Vec::new();
+        while !input.is_empty() {
+            let id: Ident = input.parse()?;
+            let mut group = Punctuated::<Ident, token::Comma>::new();
+            group.push_value(id.clone());
+            let mut ty: Option<Box<syn::Type>> = None;
+            // Check for comma + more ids in the group (Go shorthand: `a, b int`)
+            let mut group_commas: Vec<token::Comma> = Vec::new();
+            while input.peek(token::Comma) {
+                let peek_fork = input.fork();
+                let _ = peek_fork.parse::<token::Comma>();
+                // If next token is an Ident, this comma is a group comma (Go shorthand)
+                // Otherwise it's a separator between params
+                if peek_fork.peek(Ident) {
+                    group_commas.push(input.parse()?);
+                } else {
+                    break;
+                }
+            }
+            // Push the collected group identifiers and their commas into `params`
+            for _ in 0..group_commas.len() {
+                let next_id: Ident = input.parse()?;
+                group.push_value(next_id);
+            }
+            // Re-emit the commas that were consumed from group_commas
+            // (they're part of the group punctuation)
+            // Check for type
+            if input.peek(syn::Ident) {
+                let typ: Box<syn::Type> = input.parse()?;
+                ty = Some(typ);
+            } else if input.peek(syn::token::Colon) {
+                // Rust-style: `name: Type`
+                let _colon: syn::token::Colon = input.parse()?;
+                let typ: Box<syn::Type> = input.parse()?;
+                ty = Some(typ);
+            }
+            args.push(GoParam { id, ty: ty.clone() });
+            params.push(group);
+            if input.peek(token::Comma) {
+                input.parse::<token::Comma>()?;
+            }
+        }
+        Ok(GoFnInputs { args, params })
+    }
+}
+
+impl Parse for GoFnOutput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut tys = Vec::new();
+        // Skip `->` if present (Rust-style return arrow)
+        if input.peek(syn::token::RArrow) {
+            let _: syn::token::RArrow = input.parse()?;
+        }
+        // Parse the return type(s).
+        // If it's a tuple or single type, parse it. Then check for Go-style
+        // additional comma-separated types (multi-return).
+        if !input.peek(syn::token::Brace) {
+            let t: Box<syn::Type> = input.parse()?;
+            tys.push(t);
+            // Go-style: `() (int, error)` or `(int, error)` — multi-returns
+            // A comma means another return type (Go multi-return)
+            while input.peek(token::Comma) {
+                let _ = input.parse::<token::Comma>()?;
+                if input.peek(syn::token::Brace) {
+                    break;
+                }
+                let t: Box<syn::Type> = input.parse()?;
+                tys.push(t);
+            }
+        }
+        Ok(GoFnOutput { tys })
+    }
+}
+
+impl Parse for GoFn {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // Parse `fn` keyword
+        let _fn: Ident = input.call(Ident::parse_any)?;
+        // Parse function name
+        let ident: Ident = input.parse()?;
+        // Parse generics
+        let mut generics = Punctuated::<syn::GenericParam, token::Comma>::new();
+        if input.peek(syn::token::Bracket) {
+            let content;
+            let _bracketed = syn::bracketed!(content in input);
+            Punctuated::<syn::GenericParam, token::Comma>::parse_terminated(&content)?;
+        }
+        // Parse parameters
+        let paren_content;
+        let _paren = syn::parenthesized!(paren_content in input);
+        let inputs = paren_content.parse()?;
+        // Parse optional return
+        let output = if !input.is_empty() {
+            let outer = input.parse()?;
+            Some(outer)
+        } else {
+            None
+        };
+        // Parse body
+        let block: Block = input.parse()?;
+        Ok(GoFn { ident, generics, inputs, output, block })
+    }
+}
+
+/// Map a single Go type identifier to its Rust equivalent.
+fn go_type_map(ident: &syn::Ident) -> TokenStream {
+    let name = ident.to_string();
+    match name.as_str() {
+        "bool"    => quote! { bool },
+        "string"  => quote! { String },
+        "int"     => quote! { i32 },
+        "int8"    => quote! { i8 },
+        "int16"   => quote! { i16 },
+        "int32"   => quote! { i32 },
+        "int64"   => quote! { i64 },
+        "uint"    => quote! { u32 },
+        "uint8"   => quote! { u8 },
+        "uint16"  => quote! { u16 },
+        "uint32"  => quote! { u32 },
+        "uint64"  => quote! { u64 },
+        "uintptr" => quote! { usize },
+        "byte"    => quote! { u8 },
+        "rune"    => quote! { char },
+        "float32" => quote! { f32 },
+        "float64" => quote! { f64 },
+        "error"   => emit_todo("Go `error` interface not yet supported"),
+        _ => quote! { #ident },
+    }
+}
+
+/// Map Go type names to Rust, handling Path and composite types.
+fn map_go_types(ty: &syn::Type) -> TokenStream {
+    match ty {
+        syn::Type::Path(type_path) => {
+            let seg = type_path.path.segments.last();
+            match seg {
+                Some(seg) => go_type_map(&seg.ident),
+                None => quote! { #ty },
+            }
+        }
+        syn::Type::Reference(type_ref) => {
+            let elem = map_go_types(&type_ref.elem);
+            match &type_ref.lifetime {
+                Some(l) => quote! { & #l #elem },
+                None => quote! { &#elem }
+            }
+        }
+        syn::Type::Slice(type_array) => {
+            let elem = map_go_types(&type_array.elem);
+            quote! { [ #elem ] }
+        }
+        syn::Type::Array(a) => {
+            let elem = map_go_types(&a.elem);
+            quote! { [ #elem; #a.len ] }
+        }
+        syn::Type::Tuple(type_tuple) => {
+            let elems: Vec<_> = type_tuple.elems.iter().map(map_go_types).collect();
+            match elems.len() {
+                1 => quote! { ( #(#elems),* ) },
+                0 => quote! { () },
+                _ => quote! { ( #(#elems),* ) },
+            }
+        }
+        syn::Type::Paren(inner) => {
+            let mapped = map_go_types(&inner.elem);
+            quote! { ( #mapped ) }
+        }
+        _ => quote! { #ty },
+    }
+}
+
+/// Top-level: parse and transpile a Go function declaration to Rust.
+pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
+    match syn::parse2::<GoFn>(input) {
+        Ok(go_fn) => {
+            let fn_name = &go_fn.ident;
+            let generics = &go_fn.generics;
+
+            // Map return type (include `->` arrow)
+            let output = go_fn.output.as_ref().map(|output| {
+                if output.tys.is_empty() {
+                    quote! {}
+                } else {
+                    let mapped: Vec<_> = output.tys.iter().map(|t| map_go_types(t.as_ref())).collect();
+                    match mapped.len() {
+                        1 => {
+                            let m = &mapped[0];
+                            quote! { -> #m }
+                        }
+                        _ => quote! { -> ( #(#mapped),* ) },
+                    }
+                }
+            }).unwrap_or_else(|| quote! {});
+
+            // Map parameters with Go-style shorthand support:
+            //    func foo(a, b int) maps to: `a: i32, b: i32`
+            let mut all_params = Vec::<TokenStream>::new();
+            for param in &go_fn.inputs.args {
+                let id = &param.id;
+                match &param.ty {
+                    None => {
+                        // No type — pass through as individual
+                        all_params.push(quote! { #id });
+                    }
+                    Some(ty) => {
+                        let mapped = map_go_types(ty.as_ref());
+                        all_params.push(quote! { #id: #mapped });
+                    }
+                }
+            }
+
+            let body = &go_fn.block;
+
+            quote! {
+                fn #fn_name #generics ( #(#all_params),* ) #output #body
+            }
+        }
+        Err(e) => e.to_compile_error().into(),
+    }
 }
