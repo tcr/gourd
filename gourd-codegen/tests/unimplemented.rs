@@ -1,5 +1,5 @@
 // ── Go feature coverage for gourd ──────────────────────────────────
-// This file documents every Go feature the `go!` macro currently
+// This file documents every Go feature the `go_expr!` macro currently
 // supports (covered by tests/coverage.rs and embed_tests.rs)
 // and every feature that still triggers compile_error! at macro
 // expansion time.

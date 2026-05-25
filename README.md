@@ -7,16 +7,16 @@ Transpiles inline Go expressions into valid Rust via a procedural macro at compi
 ```
 gourd/
   gourd-codegen/       <-- proc-macro library (transpiler core)
-  gourd/               <-- demo binary using `go! { ... }`
+  gourd/               <-- demo binary using `go_expr! { ... }`
 ```
 
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
-[`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
+[`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go_expr!`)
 
 ## How it works
 
-1. User writes: `go! { 10 + 20 }`
-2. The proc-macro `go! { ... }` binds from tokens per `syn::Expr`
+1. User writes: `go_expr! { 10 + 20 }`
+2. The proc-macro `go_expr! { ... }` binds from tokens per `syn::Expr`
 3. The transpiler dispatches on the AST node: `Expr::Binary → BinOp::Add → #lhs + #rhs`
 4. `syn::Expr` (Go e.g. `10 + 20i32` (literal fork) → Rust valid output
 5. Emits pure `quote! { 10 + 20 }` — no runtime dependency.
