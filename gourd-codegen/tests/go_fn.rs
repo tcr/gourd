@@ -17,11 +17,9 @@ go! {
 // ── Function with internal (returns), ───────────────────────────────
 go! {
     fn go_abs(n: i32) -> i32 {
-        let mut ret = 0i32;
+        let mut ret = n;
         if n < 0 {
             ret = -n;
-        } else {
-            ret = n;
         }
         ret
     }
