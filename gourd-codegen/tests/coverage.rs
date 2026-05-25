@@ -97,6 +97,33 @@ fn if_without_else() {
     go! { if true { drop(42i32) }};
 }
 
+// ── Index expressions ───────────────────────────────────────────────
+
+#[test]
+fn index_vec() {
+    let v: Vec<i32> = vec![10, 20, 30];
+    assert_eq!(go! { v[0] }, 10i32);
+    assert_eq!(go! { v[2] }, 30i32);
+}
+
+#[test]
+fn index_string() {
+    let s: Vec<u8> = b"hello".to_vec();
+    assert_eq!(go! { s[4] }, b'o');
+}
+
+#[test]
+fn index_nested() {
+    let m: Vec<Vec<i32>> = vec![vec![1, 2], vec![3, 4]];
+    assert_eq!(go! { m[1][0] }, 3i32);
+}
+
+#[test]
+fn index_in_if() {
+    let v: Vec<i32> = vec![5, 10, 15];
+    assert_eq!(go! { if v[0] < v[1] { v[1] } else { v[0] } }, 10i32);
+}
+
 #[test]
 fn if_else_value() {
     assert_eq!(go! { if true { 1 } else { 2 } }, 1i32);

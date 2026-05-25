@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, BinOp, ExprBlock, ExprIf, UnOp};
+use syn::{Expr, BinOp, ExprBlock, ExprIf, ExprIndex, UnOp};
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -19,6 +19,7 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Group(e)          => go_to_rust(&e.expr),
         Expr::If(e)             => transpile_if(e),
         Expr::Block(e)    => transpile_block(e),
+        Expr::Index(e)    => transpile_index(e),
         // Go = Rust: let
         Expr::Let(e)        => transpile_let(e),
         // Unsupported
@@ -109,6 +110,12 @@ fn transpile_call(input: &syn::ExprCall) -> TokenStream {
 fn transpile_paren(input: &syn::ExprParen) -> TokenStream {
     let inner = go_to_rust(&input.expr);
     quote! { ( #inner ) }
+}
+
+fn transpile_index(input: &ExprIndex) -> TokenStream {
+    let seq = go_to_rust(&input.expr);
+    let idx = go_to_rust(&input.index);
+    quote! { #seq[ #idx ] }
 }
 
 fn transpile_if(input: &ExprIf) -> TokenStream {

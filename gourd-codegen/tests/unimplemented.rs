@@ -31,6 +31,9 @@
 //
 // ## Features triggering compile_error! (TODO)
 //
+// SUBSCRIPTING / INDEXING:
+//   slice[i], map[k], string[i], array[i]
+//
 // CONTROL FLOW:
 //   if/else, if-init, for/init, for-range, switch, select,
 //   defer, panic/recover, return, break, continue, goto
