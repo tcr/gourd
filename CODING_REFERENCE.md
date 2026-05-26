@@ -301,6 +301,8 @@ array slice pointer type `&[T]` instead.
 
 ## Previous RFCs Status
 
+See ./rfcs/ folder for details:
+
 | RFC | Status | Notes |
 |-----|--------|-------|
 | 001: Grouped Params | ✅ IMPLEMENTED | `GoFnInputs::Parse` uses fork-based lookahead |
