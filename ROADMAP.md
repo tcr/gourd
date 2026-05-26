@@ -252,15 +252,22 @@ go foo(42)
 
 ### 10. For syntactic error handling patterns
 
-**Status:** NOT YET IMPLEMENTED.
+**See: [RFC 004: Go Error Handling → Rust Result](../rfcs/rfc-004-error-handling.md)**
+
+**Status:** Planning — `error` maps to `Box<dyn std::error::Error>`. Body-level
+`Ok(val)` / `Err(err)` wrapping deferred.
 
 ```go
-v, err := foo()
-if err != nil { handle(err) }
+go! {
+    func divmod(n, d int) (int, error) {
+        (n / d, nil)
+    }
+}
+// → fn divmod(n: i32, d: i32) -> (i32, Box<dyn std::error::Error>)
 ```
 
-**Effort:** Medium (must handle multiple returns + `compile_error!` «TODO file error handling»)
-**Value:** High (overused)
+**Effort:** Medium (single-line change to `go_type_map` + 5 new tests)
+**Value:** High (common Go idiom)
 
 ### 11. Struct field assignment
 
