@@ -454,7 +454,7 @@ fn go_type_map(ident: &syn::Ident) -> TokenStream {
         "rune"    => quote! { char },
         "float32" => quote! { f32 },
         "float64" => quote! { f64 },
-        "error"   => emit_todo("Go `error` interface not yet supported"),
+        "error"   => quote! { Box<dyn std::error::Error> },
         _ => quote! { #ident },
     }
 }

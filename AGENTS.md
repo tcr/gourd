@@ -2,13 +2,10 @@
 
 Transpiles inline Go expressions into valid Rust via a procedural macro at compile time.
 
-## Architecture
-
 ```
 gourd/
   gourd-codegen/       <-- proc-macro library (transpiler core)
   gourd/               <-- demo binary using `go_expr! { ... }`
-  gourd-embed-tests/   <-- integration tests
 ```
 
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
@@ -25,16 +22,6 @@ gourd/
 Every expression in the Go source can be valid Rust tokens. The macro
 emits exactly those tokens into the user's expanded AST.
 
-### Supported forms
-
-| Go form | Rust transpilation |
-|---------|-------------------|
-| `10 + 20` | `10 + 20` |
-| `len(s)` | `s.len()` |
-| `nil` | `None` |
-| `x := y` (short decl) | `let x = y` |
-| ... (more below) ... |
-
 ### Unsupported forms → `compile_error!`
 
 Any Go concept missing from the transpiler (e.g. struct declarations,
@@ -50,7 +37,14 @@ cargo run -p gourd  # → demo binary output
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```
 
-Original test library project 0.1.0
-Original test
--- license: MSRC
--- with distribution repeto infos
+## RFCs
+
+RFCs are now written *after the fact* to describe an implemented feature and its design decisions. RFCs are numbered sequentially relative to other RFCs in its folder.
+
+## Development Instructions
+
+Please read @PROGRESS.md and then read these instructions:
+
+You are encouraged to add debug logs and diagnostics and try re-running the program as often as you like. This is a toy repository. You will often have more success implementing and reading debug statements and running cargo expand than by reading the code.
+
+But do try keeping changes small, iterative, and working toward finishing the implementation.
