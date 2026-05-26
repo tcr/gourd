@@ -195,19 +195,19 @@ interface {
 
 ### 6. Duplicate multi-func int, double-return values type:
 
-**Status:** NOT YET IMPLEMENTED (only partial taking (int, int) → (i32, i32).
+**Status: ✅ IMPLEMENTED (RFC 003)**
 
 ```go
 go! {
-    func divmod(n, d i32) -> (i32, i32) {
+    func divmod(n int, d int) (int, int) {
         (n / d, n % d)
     }
 }
 ```
 
-Type mapping handles viaa) `map_go_types`, so this is partially done.
-**Effort:** Low (refine `map_GO_types` for edge cases like `(bool, string)`)
-**Value:** Medium (common Go idiom for 2+ returns of mixed types)
+Go-style `(int, int)` → Rust `(i32, i32)` via `map_go_types` on tuple body expressions.
+Mixed tuple types: `(int, string)` → `(i32, String)` (verified by `test_fn_mixed_tuple_returns`).
+Triple multi-returns: `(int, int, string)` → `(i32, i32, String)` (verified by `test_fn_triple_returns`).
 
 ### 7. IfInit: `for i, v := range mySlice` simulates.
 

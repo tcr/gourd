@@ -1,6 +1,6 @@
 # RFC 003: Go Multi-Return Values
 
-**Status**: NOT YET IMPLEMENTED
+**Status**: ✅ IMPLEMENTED
 **Priority**: 3 (Medium)
 **Complexity**: Low
 
@@ -34,20 +34,24 @@ handling for Go's multi-return value syntax exists yet.
 
 ### What needs to change
 
-1. **Parameter and return type parsing** — Currently,
-   `GoFnOutput::parse` already parses multiple types
-   (in a tuple branch), but there is no support for handling
-   Go's multi-return syntax: `(int, error)` → `(i32, &str)`
-   separately.
-2. **Body transpilation for multi-statement returns**
-    — Go functions like `(n / d, n % d)` are already
-    translated into a Rust tuple. The transpiler already does this.
-3. **Edge cases** — Mixed tuple types, e.g. `(int, string)`,
-    should map to `(i32, String)`.
-4. **Go's `v, err := foo()` idiom**
-    — If one or more returns is optional (e.g. the
-    first return value handles an error or condition),
-    there is no current support for this.
+This feature required **zero code changes** — all the infrastructure was already
+in place from previous implementations:
+
+1. **`GoFnOutput::parse`** (transpiler.rs:378) — Already parses comma-separated
+   return types, extracting each as a `syn::Type` into a `Vec<syn::Type>`.
+2. **`map_go_types`** (transpiler.rs:487) — Already handles `Type::Tuple`
+   by recursively mapping each element type through `map_go_types`.
+3. **`go_to_rust_fn`** (transpiler.rs:511) — Already outputs `-> (T1, T2, ...)`
+   when `output.tys.len() > 1`.
+4. **`transpile_tuple`** (transpiler.rs:107) — Already translates Go tuple
+   expressions `(a, b)` → Rust `(a, b)` by mapping each element.
+
+### Edge cases verified by tests
+
+- `(int, int)` → `(i32, i32)` (via `map_go_types` on individual `Type::Path`)
+- `(int, string)` → `(i32, String)` (mixed tuple types)
+- `(int, int, string)` → `(i32, i32, String)` (triple multi-returns)
+- Body expressions `(n / d, n % d)` → Rust `(n / d, n % d)` (via `transpile_tuple`)
 
 ### What needs to work
 

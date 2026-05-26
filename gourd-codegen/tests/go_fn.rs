@@ -32,10 +32,24 @@ go! {
     }
 }
 
-// ── Multiple return values ─────────────────────────────────────────
+// ── Multiple return values (Go-style `(int, int)` → Rust `(i32, i32)`) ──
 go! {
-    fn go_divmod(n: i32, d: i32) -> (i32, i32) {
+    fn go_divmod(n int, d int) (int, int) {
         (n / d, n % d)
+    }
+}
+
+// ── Mixed tuple types: `(int, string)` → `(i32, String)` ──
+go! {
+    fn go_format(n int) (int, string) {
+        (n, String::from("hello"))
+    }
+}
+
+// ── Triple multi-return: `(int, int, string)` → `(i32, i32, String)` ──
+go! {
+    fn go_triple(a int, b int) (int, int, string) {
+        (a + b, a * b, String::from("pair"))
     }
 }
 
@@ -81,6 +95,21 @@ fn test_fn_multiple_returns() {
     let (q, r) = go_divmod(10, 3);
     assert_eq!(q, 3);
     assert_eq!(r, 1);
+}
+
+#[test]
+fn test_fn_mixed_tuple_returns() {
+    let (n, s) = go_format(42);
+    assert_eq!(n, 42);
+    assert_eq!(s, "hello");
+}
+
+#[test]
+fn test_fn_triple_returns() {
+    let (s, p, label) = go_triple(3, 4);
+    assert_eq!(s, 7);
+    assert_eq!(p, 12);
+    assert_eq!(label, "pair");
 }
 
 #[test]
