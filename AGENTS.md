@@ -48,3 +48,5 @@ Please read @CODING_REFERENCE.md and then read these instructions:
 You are encouraged to add debug logs and diagnostics and try re-running the program as often as you like. This is a toy repository. You will often have more success implementing and reading debug statements and running cargo expand than by reading the code.
 
 But do try keeping changes small, iterative, and working toward finishing the implementation.
+
+If a file is over 400 lines long, consider breaking it into multiple files.

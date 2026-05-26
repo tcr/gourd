@@ -168,3 +168,50 @@ fn len_call() {
     let v: Vec<i32> = vec![1, 2, 3];
     assert_eq!(go_expr! {  len(v)  }, 3i32);
 }
+
+// ── Slice literals ──────────────────────────────────────────────────
+
+#[test]
+fn slice_literal() {
+    let v: Vec<i32> = go_expr! { []int{ 1, 2, 3 } };
+    assert_eq!(v, vec![1i32, 2i32, 3i32]);
+}
+
+#[test]
+fn slice_literal_empty() {
+    let v: Vec<i32> = go_expr! { []int{ } };
+    assert!(v.is_empty());
+}
+
+#[test]
+fn slice_literal_type_inferred() {
+    let v: Vec<i32> = go_expr! { []{ 10, 20, 30, 40 } };
+    assert_eq!(v, vec![10i32, 20i32, 30i32, 40i32]);
+}
+
+// ── Map literals ──────────────────────────────────────────────────────
+
+#[test]
+fn map_literal() {
+    use std::collections::HashMap;
+    let m: HashMap<String, i32> = go_expr! { map[string]int{ "a": 1, "b": 2, "c": 3 } };
+    assert_eq!(m.get("a"), Some(&1i32));
+    assert_eq!(m.get("b"), Some(&2i32));
+    assert_eq!(m.get("c"), Some(&3i32));
+    assert_eq!(m.len(), 3);
+}
+
+#[test]
+fn map_literal_empty() {
+    use std::collections::HashMap;
+    let m: HashMap<String, i32> = go_expr! { map[string]int{ } };
+    assert!(m.is_empty());
+}
+
+#[test]
+fn map_literal_int_keys() {
+    use std::collections::HashMap;
+    let m: HashMap<i32, String> = go_expr! { map[int]string{ 1: "one", 2: "two" } };
+    assert_eq!(m.get(&1i32), Some(&"one".to_string()));
+    assert_eq!(m.get(&2i32), Some(&"two".to_string()));
+}

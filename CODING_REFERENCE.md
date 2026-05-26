@@ -296,16 +296,3 @@ array slice pointer type `&[T]` instead.
   panics. Build → read the TODO message → implement it.
 - Use `cargo expand -p gourd` liberally to inspect what your macros
   expand to at each step of development.
-
----
-
-## Previous RFCs Status
-
-See ./rfcs/ folder for details:
-
-| RFC | Status | Notes |
-|-----|--------|-------|
-| 001: Grouped Params | ✅ IMPLEMENTED | `GoFnInputs::Parse` uses fork-based lookahead |
-| 002: Receiver Functions | ✅ IMPLEMENTED | Code in `transpiler.rs:750–823`, RFC status outdated |
-| 003: Multi-Return Values | ✅ IMPLEMENTED | Zero code changes needed, already working |
-| 004: Error Handling | ✅ IMPLEMENTED | Maps `error` type → `Box<dyn std::error::Error>` |

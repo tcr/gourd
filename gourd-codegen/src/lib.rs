@@ -1,14 +1,54 @@
 use proc_macro::TokenStream;
+use proc_macro2::{TokenStream as TokenStream2, TokenTree, Delimiter};
 use syn::parse_macro_input;
 use syn::Expr;
 
 mod transpiler;
 
 /// Re-export the expression macro so `use gourd_codegen::go_expr!` works.
+/// Tries to parse as Go slice/map literal first, then falls back to
+/// Go expression parsing.
 #[proc_macro]
 pub fn go_expr(input: TokenStream) -> TokenStream {
-    let expr = parse_macro_input!(input as Expr);
+    let tokens: TokenStream2 = input.clone().into();
+    
+    // Check if the tokens form a Go slice literal: []Type{...} or []{...}
+    // A slice literal starts with `[` (as a bracket group).
+    if check_is_slice_literal(&tokens) {
+        if let Ok(slice_lit) = transpiler::parse_go_slice(&tokens) {
+            return transpiler::go_to_rust_slice(&slice_lit).into();
+        }
+    }
+    
+    // Check if the tokens form a Go map literal: map[K]V{...}
+    if check_is_map_literal(&tokens) {
+        if let Ok(map_lit) = transpiler::parse_go_map(&tokens) {
+            return transpiler::go_to_rust_map(&map_lit).into();
+        }
+    }
+    
+    // Fall back to standard Go expression parsing
+    let tokens2: proc_macro::TokenStream = input;
+    let expr = parse_macro_input!(tokens2 as Expr);
     transpiler::go_to_rust(&expr).into()
+}
+
+/// Check if tokens look like a Go slice literal `[Type]{elems}` or `[]{elems}`
+fn check_is_slice_literal(tokens: &TokenStream2) -> bool {
+    let mut iter = tokens.clone().into_iter();
+    match iter.next() {
+        Some(TokenTree::Group(g)) => g.delimiter() == Delimiter::Bracket,
+        _ => false,
+    }
+}
+
+/// Check if tokens look like a Go map literal `map[K]V{entries}`
+fn check_is_map_literal(tokens: &TokenStream2) -> bool {
+    let mut iter = tokens.clone().into_iter();
+    match iter.next() {
+        Some(TokenTree::Ident(ident)) => ident.to_string() == "map",
+        _ => false,
+    }
 }
 
 /// Top-level macro for Go declarations.
