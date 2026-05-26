@@ -1,26 +1,10 @@
 # Gourd
 
 Transpiles inline Go expressions into valid Rust via a procedural macro at compile time.
-See embedded tests for the currently supported feature set.
 
 # ROADMAP
 
-This document outlines the next features to add for Go → Rust compatibility.
-Prioritised by effort/value to the user experience.
-
-## Completed
-
-- [x] **`go_expr!`**: Inline expression transpiler (literals, binary/unary operators,
-      `len`/`cap`, if/else, index, method calls, field access, short declarations,
-      parentheses, ranges, loops).
-- [x] **`go!`**: Function declaration entry point (type name mapping for
-      `int` / `bool` / etc.), return type mapping, parameter shaping.
-- [x] **Go-style slice type shorthand** (`[]T` → `&[T]`): Slice detection and
-      parameter generation, group-aware slicing in `[]T` (shorthand `a, b []int`
-      → `a: &[i32], b: &[i32]`), `len()` returns `as i32` cast.
-- [x] **Block transpilation**: Statement-level handling (expressions, locals,
-      `let mut`, `break`, `return`). Tuple literals, cast expressions, and
-      assignments—all transpiled inside function blocks.
+This document outlines remaining features to add for Go → Rust compatibility.
 
 ## Current features (`go_expr!`)
 
@@ -46,104 +30,49 @@ Prioritised by effort/value to the user experience.
 
 ## Undone (kept as `compile_error!` sinks)
 
-### Subscripting / indexing
-> `slice[i]`, `map[k]`, `string[i]`, `array[i]` — works by
-> `transpile_index` but errors when the element type is unknown.
-
-### String titurations
-> `string(bytes_slice)` → `std::str::from_utf8(bytes_slice).unwrap()`
+### `string(bytes_slice)` conversions
+`string(bytes_slice)` → `std::str::from_utf8(bytes_slice).unwrap()`
 
 ### Type conversions
-> Go's explicit type conversions `(int)(float_val)` → Rust casts.
+Go's explicit type conversions `(int)(float_val)` → Rust casts.
 
-### String slicing
-> `string(some_bytes)` or `string(byte_slice)` — implicit conversions
-> are implicit in Go, explicit in Rust.
+### Slice literals
+`[]int{1, 2, 3}` — array literal syntax (`transpile_array` works but Go slice literals are a separate concern).
 
-## Optional (perhaps out of scope for an experimental
+### `select` statement
 
----
+### `defer`
 
-### Go → Rust  next volumes: transpile each statement; the final expression
-### becomes the block's value.
+### `panic` / `recover`
 
-**TODO: handle the following statement types:**
+### Goroutines (`go func { }()`)
 
-- [ ] `Stmt::Break`
-- [ ] `Stmt::Continue`
-- [ ] `Stmt::If`
-- [ ] `Stmt::ForLoop`
-- [ ] `Stmt::While`
-- [ ] `Stmt::Loop`
-- [x] `Stmt::Expr`
-- [x] `Stmt::Local`
-- [x] `Stmt::Break` (via `Expr::Break`)
-- [x] `Stmt::Return` (via `Expr::Return`)
-- [ ] assertion statements
-- [ ] function declarations (recursively handled — [TODO])
-- [ ] struct declarations (recursively handled — [TODO])
-- [ ] enum declarations (recursively handled — [TODO])
-- [ ] impl blocks (recursively handled — [TODO])
-- [ ] use statements (recursively handled — [TODO])
-- [ ] static declarations (recursively handled — [TODO])
-- [ ] const declarations (recursively handled — [TODO])
-- [ ] type aliases (recursively handled — [TODO])
+### Channels (`ch <- value`, `<- ch`)
 
----
+### `sync` primitives
 
-## FEATURE ROADMAP (by priority)
+### Map literals `map[string]int{"a": 1}`
 
-### 1. Go-style parameter shorthand
+### `for k, v := range slice` with init
 
-**Status: ✅ IMPLEMENTED**
+### Type assertions and type switches
 
-**Goal:** Transform Go syntax `func foo(a, b, c int)` → Rust `fn foo(a: i32, b: i32, c: i32)`.
+### Go interface → trait mapping
 
-```go
-go! {
-    func foo(a, b, c int) string {
-        a + b + c
-    }
-}
-// Transpiles to:
-fn foo(a: i32, b: i32, c: i32) -> String {
-    a + b + c
-}
+### `struct{}` bare structs (without fields)
 
-Also handles Go-style parameter grouping: `a, b int` → `a: i32, b: i32`,
-including any number of grouped parameters (not limited to 2). The parser
-uses fork-based lookahead: when the name after a group-comma is a known
-Go type keyword (e.g. `int`, `string`), the comma is treated as a
-parameter separator rather than a group-member, enabling correct parsing
-for arbitrarily many grouped params (e.g. `a, b, c, d int`).
+### `assert` statements
 
-**Effort:** Medium (requires splitting one `syn::Pat` into several)
-**Value:** High (common Go pattern, very easy to break missing)
+### Function declarations inside blocks
 
-### 2. Slice type shorthand
+### `continue` statement
 
-**Status: ✅ IMPLEMENTED**
+### Labels (Go labeled break/continue within control flow structure)
 
-**Goal:** Complex Go type `[]T` (slice → `&[T]` (reference slice syntax).
+## FEATURE ROADMAP (remaining, by priority)
 
-```go
-go! {
-    fn go_len(a []int) i32 {
-        len(a)
-    }
-}
-// Transpiles to:
-fn go_len(a: &[i32]) -> i32 {
-    a.len() as i32
-}
-```
+### 1. Go-style `string()` conversions
 
-Also supports Go-style parameter grouping: `a, b []int` → `a: &[i32], b: &[i32]`.
-
-**Effort:** Low (edit `map_GO_types` to handle `[]T` type alias)
-**Value:** Medium (common Go pattern)
-
-### 3. Go ≠ Rust String metadata: bytes → string (`string()` builtin
 **Status:** NOT YET IMPLEMENTED
 
 **Goal:** Support Go implicit byte/byte slice string conversions:
@@ -155,11 +84,9 @@ go_len(some_bytes) → std::str::from_utf8(some_bytes).unwrap()
 **Effort:** Medium (must parse Go `string()` function — and emit call converted to a `call` parser)
 **Value:** Medium (common Go pattern)
 
-### 4. Go-generics: receiver functions
+### 2. Receiver functions (method declarations)
 
 **Status:** NOT YET IMPLEMENTED
-
-**Goal:** Go receiver methods:
 
 ```go
 go! {
@@ -175,10 +102,10 @@ impl Foo {
 }
 ```
 
-**Effort:** Medium (requires an `impl` block in the destination, special handling of receiver types (&&mut Foo → &Foo))
+**Effort:** Medium (requires an `impl` block in the destination, special handling of receiver types (`&&mut Foo → &Foo))
 **Value:** High (common Go pattern)
 
-### 5. Interfaces
+### 3. Interfaces
 
 **Status:** NOT YET IMPLEMENTED
 
@@ -193,9 +120,9 @@ interface {
 
 **Value:** Medium (many Go programs classify types)
 
-### 6. Duplicate multi-func int, double-return values type:
+### 4. Multi-return values
 
-**Status: ✅ IMPLEMENTED (RFC 003)**
+**Status:** NOT YET IMPLEMENTED (RFC 003)
 
 ```go
 go! {
@@ -205,11 +132,7 @@ go! {
 }
 ```
 
-Go-style `(int, int)` → Rust `(i32, i32)` via `map_go_types` on tuple body expressions.
-Mixed tuple types: `(int, string)` → `(i32, String)` (verified by `test_fn_mixed_tuple_returns`).
-Triple multi-returns: `(int, int, string)` → `(i32, i32, String)` (verified by `test_fn_triple_returns`).
-
-### 7. IfInit: `for i, v := range mySlice` simulates.
+### 5. `for i, v := range mySlice` with init.
 
 **Status:** NOT YET IMPLEMENTED.
 
@@ -226,7 +149,7 @@ go! {
 **Effort:** High
 **Value:** High (common Go idiom, much less idiomatic in Rust)
 
-### 8. Channels
+### 6. Channels
 
 **Status:** NOT YET IMPLMENTED.
 
@@ -239,7 +162,7 @@ x := <- ch
 **Value:** Low (Rust pattern for channels are different anyhow, `Channel`
             (anowned singly-crning handles)
 
-### 9. Goroutines (`go func { ... }()`)
+### 7. Goroutines (`go func { ... }()`)
 
 **Status:** NOT YET IMPLEMENTED.
 
@@ -250,31 +173,19 @@ go foo(42)
 **Effort:** Very high (must spawn bare-metal thread, or async task)
 **Value:** Low (Rust handles concurrency very differently)
 
-### 10. For syntactic error handling patterns
+### 8. Error handling
 
 **See: [RFC 004: Go Error Handling → Rust Result](../rfcs/rfc-004-error-handling.md)**
 
 **Status:** Planning — `error` maps to `Box<dyn std::error::Error>`. Body-level
 `Ok(val)` / `Err(err)` wrapping deferred.
 
-```go
-go! {
-    func divmod(n, d int) (int, error) {
-        (n / d, nil)
-    }
-}
-// → fn divmod(n: i32, d: i32) -> (i32, Box<dyn std::error::Error>)
-```
-
-**Effort:** Medium (single-line change to `go_type_map` + 5 new tests)
-**Value:** High (common Go idiom)
-
-### 11. Struct field assignment
+### 9. Struct field assignment
 
 **Status:** NOT YET IMPLEMENTED (already guarded in `transpile_let`, working via `Expr::Let` dispatch).
 **Value:** Would surface when struct {} declared)
 
-### 12. Map and Slice literals
+### 10. Map and Slice literals
 
 **Status:** NOT YET IMPLEMENTED.
 
