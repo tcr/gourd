@@ -3,6 +3,10 @@ name = "gourd"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "gourd"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gourd"
 path = "src/main.rs"
