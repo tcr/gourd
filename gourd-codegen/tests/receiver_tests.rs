@@ -1,0 +1,52 @@
+use gourd_codegen::go;
+
+go! {
+    struct Foo {
+        x int
+    }
+}
+
+go! {
+    func (f Foo) get() int {
+        f.x
+    }
+}
+
+go! {
+    func (f *Foo) add(z int) int {
+        f.x = f.x + z
+        f.x
+    }
+}
+
+go! {
+    func (f *Foo) double() int {
+        f.x * 2
+    }
+}
+
+go! {
+    func (f Foo) scale(m int) int {
+        f.x * m
+    }
+}
+
+#[test]
+fn test_value_receiver() {
+    let foo = Foo { x: 42 };
+    assert_eq!(foo.get(), 42);
+}
+
+#[test]
+fn test_pointer_receiver_add() {
+    let mut foo = Foo { x: 10 };
+    let result = foo.add(5);
+    assert_eq!(result, 15);
+    assert_eq!(foo.x, 15);
+}
+
+#[test]
+fn test_value_receiver_with_inputs() {
+    let foo = Foo { x: 3 };
+    assert_eq!(foo.scale(4), 12);
+}
