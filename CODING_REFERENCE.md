@@ -138,6 +138,29 @@ Not: `parenthesized!(input)` — that does not exist and will not compile.
 The return type is `proc_macro2::GroupName`, specifically
 `proc_macro2:: groups::Parenthesis`.
 
+### `proc_macro2::Delimiter` variant names
+
+| `proc_macro2` | Usage |
+|---------------|-------|
+| `Delimiter::Parenthesis` | `( ... )` |
+| `Delimiter::Brace` | `{ ... }` |
+| `Delimiter::Bracket` | `[ ... ]` |
+| `Delimiter::None` | invisible (macro variables) |
+
+The variant name is `Brace`, matching `proc_macro2::Delimiter::Brace`. There is *no* `Curly` or `CurlyBrace` variant — the old `Delimiter::Curly` (from `proc_macro` v0.2.x) was renamed to `Brace` in `proc_macro2` v1.0. Both `syn::braced!()` (parsing) and `proc_macro2::Group::new(Delimiter::Brace, ...)` (construction) use the same delimiter.
+
+### Method-chain `.insert(key, val)` is not a statement
+
+Syntax `.insert(a, 1)` is not a valid standalone Rust statement (error: "expected expression, found `.`"). Always provide the explicit receiver:
+
+```rust
+// WRONG.
+m.insert(a, 1)  // ❌ — syntax error: expected expression, found `.`
+
+// RIGHT.
+m.insert(a, 1);  // ✅
+```
+
 ### `Token![;]` is `syn::token::Semi`, not `Token`
 
 ```rust
@@ -282,17 +305,72 @@ array slice pointer type `&[T]` instead.
 | `[]int` | `&[i32]` |
 | `a []int` | `a: &[i32]` |
 
----
+## Eval Code Quality (File/Function Length) via MCP
 
-## Key Rust Notes
+Two MCP tools: `rust_analyzer_symbols` (for file contents) and
+`rust_analyzer_workspace_diagnostics` (for workspace-level errors).
 
-- GO body != RUST body: Go omits semicolons (newlines separate), Rust
-  requires them. Must parse by expression, not by `Block`.
-- The `replace_receiver` function recursively traverses ALL 20+ `Expr`
-  variants, replacing the receiver name (e.g. `f`) with `self`. After
-  this transformation, the resulting AST is passed to `go_to_rust` for
-  full Go→Rust transpilation.
-- Missing functions in the transpiler cause compile errors, not runtime
-  panics. Build → read the TODO message → implement it.
-- Use `cargo expand -p gourd` liberally to inspect what your macros
-  expand to at each step of development.
+### Quick per-file check (terminal)
+
+```bash
+# 1. Find all source files and their line counts (excluding tests):
+find gourd-codegen/src gourd/src -name '*.rs' -exec wc -l {} +
+
+# 2. Sort by line count, longest first:
+find gourd-codegen/src gourd/src -name '*.rs' -exec wc -l {} + | sort -t'/' -k9n
+```
+
+Thresholds: **500 lines** per file, **100 lines** per function.
+
+### Per-file: `rust_analyzer_symbols` with verbose=true
+
+```
+rust_analyzer_symbols(
+    file_path = "gourd-codegen/src/transpiler.rs",
+    verbose = true,
+    limit = 1000
+)
+```
+
+This returns `symbols[].location.range` — each top-level symbol (function,
+struct, impl) with `start.line` and `end.line`. Line span =
+`end.line - start.line + 1`.
+
+To find long functions within a file, look at symbols with `kind == 12`
+(function). For `impl` blocks, look for `kind == 19`.
+
+### Per-workspace: `rust_analyzer_workspace_diagnostics`
+
+```
+rust_analyzer_workspace_diagnostics(verbose = true, workspace_id = <ws_id>)
+```
+
+Returns all compiler errors, warnings, hints,
+and information-level issues across every file with attached data for
+Full diagnostics check:
+
+```
+# Step 1: Ensure workspace is registered (or re-add it):
+rust_analyzer_add_workspace(path = "gourd")
+
+# Step 2: Check for any compilation errors:
+rust_analyzer_workspace_diagnostics(workspace_id = "ws-2", verbose = true)
+```
+
+Empty `files` / zero counts in `summary` = clean build. Non-empty =
+see `files[<uri>].diagnostics`.
+
+### Sliding inspection: `inlay_hints`
+
+Pass `verbose = true` to `rust_analyzer_inlay_hints` on a file to get
+parameter names and inferred types for every statement. Not about
+length — but useful when reading long functions:
+
+```
+rust_analyzer_inlay_hints(
+    file_path = "gourd-codegen/src/transpiler/funcs.rs",
+    line = 0, character = 0,
+    end_line = 469, end_character = 0,
+    workspace_id = "ws-2"
+)
+```

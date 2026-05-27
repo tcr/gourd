@@ -11,7 +11,7 @@ gourd/
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
 [`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go_expr!`)
 
-## How it works
+## Example of how it works
 
 1. User writes: `go_expr! { 10 + 20 }`
 2. The proc-macro `go_expr! { ... }` binds from tokens per `syn::Expr`
@@ -49,7 +49,9 @@ RFCs are now written *after the fact* to describe an implemented feature and its
 
 ## Development Instructions
 
-Please read @CODING_REFERENCE.md when writing new code.
+ALWAYS read @CODING_REFERENCE.md when editing code.
+
+NEVER use a sub-agent or task unless instructed to.
 
 You are encouraged to add debug logs and diagnostics and try re-running the program as often as you like. This is a toy repository. You will often have more success implementing and reading debug statements and running cargo expand than by reading the code.
 

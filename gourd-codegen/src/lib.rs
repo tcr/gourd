@@ -73,7 +73,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                     // Check if second token is `(Parenthesis Group)` → receiver function
                     if let Some(proc_macro2::TokenTree::Group(g)) = iter.next() {
                         if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
-                            transpiler::modname::go_to_rust_receiver_fn(tokens).into()
+                            transpiler::funcs::go_to_rust_receiver_fn(tokens).into()
                         } else {
                             transpiler::go_to_rust_fn(tokens).into()
                         }
