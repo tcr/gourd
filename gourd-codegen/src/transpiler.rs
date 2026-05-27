@@ -43,11 +43,11 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Verbatim(tokens) => {
             // Try to parse as Go slice literal: []Type{...}
             match syn::parse2::<slices::GoSliceLit>(tokens.clone()) {
-                Ok(slice_lit) => slices::go_to_rust_slice(&slice_lit).into(),
+                Ok(slice_lit) => slices::go_to_rust_slice(&slice_lit),
                 Err(_) => {
                     // Try to parse as Go map literal: map[K]V{key: val, ...}
                     match syn::parse2::<slices::GoMapLit>(tokens.clone()) {
-                        Ok(map_lit) => slices::go_to_rust_map(&map_lit).into(),
+                        Ok(map_lit) => slices::go_to_rust_map(&map_lit),
                         Err(_) => emit_todo("unsupported Go form"),
                     }
                 }
@@ -296,17 +296,17 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
 // ──────────────────────────────────────────────
 
 /// Parse type Name along w/ and shared type spec.
-struct GoFnInputs {
+pub(crate) struct GoFnInputs {
     args: Vec<GoParam>,
 }
 
-struct GoParam {
+pub(crate) struct GoParam {
     id: Ident,
     ty: Option<Box<syn::Type>>,
     slice_elem: Option<syn::Type>,
 }
 
-struct GoFnOutput {
+pub(crate) struct GoFnOutput {
     tys: Vec<syn::Type>,
 }
 
@@ -595,12 +595,12 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
 // Go struct declaration → Rust struct
 // ──────────────────────────────────────────────
 
-struct GoStruct {
+pub(crate) struct GoStruct {
     ident: Ident,
     fields: Vec<GoStructField>,
 }
 
-struct GoStructField {
+pub(crate) struct GoStructField {
     name: Ident,
     ty: syn::Type,
 }

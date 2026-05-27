@@ -2,10 +2,11 @@ use super::go_to_rust;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::parse::{discouraged::Speculative, Parse, ParseStream};
+use syn::parse::discouraged::Speculative;
+use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
-use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
+use syn::{Expr, Ident};
 use super::{GoFnInputs, GoFnOutput, map_go_types};
 
 /// Receiver parsing: (name Type) or (name *Type) where * means pointer receiver
@@ -214,12 +215,11 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
 pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
     match expr {
         Expr::Field(f) => {
-            if let Expr::Path(ref base_path) = *f.base {
-                if base_path.path.is_ident(recv_name) {
-                    // f.recv_fieldname  →  self.fieldname
-                    let member = f.member.clone();
-                    return syn::parse_quote! { self.#member };
-                }
+            if let Expr::Path(ref base_path) = *f.base
+                && base_path.path.is_ident(recv_name) {
+                // f.recv_fieldname  →  self.fieldname
+                let member = f.member.clone();
+                return syn::parse_quote! { self.#member };
             }
             Expr::Field(syn::ExprField {
                 attrs: Vec::new(),
@@ -232,14 +232,14 @@ pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
             Expr::Binary(syn::ExprBinary {
                 attrs: Vec::new(),
                 left: Box::new(replace_receiver(&b.left, recv_name)),
-                op: b.op.clone(),
+                op: b.op,
                 right: Box::new(replace_receiver(&b.right, recv_name)),
             })
         }
         Expr::Unary(u) => {
             Expr::Unary(syn::ExprUnary {
                 attrs: Vec::new(),
-                op: u.op.clone(),
+                op: u.op,
                 expr: Box::new(replace_receiver(&u.expr, recv_name)),
             })
         }
@@ -330,7 +330,7 @@ pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
             attrs: Vec::new(),
             start: r.start.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
             end: r.end.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
-            limits: r.limits.clone(),
+            limits: r.limits,
         }),
         Expr::Break(b) => {
             Expr::Break(syn::ExprBreak {
@@ -353,7 +353,7 @@ pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
                 if_token: i.if_token,
                 cond: Box::new(replace_receiver(&i.cond, recv_name)),
                 then_branch: i.then_branch.clone(),
-                else_branch: i.else_branch.as_ref().map(|(e, block)| (e.clone(), Box::new(replace_receiver(block, recv_name)))),
+                else_branch: i.else_branch.as_ref().map(|(e, block)| (*e, Box::new(replace_receiver(block, recv_name)))),
             })
         }
         Expr::While(w) => {
@@ -387,7 +387,7 @@ pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
         Expr::Block(b) => {
             let new_stmts: Vec<syn::Stmt> = b.block.stmts.iter().map(|stm| {
                 match stm {
-                    syn::Stmt::Expr(v, s) => syn::Stmt::Expr(*Box::new(replace_receiver(v, recv_name)), s.clone()),
+                    syn::Stmt::Expr(v, s) => syn::Stmt::Expr(*Box::new(replace_receiver(v, recv_name)), *s),
                     syn::Stmt::Local(l) => syn::Stmt::Local(replace_receiver_local(l, recv_name)),
                     other => other.clone(),
                 }

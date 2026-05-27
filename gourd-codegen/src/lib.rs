@@ -14,17 +14,15 @@ pub fn go_expr(input: TokenStream) -> TokenStream {
 
     // Check if the tokens form a Go slice literal: []Type{...} or []{...}
     // A slice literal starts with `[` (as a bracket group).
-    if check_is_slice_literal(&tokens) {
-        if let Ok(slice_lit) = transpiler::slices::parse_go_slice(&tokens) {
-            return transpiler::slices::go_to_rust_slice(&slice_lit).into();
-        }
+    if check_is_slice_literal(&tokens)
+        && let Ok(slice_lit) = transpiler::slices::parse_go_slice(&tokens) {
+        return transpiler::slices::go_to_rust_slice(&slice_lit).into();
     }
 
     // Check if the tokens form a Go map literal: map[K]V{...}
-    if check_is_map_literal(&tokens) {
-        if let Ok(map_lit) = transpiler::slices::parse_go_map(&tokens) {
-            return transpiler::slices::go_to_rust_map(&map_lit).into();
-        }
+    if check_is_map_literal(&tokens)
+        && let Ok(map_lit) = transpiler::slices::parse_go_map(&tokens) {
+        return transpiler::slices::go_to_rust_map(&map_lit).into();
     }
 
     // Fall back to standard Go expression parsing
@@ -46,7 +44,7 @@ fn check_is_slice_literal(tokens: &TokenStream2) -> bool {
 fn check_is_map_literal(tokens: &TokenStream2) -> bool {
     let mut iter = tokens.clone().into_iter();
     match iter.next() {
-        Some(TokenTree::Ident(ident)) => ident.to_string() == "map",
+            Some(TokenTree::Ident(ident)) => ident == "map",
         _ => false,
     }
 }

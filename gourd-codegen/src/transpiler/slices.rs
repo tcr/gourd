@@ -2,10 +2,9 @@ use super::go_to_rust;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::parse::{discouraged::Speculative, Parse, ParseStream};
-use syn::punctuated::Punctuated;
+use syn::parse::{Parse, ParseStream};
 use syn::token;
-use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
+use syn::{Expr, Ident};
 
 /// Go slice literal: `[]Type{elem1, elem2, ...}`
 /// Parsed from Go source inside expressions, transpiles to Rust `vec![elem1, elem2, ...]`.
@@ -19,7 +18,7 @@ pub struct GoSliceLit {
 /// Parsed from Go source, transpiles to Rust `std::collections::HashMap`.
 pub struct GoMapLit {
     #[allow(dead_code)] pub key_type: Option<syn::Type>,
-    pub val_type: Option<syn::Type>,
+    #[allow(dead_code)] pub val_type: Option<syn::Type>,
     pub entries: Vec<(Expr, Expr)>,  // (key, value) pairs
 }
 
@@ -27,36 +26,12 @@ impl Parse for GoSliceLit {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         // Parse `[]` (optionally with a type inside like `[]int`), then `{elems}`
         // First, try to parse a bracket group (could be empty `[]` or `[]Type`)
-        let mut has_type = false;
-        let _type_name: Option<syn::Type> = None;
-
-        // Try to parse as Group (handles `[]` directly, or `[]int` as Group content)
-        let fork = input.fork();
-        match fork.parse::<proc_macro2::TokenStream>() {
-            Ok(_) => {
-                // Consumed — but this doesn't work: ParseStream::parse<T>
-                // for TokenStream isn't implemented.
-                // Instead, use syn::bracketed! or handle the bracket manually.
-            }
-            Err(_) => {}
-        }
-
-        // Actually, check if this starts with `[` by looking at the first token
-        if !input.peek(syn::token::Bracket) {
-            return Err(input.error("expected Go slice literal starting with `[]` or `[Type]`"));
-        }
-
-        // Use syn::bracketed to handle `[]` or `[Type]`
-        // `syn::bracketed!` parses `[...]` as a Group into `ParseBuffer`
-        // The content can be empty (just `[]`) or contain a type.
         let bracket_content;
         let _ = syn::bracketed!(bracket_content in input);
 
-        // Check if there's a type inside
+        // Parse the element type (handles `[]` or `[]Type`)
         if !bracket_content.is_empty() {
-            // Parse the element type (e.g. `int`, `string`)
             let _elem_type: syn::Type = bracket_content.parse()?;
-            has_type = true;
         }
 
         // Now parse `{e1, e2, ...}`
@@ -77,8 +52,8 @@ impl Parse for GoSliceLit {
             }
         }
 
-        // If has_type, store it for type inference
-        let elem_type = if has_type { Some(syn::Type::Path(syn::TypePath {
+        // If bracket_content was non-empty, store a dummy type for inference
+        let elem_type = if !bracket_content.is_empty() { Some(syn::Type::Path(syn::TypePath {
             path: syn::Path::from(Ident::new("dummy_type_for_inference", proc_macro2::Span::call_site())),
             qself: None,
         })) } else { None };
@@ -139,7 +114,7 @@ pub(crate) fn parse_map_entry(input: ParseStream) -> syn::Result<(Expr, Expr)> {
 }
 
 pub fn go_to_rust_slice(input: &GoSliceLit) -> TokenStream {
-    let elems: Vec<_> = input.elems.iter().map(|e| go_to_rust(e)).collect();
+    let elems: Vec<_> = input.elems.iter().map(go_to_rust).collect();
     quote! { vec![ #(#elems),* ] }
 }
 
@@ -219,7 +194,7 @@ pub fn parse_go_map(tokens: &proc_macro2::TokenStream) -> syn::Result<GoMapLit> 
     // Skip the `map` ident
     match iter.next() {
         Some(TokenTree::Ident(id)) => {
-            if id.to_string() != "map" {
+            if id != "map" {
                 return Err(syn::Error::new(proc_macro2::Span::call_site(), "expected `map` keyword"));
             }
         }
@@ -244,10 +219,9 @@ pub fn parse_go_map(tokens: &proc_macro2::TokenStream) -> syn::Result<GoMapLit> 
             let val_type: Option<syn::Type> = {
                 let mut has_val_type = false;
                 for tt in remaining.clone() {
-                    if let TokenTree::Group(g) = &tt {
-                        if g.delimiter() == proc_macro2::Delimiter::Brace {
-                            break;
-                        }
+                    if let TokenTree::Group(g) = &tt
+                        && g.delimiter() == proc_macro2::Delimiter::Brace {
+                        break;
                     }
                     has_val_type = true;
                     // Collect type tokens (identifiers)
@@ -315,10 +289,9 @@ pub(crate) fn extract_brace_content(tokens: &proc_macro2::TokenStream) -> syn::R
     use proc_macro2::TokenTree;
 
     for tt in tokens.clone() {
-        if let TokenTree::Group(g) = tt {
-            if g.delimiter() == proc_macro2::Delimiter::Brace {
-                return Ok(g.stream());
-            }
+        if let TokenTree::Group(g) = tt
+            && g.delimiter() == proc_macro2::Delimiter::Brace {
+            return Ok(g.stream());
         }
     }
     Err(syn::Error::new(proc_macro2::Span::call_site(), "expected `{...}` braces"))
