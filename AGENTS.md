@@ -5,7 +5,7 @@ Transpiles inline Go expressions into valid Rust via a procedural macro at compi
 ```
 gourd/
   gourd-codegen/       <-- proc-macro library (transpiler core)
-  gourd/               <-- demo binary using `go_expr! { ... }`
+  gourd/               <-- runtime + demo binary
 ```
 
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
@@ -17,7 +17,7 @@ gourd/
 2. The proc-macro `go_expr! { ... }` binds from tokens per `syn::Expr`
 3. The transpiler dispatches on the AST node: `Expr::Binary → BinOp::Add → #lhs + #rhs`
 4. `syn::Expr` (Go e.g. `10 + 20i32` (literal fork) → Rust valid output
-5. Emits pure `quote! { 10 + 20 }` — no runtime dependency.
+5. Emits pure `quote! { 10 + 20 }`.
 
 Every expression in the Go source can be valid Rust tokens. The macro
 emits exactly those tokens into the user's expanded AST.
@@ -41,12 +41,16 @@ cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 
 RFCs are now written *after the fact* to describe an implemented feature and its design decisions. RFCs are numbered sequentially relative to other RFCs in its folder.
 
+## Working with files
+
+- If a file is over 400 lines long, consider breaking it into multiple files. 
+- Please lean on the `rust-analyzer` MCP for refactoring and inspecting Rust types. The Rust Analyzer MCP is much better at refactoring than copy/paste. It also is useful for navigating the codebase.
+- For other edits, consider using command line tools like `cp` and `sed` to work exactly with line numbers. Whenever trying to recover a misedited file, attempt to read its previous contents from `git`.
+
 ## Development Instructions
 
-Please read @CODING_REFERENCE.md and then read these instructions:
+Please read @CODING_REFERENCE.md when writing new code.
 
 You are encouraged to add debug logs and diagnostics and try re-running the program as often as you like. This is a toy repository. You will often have more success implementing and reading debug statements and running cargo expand than by reading the code.
 
 But do try keeping changes small, iterative, and working toward finishing the implementation.
-
-If a file is over 400 lines long, consider breaking it into multiple files.

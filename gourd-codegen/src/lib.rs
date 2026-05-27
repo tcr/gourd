@@ -11,22 +11,22 @@ mod transpiler;
 #[proc_macro]
 pub fn go_expr(input: TokenStream) -> TokenStream {
     let tokens: TokenStream2 = input.clone().into();
-    
+
     // Check if the tokens form a Go slice literal: []Type{...} or []{...}
     // A slice literal starts with `[` (as a bracket group).
     if check_is_slice_literal(&tokens) {
-        if let Ok(slice_lit) = transpiler::parse_go_slice(&tokens) {
-            return transpiler::go_to_rust_slice(&slice_lit).into();
+        if let Ok(slice_lit) = transpiler::slices::parse_go_slice(&tokens) {
+            return transpiler::slices::go_to_rust_slice(&slice_lit).into();
         }
     }
-    
+
     // Check if the tokens form a Go map literal: map[K]V{...}
     if check_is_map_literal(&tokens) {
-        if let Ok(map_lit) = transpiler::parse_go_map(&tokens) {
-            return transpiler::go_to_rust_map(&map_lit).into();
+        if let Ok(map_lit) = transpiler::slices::parse_go_map(&tokens) {
+            return transpiler::slices::go_to_rust_map(&map_lit).into();
         }
     }
-    
+
     // Fall back to standard Go expression parsing
     let tokens2: proc_macro::TokenStream = input;
     let expr = parse_macro_input!(tokens2 as Expr);
@@ -73,7 +73,7 @@ pub fn go(input: TokenStream) -> TokenStream {
                     // Check if second token is `(Parenthesis Group)` → receiver function
                     if let Some(proc_macro2::TokenTree::Group(g)) = iter.next() {
                         if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
-                            transpiler::go_to_rust_receiver_fn(tokens).into()
+                            transpiler::modname::go_to_rust_receiver_fn(tokens).into()
                         } else {
                             transpiler::go_to_rust_fn(tokens).into()
                         }
