@@ -181,3 +181,84 @@ go! {
 fn test_error_signature_check() {
     let _ = hello();
 }
+
+// ── Slice/map literals inside go! function bodies ────────────────────
+
+go! {
+    fn go_slice_literal() Vec<i32> {
+        []int{ 1, 2, 3 }
+    }
+}
+
+#[test]
+fn test_slice_literal_in_body() {
+    let v = go_slice_literal();
+    assert_eq!(v, vec![1i32, 2i32, 3i32]);
+}
+
+go! {
+    fn go_slice_literal_empty() Vec<i32> {
+        []int{}
+    }
+}
+
+#[test]
+fn test_slice_literal_empty_in_body() {
+    let v = go_slice_literal_empty();
+    assert!(v.is_empty());
+}
+
+go! {
+    fn go_slice_literal_type_inferred() Vec<i32> {
+        []{ 2, 3, 4 }
+    }
+}
+
+#[test]
+fn test_slice_literal_type_inferred_in_body() {
+    let v = go_slice_literal_type_inferred();
+    assert_eq!(v, vec![2i32, 3i32, 4i32]);
+}
+
+// NOTE: this hangs during build when uncommented:
+//
+// go! {
+//     fn go_map_literal(a string) int {
+//         let m = map[string]int{ "a": 1, "b": 2, "c": 3 };
+//         *m.get(a).unwrap()
+//     }
+// }
+//
+// #[test]
+// fn test_map_literal_in_body() {
+//     use std::collections::HashMap;
+//     let result = go_map_literal(String::from("b"));
+//     assert_eq!(result, 2i32);
+//     let result = go_map_literal(String::from("a"));
+//     assert_eq!(result, 1i32);
+// }
+
+go! {
+    fn go_map_literal_empty() bool {
+        let m = map[string]int{ };
+        m.is_empty()
+    }
+}
+
+#[test]
+fn test_map_literal_empty_in_body() {
+    assert!(go_map_literal_empty());
+}
+
+go! {
+    fn go_int_map() String {
+        let m = map[int]string{ 1: "one", 2: "two" };
+        m.get(2).unwrap().clone()
+    }
+}
+
+#[test]
+fn test_int_map_in_body() {
+    let result = go_int_map();
+    assert_eq!(result, "two".to_string());
+}

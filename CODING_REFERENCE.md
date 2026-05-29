@@ -208,9 +208,126 @@ let body: Box<Block> = syn::parse_quote! { { statements; here; } };
 It parses text → syn AST. Essential for constructing AST nodes from
 strings without implementing `Parse` manually.
 
----
+### `quote!` with a `String` produces a string literal, NOT an identifier
 
-## Architecture
+This was a subtle but critical bug. When interpolating a `String` into
+`quote!`, the string content becomes a Rust string literal (`"m"`), not
+an identifier token:
+
+```rust
+let ident = String::from("m");
+quote! { let #ident = 42; }  // ❌ → `let "m" = 42;` (string literal!)
+
+let name: syn::Ident = syn::parse_str(&ident).unwrap();
+quote! { let #name = 42; }   // ✅ → `let m = 42;` (proper identifier)
+```
+
+**Rule:** Always convert a `String` to `syn::Ident` via `syn::parse_str`
+before interpolating into `quote!` as a name.
+
+### `HashMap::new()` without type hints causes inference failure
+
+```rust
+let mut m = std::collections::HashMap::new();
+m.is_empty();  // ❌ cannot infer HashMap<K, V>
+```
+
+For empty maps, use `HashMap::default()` which defers type resolution:
+```rust
+let mut m = std::collections::HashMap::default();
+```
+
+For non-empty maps, provide type parameters:
+```rust
+let mut m = std::collections::HashMap::<i32, String>::new();
+```
+
+### `HashMap::get(key)` requires a reference: `get(&key)`
+
+Rust's `HashMap::get(&Q)` takes a reference to the key type. Go code like
+`m[2]` or `m.get(2)` in the Go block must be translated to `m.get(&2)`:
+
+```rust
+fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
+    // For `.get(key)`, wrap key in &
+    if method_name == "get" {
+        let args = args.iter().enumerate().map(|(i, a)| {
+            if i == 0 { quote! { &#a } } else { quote! { #a } }
+        });
+        return quote! { #receiver.#method_name( #(#args),* ) };
+    }
+    // ... normal case
+}
+```
+
+### `syn::braced!` fails on nested groups — use `step()` instead
+
+`syn::braced!(content in input)` does NOT work when `input` is nested
+inside another brace-delimited group. The workaround is to use a
+`step()` closure to extract the group content from the parent cursor:
+
+```rust
+let content = cursor.step(|cursor| {
+    if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
+        Ok((inner.token_stream(), rest))
+    } else {
+        Err(cursor.error("expected `{`"))
+    }
+});
+```
+
+### Early return with `?` prevents fallback parsing
+
+When trying to parse `Stmt` from a block and then falling back to
+alternate logic (e.g., `let` statement detection), using `?` propagates
+errors and exits. Replace `?` with `if let Ok(...) =` to continue:
+
+```rust
+// WRONG — exits on failure, never reaches fallback:
+brace_content.parse::<Stmt>()?;
+fallback_logic();
+
+// RIGHT — falls through on failure:
+if let Ok(stmt) = brace_content.parse::<Stmt>() {
+    // parsed successfully
+} else {
+    fallback_logic();  // tries alternate parsing
+}
+```
+
+### Capturing map key/value types from Go declarations
+
+When parsing `map[K]V{entries}`, capture the key and value types:
+
+```rust
+// Parse K from [K]
+let k_content;
+let _ = syn::bracketed!(k_content in input);
+let key_type = if !k_content.is_empty() {
+    k_content.parse::<syn::Type>().ok()
+} else { None };
+
+// Parse V
+let val_type = if input.peek(syn::Ident) || input.peek(syn::token::Bracket) {
+    input.parse::<syn::Type>().ok()
+} else { None };
+
+// Map Go types → Rust types via `map_go_types(key_type)?`
+```
+
+### `Cursor` lacks `parse()`/`peek()` methods
+
+`proc_macro2::Cursor` (from `step()` closures) does NOT have `.parse()`
+or `.peek()` methods. To inspect a cursor's contents, convert it to a
+`TokenStream` first:
+
+```rust
+cursor.step(|cursor| {
+    let ts: TokenStream = cursor.token_stream();
+    let result = syn::parse2::<syn::Type>(ts);  // ✅ works
+    Ok((result, cursor))
+});
+```
 
 ```
 gourd/

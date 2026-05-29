@@ -4,9 +4,10 @@ use syn::ext::IdentExt;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
-use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
+use syn::{BinOp, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, Stmt, UnOp};
 
 pub mod funcs;
+pub mod slices;
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -27,7 +28,21 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::If(e)        => transpile_if(e),
         Expr::Range(e)     => transpile_range(e),
         Expr::Index(e)     => transpile_index(e),
-        Expr::Array(e)     => transpile_array(e),
+        Expr::Array(e)     => {
+            // In Go slice literals like `[]int{ 1, 2, 3 }`, syn parses `[]`
+            // as an empty array expression. If the array has no elements,
+            // this is likely the start of a Go slice literal. We emit
+            // an empty vec, but the actual slice elements come from the
+            // `Expr::Verbatim` handling above when syn partially parses
+            // the slice literal.
+            if e.elems.is_empty() {
+                quote! { vec![] }
+            } else {
+                // Normal Rust array literal — translate elements
+                let elems: Vec<_> = e.elems.iter().map(go_to_rust).collect();
+                quote! { [#(#elems),*] }
+            }
+        }
         Expr::Loop(e)      => transpile_loop(e),
         Expr::ForLoop(e)   => transpile_for_loop(e),
         Expr::While(e)     => transpile_while(e),
@@ -39,7 +54,54 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Assign(e)     => transpile_assign(e),
         Expr::Break(e)      => transpile_break(e),
         Expr::Return(e)     => transpile_return(e),
-        Expr::Verbatim(_) => emit_todo("unsupported Go form"),
+        Expr::Verbatim(tokens) => {
+            // syn may produce Verbatim tokens for Go slice/map literals
+            // that it couldn't fully parse. Check if there's a brace group
+            // in the verbatim tokens — if so, extract elements as a slice.
+            use proc_macro2::TokenTree;
+
+            // Look for a brace group in the verbatim tokens
+            for tt in tokens.clone() {
+                if let TokenTree::Group(g) = tt
+                    && g.delimiter() == proc_macro2::Delimiter::Brace {
+                    // Extract elements from the brace group
+                    let mut elems = Vec::new();
+                    let brace_content = g.stream();
+
+                    // Collect tokens from the brace group and parse as expressions
+                    // We can use syn::Expr::parse with a ParseStream created from
+                    // the token stream via a custom parser
+                    #[derive(Default)]
+                    struct ElemParser {
+                        elems: Vec<Expr>,
+                    }
+                    impl Parse for ElemParser {
+                        fn parse(input: ParseStream) -> syn::Result<Self> {
+                            let mut elems = Vec::new();
+                            while !input.is_empty() {
+                                let expr: Expr = input.parse()?;
+                                elems.push(expr);
+                                if input.peek(syn::token::Comma) {
+                                    let _: syn::token::Comma = input.parse()?;
+                                } else {
+                                    break;
+                                }
+                            }
+                            Ok(ElemParser { elems })
+                        }
+                    }
+
+                    let parser: ElemParser = syn::parse2(brace_content).unwrap_or_default();
+                    for expr in parser.elems {
+                        elems.push(go_to_rust(&expr));
+                    }
+                    return quote! { vec![ #(#elems),* ] };
+                }
+            }
+
+            // No brace group — emit raw tokens (simple literals)
+            quote! { #tokens }
+        }
         _                  => emit_todo("unsupported Go form"),
     }
 }
@@ -49,8 +111,6 @@ fn transpile_lit(input: &syn::ExprLit) -> TokenStream {
     let lit = &input.lit;
     match lit {
         syn::Lit::Str(s) => {
-            // In Go, `s := "hello"` produces an owned string.
-            // In Rust, `"hello"` is `&str`.  Convert to String.
             quote! { ::std::string::String::from(#s) }
         }
         _ => quote! { #lit },
@@ -130,7 +190,7 @@ fn transpile_cast(input: &syn::ExprCast) -> TokenStream {
     quote! { #expr as #ty }
 }
 
-/// Go assignment `x = y` → Rust `x = y` (for mutation after `let mut`)
+/// Go assignment `x = y` → Rust `x = y`
 fn transpile_assign(input: &syn::ExprAssign) -> TokenStream {
     let lhs = go_to_rust(&input.left);
     let rhs = go_to_rust(&input.right);
@@ -177,7 +237,6 @@ fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     quote! { #func( #(#args),* ) }
 }
 
-/// `(x)  r  (x)`
 fn transpile_paren(input: &syn::ExprParen) -> TokenStream {
     let inner  = go_to_rust(&input.expr);
     quote! { ( #inner ) }
@@ -189,6 +248,7 @@ fn transpile_index(input: &ExprIndex) -> TokenStream {
     quote! { #seq[ #idx ] }
 }
 
+#[allow(dead_code)]
 fn transpile_array(input: &ExprArray) -> TokenStream {
     let elems: Vec<_> = input.elems.iter().map(go_to_rust).collect();
     quote! { [ #(#elems),* ] }
@@ -198,6 +258,14 @@ fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
     let receiver  = go_to_rust(&input.receiver);
     let method_name  = &input.method;
     let args: Vec<_>  = input.args.iter().map(go_to_rust).collect();
+    // For `.get(key)` calls, wrap the key in a reference
+    let args_str = method_name.to_string();
+    if args_str == "get" {
+        if let Some(first) = args.first() {
+            let rest: Vec<_> = args.iter().skip(1).cloned().collect();
+            return quote! { #receiver.#method_name( &#first #(#rest),* ) };
+        }
+    }
     quote! { #receiver.#method_name( #(#args),* ) }
 }
 
@@ -252,8 +320,6 @@ fn transpile_if(input: &ExprIf) -> TokenStream {
     quote! { if #cond #then_block #else_block }
 }
 
-/// An `{ ... }` block: transpile each statement; the final expression
-/// becomes the block's value.
 fn transpile_block(input: &ExprBlock) -> TokenStream {
     if input.block.stmts.is_empty() {
         return quote! {{  }};
@@ -267,7 +333,6 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
                     syn::Stmt::Local(local)  => {
                         let local_pat  = &local.pat;
                         let local_val  = local.init.as_ref().map(|v| go_to_rust(&v.expr));
-                        // Convert `mut x` from Go pattern: the Pat already has mut binding stored in it
                         outputs.push(quote! { let #local_pat = #local_val; });
                     }
             _  => {
@@ -282,7 +347,17 @@ fn transpile_block(input: &ExprBlock) -> TokenStream {
 // Go function declaration → Rust fn (the `go!` macro)
 // ──────────────────────────────────────────────
 
-/// Parse type Name along w/ and shared type spec.
+pub(crate) enum GoStmt {
+    Local(syn::Local),
+    Expr(Expr),
+    GoSlice(Vec<Expr>),
+    GoMap(String, Option<syn::Type>, Option<syn::Type>, Vec<(Expr, Expr)>),  // (ident, key_type, val_type, entries)
+}
+
+pub(crate) struct GoBlock {
+    stmts: Vec<GoStmt>,
+}
+
 pub(crate) struct GoFnInputs {
     args: Vec<GoParam>,
 }
@@ -302,7 +377,7 @@ struct GoFn {
     generics: Punctuated<syn::GenericParam, token::Comma>,
     inputs: GoFnInputs,
     output: Option<GoFnOutput>,
-    block: Block,
+    block: GoBlock,
 }
 
 impl Parse for GoFnInputs {
@@ -313,8 +388,6 @@ impl Parse for GoFnInputs {
             let _ty: Option<Box<syn::Type>> = None;
             let mut group_ids: Vec<Ident> = Vec::new();
 
-            // Collect group names: look for comma + named params sharing a type.
-            // Stop if the name after the comma is a known Go type keyword.
             while input.peek(token::Comma) {
                 let peek_fork = input.fork();
                 let _ = peek_fork.parse::<token::Comma>();
@@ -327,21 +400,17 @@ impl Parse for GoFnInputs {
                         | "byte" | "rune" | "float32" | "float64" | "error"
                     );
                     if known_go_type {
-                        // This comma is a param separator, not a group comma. Rollback.
                         input.advance_to(&peek_fork);
                         break;
                     }
-                    // It's a group name: consume the comma and the name.
                     input.parse::<token::Comma>()?;
                     let param_name: Ident = input.parse()?;
                     group_ids.push(param_name);
                 } else {
-                    // `[` (slice type) — stop grouping.
                     break;
                 }
             }
 
-            // Parse the type that follows (for non-slice cases).
             let fork = input.fork();
             let is_slice_like = fork.peek(syn::token::Bracket);
 
@@ -354,7 +423,6 @@ impl Parse for GoFnInputs {
             }
 
             if is_slice_like {
-                // Slice type: `[]T` — parse element type from what follows the brackets.
                 let content;
                 let _ = syn::bracketed!(content in input);
                 let elem_path: syn::Path = if content.is_empty() {
@@ -388,24 +456,18 @@ impl Parse for GoFnInputs {
 impl Parse for GoFnOutput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut tys = Vec::new();
-        // Skip `->` if present (Rust-style return arrow)
         if input.peek(syn::token::RArrow) {
             let _: syn::token::RArrow = input.parse()?;
         }
-        // Parse the return type(s).
-        // If it's a tuple or single type, parse it. Then check for Go-style
-        // additional comma-separated types (multi-return).
         if !input.peek(syn::token::Brace) {
             let t = input.parse()?;
             tys.push(t);
-            // Go-style: `() (int, error)` or `(int, error)` — multi-returns
-            // A comma means another return type (Go multi-return)
             while input.peek(token::Comma) {
                 let _ = input.parse::<token::Comma>()?;
                 if input.peek(syn::token::Brace) {
                     break;
                 }
-            let t = input.parse()?;
+                let t = input.parse()?;
                 tys.push(t);
             }
         }
@@ -413,32 +475,463 @@ impl Parse for GoFnOutput {
     }
 }
 
+/// Parse a Go slice literal pattern: []Type{e1, e2, ...} or []{e1, e2}
+#[allow(dead_code)]
+fn parse_go_slice_literal(input: ParseStream) -> syn::Result<Vec<Expr>> {
+    // Consume first `[]` using bracketed! macro
+    let _bracket_token;
+    let bracket_content;
+    _bracket_token = syn::bracketed!(bracket_content in input);
+    // Skip optional type inside brackets (e.g. `[]int`)
+    if !bracket_content.is_empty() {
+        let _skip: syn::Type = bracket_content.parse()?;
+    }
+    if input.peek(syn::token::Brace) {
+        let brace_content;
+        let _ = syn::braced!(brace_content in input);
+        let mut elems = Vec::new();
+        if !brace_content.is_empty() {
+            let fork = brace_content.fork();
+            while !fork.is_empty() {
+                if let Ok(e) = fork.parse::<Expr>() {
+                    elems.push(e);
+                    if fork.peek(token::Comma) {
+                        fork.parse::<token::Comma>()?;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(elems)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Parse a Go map literal pattern: map[K]V{key: val, ...}
+#[allow(dead_code)]
+fn parse_go_map_literal(input: ParseStream) -> syn::Result<Vec<(Expr, Expr)>> {
+    // `map` keyword already consumed
+    let bracket_content;
+    let _ = syn::bracketed!(bracket_content in input);
+    // Parse K (key type) — skip if not a valid Rust type
+    if !bracket_content.is_empty() {
+        let _skip = bracket_content.parse::<syn::Type>();
+    }
+    // Parse V (value type) — skip if not a valid Rust type
+    if input.peek(syn::Ident) || input.peek(syn::token::Bracket) {
+        let _skip = input.parse::<syn::Type>();
+    }
+    // Parse `{key: val, ...}`
+    let brace_content;
+    let _ = syn::braced!(brace_content in input);
+    let mut entries = Vec::new();
+    if !brace_content.is_empty() {
+        let fork = brace_content.fork();
+        while !fork.is_empty() {
+            if let Ok(key) = fork.parse::<Expr>() {
+                if fork.peek(syn::token::Colon) {
+                    let _: token::Colon = fork.parse()?;
+                    if let Ok(value) = fork.parse::<Expr>() {
+                        entries.push((key, value));
+                        if fork.peek(token::Comma) {
+                            fork.parse::<token::Comma>()?;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    Ok(entries)
+}
+
+/// Parse each statement from the brace content using speculative parsing.
+/// Handles Go slice/map literals that syn::Stmt can't capture.
+fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
+    let brace_content;
+    let _brace = syn::braced!(brace_content in input);
+
+    let mut stmts = Vec::new();
+    while !brace_content.is_empty() {
+        // 1. Try syn::Local (handles `let x = ...` declarations)
+        let fork = brace_content.fork();
+        if fork.peek(syn::token::Let) {
+            match fork.parse::<Stmt>() {
+                Ok(Stmt::Local(_)) => {
+                    if let Ok(Stmt::Local(local)) = brace_content.parse() {
+                        stmts.push(GoStmt::Local(local));
+                        if brace_content.peek(token::Semi) {
+                            let _semi: token::Semi = brace_content.parse()?;
+                        }
+                        continue;
+                    }
+                    // parse failed — fall through to let fallback
+                }
+                _ => {}
+            }
+            // Handle `let m = map[K]V{...}` when syn can't parse the value
+            let let_fork = brace_content.fork();
+            if let_fork.parse::<syn::token::Let>().is_ok()
+                && let_fork.parse::<syn::Ident>().is_ok()
+                && let_fork.parse::<syn::token::Eq>().is_ok()
+            {
+                // Check if the value is a Go map literal
+                if let_fork.peek(syn::Ident) {
+                    let map_fork = let_fork.fork();
+                    if let Ok(kw) = map_fork.parse::<syn::Ident>() {
+                        if kw == "map" && map_fork.peek(syn::token::Bracket) {
+                            // Parse: `let m = map[K]V{entries}`
+                            brace_content.parse::<syn::token::Let>()?;
+                            let ident = brace_content.parse::<syn::Ident>()?;
+                            let ident_str = ident.to_string();
+                            brace_content.parse::<syn::token::Eq>()?;
+                            // Parse map literal `map[K]V{entries}`
+                            brace_content.parse::<syn::Ident>()?;
+                            // Capture key type
+                            let k_content;
+                            let _ = syn::bracketed!(k_content in brace_content);
+                            let key_type = if !k_content.is_empty() {
+                                if let Ok(t) = k_content.parse::<syn::Type>() {
+                                    Some(t)
+                                } else {
+                                    let _: proc_macro2::TokenStream = k_content.parse()?;
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                            // Capture value type
+                            let val_type = if brace_content.peek(syn::Ident) || brace_content.peek(syn::token::Bracket) {
+                                if let Ok(t) = brace_content.parse::<syn::Type>() {
+                                    Some(t)
+                                } else {
+                                    let _: proc_macro2::TokenStream = brace_content.parse()?;
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                            // Skip the `{...}` group and parse entries from it.
+                            // Use step() to extract the group content from the main
+                            // stream, which works on nested groups.
+                            let m_content = brace_content.step(|cursor| {
+                                if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
+                                    Ok((inner.token_stream(), rest))
+                                } else {
+                                    Err(cursor.error("expected `{`"))
+                                }
+                            });
+                            let mut entries = Vec::new();
+                            if let Ok(inner_ts) = m_content {
+                                if !inner_ts.is_empty() {
+                                    // Parse entries from the inner stream using a custom parser
+                                    #[derive(Default)]
+                                    struct MapEntryParser { entries: Vec<(Expr, Expr)> }
+                                    impl Parse for MapEntryParser {
+                                        fn parse(input: ParseStream) -> syn::Result<Self> {
+                                            let mut entries = Vec::new();
+                                            while !input.is_empty() {
+                                                if let Ok(key) = input.parse::<Expr>() {
+                                                    if input.peek(syn::token::Colon) {
+                                                        let _: token::Colon = input.parse()?;
+                                                        if let Ok(value) = input.parse::<Expr>() {
+                                                            entries.push((key, value));
+                                                            if input.peek(token::Comma) {
+                                                                let _: token::Comma = input.parse()?;
+                                                            } else {
+                                                                break;
+                                                            }
+                                                        } else {
+                                                            break;
+                                                        }
+                                                    } else {
+                                                        break;
+                                                    }
+                                                } else {
+                                                    break;
+                                                }
+                                            }
+                                            Ok(MapEntryParser { entries })
+                                        }
+                                    }
+                                    let parser: MapEntryParser = syn::parse2(inner_ts).unwrap_or_default();
+                                    entries = parser.entries;
+                                }
+                                stmts.push(GoStmt::GoMap(ident_str.clone(), key_type.clone(), val_type.clone(), entries.clone()));
+                                if brace_content.peek(token::Semi) {
+                                    let _semi: token::Semi = brace_content.parse()?;
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Check for Go slice literal: []...{...}
+        //    (must come BEFORE syn::Expr parse since [] is valid Rust empty array)
+        let fork = brace_content.fork();
+        if fork.peek(syn::token::Bracket) {
+            // Parse brackets from fork, then advance brace_content if it's a slice literal
+            let _bracket;
+            let bracket_content;
+            _bracket = syn::bracketed!(bracket_content in fork);
+
+            // Skip optional type inside first `[]` (e.g. `[int]`)
+            if !bracket_content.is_empty() {
+                let type_fork = bracket_content.fork();
+                if type_fork.parse::<syn::Type>().is_ok() {
+                    let _: syn::Type = bracket_content.parse()?;
+                } else {
+                    let _: proc_macro2::TokenStream = bracket_content.parse()?;
+                }
+            }
+
+            // Also skip optional type after `[]` (e.g. `[]int` → skip `int`)
+            // The type follows the closing bracket, not inside it
+            let type_fork = fork.fork();
+            if type_fork.parse::<syn::Type>().is_ok() {
+                let _: syn::Type = fork.parse()?;
+            }
+
+            // Now check if fork points to `{` (after brackets and optional type)
+            if fork.peek(syn::token::Brace) {
+                use proc_macro2::TokenTree;
+                // Advance the main stream to fork's position (at `{`)
+                brace_content.advance_to(&fork);
+                // Extract the inner content from the fork's token stream
+                let group_stream: proc_macro2::TokenStream = fork.parse()?;
+                if let Some(TokenTree::Group(group)) = group_stream
+                    .into_iter()
+                    .next()
+                    .and_then(|t| {
+                        if let TokenTree::Group(g) = t { Some(TokenTree::Group(g)) } else { None }
+                    })
+                    && group.delimiter() == proc_macro2::Delimiter::Brace
+                {
+                    // Parse elements from the group's inner stream
+                    let inner_ts = group.stream();
+                    let mut elems = Vec::new();
+                    if !inner_ts.is_empty() {
+                        #[derive(Default)]
+                        struct ElemParser { elems: Vec<Expr> }
+                        impl Parse for ElemParser {
+                            fn parse(input: ParseStream) -> syn::Result<Self> {
+                                let mut elems = Vec::new();
+                                while !input.is_empty() {
+                                    let expr: Expr = input.parse()?;
+                                    elems.push(expr);
+                                    if input.peek(syn::token::Comma) {
+                                        let _: syn::token::Comma = input.parse()?;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                Ok(ElemParser { elems })
+                            }
+                        }
+                        let parser: ElemParser = syn::parse2(inner_ts).unwrap_or_default();
+                        elems = parser.elems;
+                    }
+                    // Advance brace_content to fork's position (at `{...}`).
+                    // The `[]` and optional type were already handled by the
+                    // fork-based detection above. Just skip past the brace group.
+                    // `step()` with `.group(Delimiter::Brace)` works on nested
+                    // groups because it extracts groups at the cursor level.
+                    let _rest = brace_content.step(|cursor| {
+                        if let Some((_, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
+                            Ok(((), rest))
+                        } else {
+                            Err(cursor.error("expected `{`"))
+                        }
+                    });
+                    stmts.push(GoStmt::GoSlice(elems));
+                    continue;
+                }
+            }
+            // Not a slice literal — fall through to other parsers
+        }
+
+        // 3. Try standard expression parsing via speculative parse
+        let fork = brace_content.fork();
+        if let Ok(expr) = fork.parse::<Expr>() {
+            brace_content.advance_to(&fork);
+            stmts.push(GoStmt::Expr(expr));
+            if brace_content.peek(token::Semi) {
+                let _semi: token::Semi = brace_content.parse()?;
+            }
+            continue;
+        }
+
+        // 4. Check for Go map literal: map[K]V{...}
+        let fork = brace_content.fork();
+        if fork.peek(syn::Ident) {
+            if let Ok(ident) = fork.parse::<syn::Ident>() {
+                if ident == "map" && fork.peek(syn::token::Bracket) {
+                    // This is a Go map literal: map[K]V{...}
+                    brace_content.parse::<syn::Ident>()?;
+                    // Consume `[K]`
+                    let k_content;
+                    let _ = syn::bracketed!(k_content in brace_content);
+                    // Parse K (key type) — skip if not a valid Rust type
+                    if !k_content.is_empty() {
+                        if k_content.parse::<syn::Type>().is_err() {
+                            let _: proc_macro2::TokenStream = k_content.parse()?;
+                        }
+                    }
+                    // Parse V (value type) — skip if not a valid Rust type
+                    if brace_content.peek(syn::Ident) || brace_content.peek(syn::token::Bracket) {
+                        if brace_content.parse::<syn::Type>().is_err() {
+                            let _: proc_macro2::TokenStream = brace_content.parse()?;
+                        }
+                    }
+                    // Parse `{key: val, ...}`
+                    let m_content = brace_content.step(|cursor| {
+                        if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
+                            Ok((inner.token_stream(), rest))
+                        } else {
+                            Err(cursor.error("expected `{`"))
+                        }
+                    });
+                    let mut entries = Vec::new();
+                    if let Ok(inner_ts) = m_content {
+                        if !inner_ts.is_empty() {
+                            #[derive(Default)]
+                            struct MapEntryParser { entries: Vec<(Expr, Expr)> }
+                            impl Parse for MapEntryParser {
+                                fn parse(input: ParseStream) -> syn::Result<Self> {
+                                    let mut entries = Vec::new();
+                                    while !input.is_empty() {
+                                        if let Ok(key) = input.parse::<Expr>() {
+                                            if input.peek(syn::token::Colon) {
+                                                let _: token::Colon = input.parse()?;
+                                                if let Ok(value) = input.parse::<Expr>() {
+                                                    entries.push((key, value));
+                                                    if input.peek(token::Comma) {
+                                                        let _: token::Comma = input.parse()?;
+                                                    } else {
+                                                        break;
+                                                    }
+                                                } else {
+                                                    break;
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    Ok(MapEntryParser { entries })
+                                }
+                            }
+                            let parser: MapEntryParser = syn::parse2(inner_ts).unwrap_or_default();
+                            entries = parser.entries;
+                        }
+                        stmts.push(GoStmt::GoMap(String::new(), None, None, entries));
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // 5. Nothing matched — try to skip one statement to avoid infinite loop
+        let _ = brace_content.parse::<syn::Expr>();
+    }
+
+    Ok(GoBlock { stmts })
+}
+fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
+    match stmt {
+        GoStmt::Local(local) => {
+            let pat = &local.pat;
+            let val = local.init.as_ref().map(|v| go_to_rust(&v.expr));
+            quote! { let #pat = #val; }
+        }
+        GoStmt::Expr(expr) => go_to_rust(expr),
+        GoStmt::GoSlice(elems) => {
+            let elems: Vec<_> = elems.iter().map(go_to_rust).collect();
+            quote! { vec![ #(#elems),* ] }
+        }
+        GoStmt::GoMap(ident, key_type, val_type, entries) => {
+            if entries.is_empty() {
+                if ident.is_empty() {
+                    return quote! { std::collections::HashMap::default() };
+                }
+                let name: syn::Ident = syn::parse_str(&ident).unwrap();
+                if let (Some(kt), Some(vt)) = (&key_type, &val_type) {
+                    let kt = map_go_types(kt);
+                    let vt = map_go_types(vt);
+                    return quote! { let #name = std::collections::HashMap::<#kt, #vt>::default(); };
+                }
+                return quote! { let #name = std::collections::HashMap::default(); };
+            }
+            let insertions: Vec<_> = entries.iter().map(|(k, v)| {
+                let key = go_to_rust(k);
+                let val = go_to_rust(v);
+                quote! { m.insert(#key, #val); }
+            }).collect();
+            let block = if let (Some(kt), Some(vt)) = (&key_type, &val_type) {
+                let kt = map_go_types(kt);
+                let vt = map_go_types(vt);
+                quote! {
+                    {
+                        let mut m = std::collections::HashMap::<#kt, #vt>::new();
+                        #(#insertions)*
+                        m
+                    }
+                }
+            } else {
+                quote! {
+                    {
+                        let mut m = std::collections::HashMap::new();
+                        #(#insertions)*
+                        m
+                    }
+                }
+            };
+            if ident.is_empty() {
+                block
+            } else {
+                let name: syn::Ident = syn::parse_str(&ident).unwrap();
+                quote! { let #name = #block; }
+            }
+        }
+    }
+}
+
 impl Parse for GoFn {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // Parse `fn` keyword
         let _fn: Ident = input.call(Ident::parse_any)?;
-        // Parse function name
         let ident: Ident = input.parse()?;
-        // Parse generics
         let generics = Punctuated::<syn::GenericParam, token::Comma>::new();
         if input.peek(syn::token::Bracket) {
             let content;
             let _bracketed = syn::bracketed!(content in input);
             Punctuated::<syn::GenericParam, token::Comma>::parse_terminated(&content)?;
         }
-        // Parse parameters
         let paren_content;
         let _paren = syn::parenthesized!(paren_content in input);
         let inputs = paren_content.parse()?;
-        // Parse optional return
         let output = if !input.is_empty() {
             let outer = input.parse()?;
             Some(outer)
         } else {
             None
         };
-        // Parse body
-        let block: Block = input.parse()?;
+        let block = parse_go_block(input)?;
         Ok(GoFn { ident, generics, inputs, output, block })
     }
 }
@@ -473,11 +966,19 @@ fn go_type_map(ident: &syn::Ident) -> TokenStream {
 fn map_go_types(ty: &syn::Type) -> TokenStream {
     match ty {
         syn::Type::Path(type_path) => {
-            let seg = type_path.path.segments.last();
-            match seg {
-                Some(seg) => go_type_map(&seg.ident),
-                None => quote! { #ty },
+            // Only map if the first segment is a Go builtin
+            if let Some(first) = type_path.path.segments.first() {
+                let first_name = first.ident.to_string();
+                if matches!(first_name.as_str(),
+                    "bool" | "string" | "int" | "int8" | "int16" | "int32" | "int64"
+                    | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr"
+                    | "byte" | "rune" | "float32" | "float64" | "error"
+                ) {
+                    return go_type_map(&first.ident);
+                }
             }
+            // Not a Go builtin — pass through unchanged
+            quote! { #ty }
         }
         syn::Type::Reference(type_ref) => {
             let elem = map_go_types(&type_ref.elem);
@@ -517,7 +1018,6 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
             let fn_name = &go_fn.ident;
             let generics = &go_fn.generics;
 
-            // Map return type (include `->` arrow)
             let output = go_fn.output.as_ref().map(|output| {
                 if output.tys.is_empty() {
                     quote! {}
@@ -533,8 +1033,6 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                 }
             }).unwrap_or_else(|| quote! {});
 
-            // Map parameters with Go-style shorthand support:
-            //    func foo(a, b int) maps to: `a: i32, b: i32`
             let mut all_params = Vec::<TokenStream>::new();
             for param in &go_fn.inputs.args {
                 let id = &param.id;
@@ -553,22 +1051,11 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                 }
             }
 
-            // Transpile block statements
             let mut stmts = Vec::new();
             for stm in &go_fn.block.stmts {
-                match stm {
-                    syn::Stmt::Expr(val_expr, _) => {
-                        stmts.push(go_to_rust(val_expr));
-                    }
-                    syn::Stmt::Local(local) => {
-                        let local_pat = &local.pat;
-                        let local_val = local.init.as_ref().map(|v| go_to_rust(&v.expr));
-                        stmts.push(quote! { let #local_pat = #local_val; });
-                    }
-                    _ => stmts.push(emit_todo("statement not yet supported")),
-                }
+                stmts.push(go_stmt_to_rust(stm));
             }
-            let body: Box<syn::ExprBlock> = syn::parse_quote! {{ #(#stmts);* }};
+            let body: Box<syn::ExprBlock> = syn::parse_quote!({ #(#stmts);* });
 
             quote! {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body
