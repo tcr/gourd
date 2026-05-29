@@ -171,17 +171,6 @@ fn test_param_grouping() {
     assert_eq!(go_shorthand(1, 2, 3), 6);
 }
 
-// ── Go error type → Rust Box<dyn Error> (RFC 004) ───────────────────
-// Maps Go `error` to Rust `Box<dyn std::error::Error>` in function
-// signatures (params and return types). Body-level Ok/Err wrapping is
-// intentionally out of scope per RFC 004.
-
-#[allow(unused_variables)]
-go! {
-    fn handle(code int, err error) {
-    }
-}
-
 go! {
     fn hello() string {
         String::from("hello")

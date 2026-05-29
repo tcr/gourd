@@ -7,8 +7,5 @@
 mod go_gc;
 pub use go_gc::GoGc;
 
-/// Re-export the expression macro for inline Go transpilation.
-pub use gourd_codegen::go_expr;
-
 /// Re-export the declaration macro for Go declarations.
 pub use gourd_codegen::go;

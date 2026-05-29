@@ -215,15 +215,15 @@ strings without implementing `Parse` manually.
 ```
 gourd/
   gourd-codegen/       ← proc-macro library (transpiler core)
-  gourd/               ← demo binary using `go_expr! { ... }`
+  gourd/               ← runtime + demo binary
 ```
 
 Key files:
 
 | File | Purpose |
 |------|---------|
-| `gourd-codegen/src/lib.rs` | `go!` and `go_expr!` proc macros, dispatch logic |
-| `gourd-codegen/src/transpiler.rs` | Go → Rust transpiler (~1050 lines) |
+| `gourd-codegen/src/lib.rs` | `go!` proc-macro, dispatch logic |
+| `gourd-codegen/src/transpiler.rs` | Go → Rust transpiler (~650 lines) |
 | `gourd-codegen/tests/receiver_tests.rs` | Receiver scope tests |
 
 Types in `transpiler.rs`:

@@ -1,35 +1,75 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use gourd::{GoGc, go_expr};
+use gourd::GoGc;
+use gourd::go;
 
-    // Arithmetic tests
-    let sum: i32 = go_expr! { 10 + 20 };
+go! {
+    fn go_add() -> i32 {
+        10 + 20
+    }
+}
+
+go! {
+    fn go_sub() -> i32 {
+        50 - 10
+    }
+}
+
+go! {
+    fn go_mul() -> i32 {
+        4 * 5
+    }
+}
+
+go! {
+    fn go_div() -> i32 {
+        100 / 4
+    }
+}
+
+go! {
+    fn go_parens() -> i32 {
+        (3 + 2) * 4
+    }
+}
+
+go! {
+    fn go_neg() -> i32 {
+        -7 + 3
+    }
+}
+
+go! {
+    fn go_bool() -> bool {
+        true && false
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Arithmetic tests via go!
+    let sum = go_add();
     println!("10 + 20 = {sum}");
     assert_eq!(sum, 30);
 
-    let diff: i32 = go_expr! { 50 - 10 };
+    let diff = go_sub();
     println!("50 - 10 = {diff}");
     assert_eq!(diff, 40);
 
-    let prod: i32 = go_expr! { 4 * 5 };
+    let prod = go_mul();
     println!("4 * 5 = {prod}");
     assert_eq!(prod, 20);
 
-    let quot: i32 = go_expr! { 100 / 4 };
+    let quot = go_div();
     println!("100 / 4 = {quot}");
     assert_eq!(quot, 25);
 
-    // Parenthesized expression
-    let parens: i32 = go_expr! { (3 + 2) * 4 };
+    let parens = go_parens();
     println!("(3 + 2) * 4 = {parens}");
     assert_eq!(parens, 20);
 
-    // Negation
-    let neg: i32 = go_expr! { -7 + 3 };
+    let neg = go_neg();
     println!("-7 + 3 = {neg}");
     assert_eq!(neg, -4);
 
-    // Short-circuit boolean logic
-    let bool_test: bool = go_expr! { true && false };
+    let bool_test = go_bool();
     println!("true && false = {bool_test}");
     assert!(!bool_test);
 
@@ -38,11 +78,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let p = GoGc::new(Point { x: 1, y: 2 });
     let _q = GoGc::clone(&p);
-    
+
     assert_eq!(p.x, 1);
     assert_eq!(p.y, 2);
     println!("GoGc reference count (p.copied(q)): {}", p.strong_count());
-    
+
     assert_eq!(p.strong_count(), 2);
 
     let _r = GoGc::clone(&p);

@@ -7,7 +7,6 @@ use syn::token;
 use syn::{BinOp, Block, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, Ident, UnOp};
 
 pub mod funcs;
-pub mod slices;
 
 /// Emit a compile-time error for forms we don't support.
 fn emit_todo(msg: &'static str) -> TokenStream {
@@ -40,19 +39,7 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Assign(e)     => transpile_assign(e),
         Expr::Break(e)      => transpile_break(e),
         Expr::Return(e)     => transpile_return(e),
-        Expr::Verbatim(tokens) => {
-            // Try to parse as Go slice literal: []Type{...}
-            match syn::parse2::<slices::GoSliceLit>(tokens.clone()) {
-                Ok(slice_lit) => slices::go_to_rust_slice(&slice_lit),
-                Err(_) => {
-                    // Try to parse as Go map literal: map[K]V{key: val, ...}
-                    match syn::parse2::<slices::GoMapLit>(tokens.clone()) {
-                        Ok(map_lit) => slices::go_to_rust_map(&map_lit),
-                        Err(_) => emit_todo("unsupported Go form"),
-                    }
-                }
-            }
-        }
+        Expr::Verbatim(_) => emit_todo("unsupported Go form"),
         _                  => emit_todo("unsupported Go form"),
     }
 }
