@@ -1,6 +1,6 @@
 //! Go slice and map literal parsing utilities.
 #![allow(dead_code)]
-use super::go_to_rust;
+use super::expr::go_to_rust;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;

@@ -1,4 +1,6 @@
-use super::go_to_rust;
+use super::expr::go_to_rust;
+use super::parsing::{GoFnInputs, GoFnOutput};
+use super::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
@@ -7,7 +9,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{Expr, Ident};
-use super::{GoFnInputs, GoFnOutput, map_go_types};
+
+use syn::fold::Fold;
 
 /// Receiver parsing: (name Type) or (name *Type) where * means pointer receiver
 pub(crate) struct Receiver {
@@ -188,7 +191,7 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
             for stm in &parsed.stmts {
                 match stm {
                     GoStmt::Expr(expr) => {
-                        let renamed = replace_receiver(expr, &recv_name);
+                        let renamed = replace_receiver(expr.clone(), &recv_name);
                         let transpiled = go_to_rust(&renamed);
                         stmts.push(transpiled);
                     }
@@ -207,235 +210,74 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
     }
 }
 
-/// Replace all occurrences of `receiver_name` (as a path or field base)
-/// with `self` in a Go expression AST. This operates on the RAW Go AST
-/// (syn::Expr), producing a new syn::Expr where all receiver references
-/// have been renamed to "self". The result can then be passed to `go_to_rust`
-/// for full Go→Rust transpilation.
-pub(crate) fn replace_receiver(expr: &Expr, recv_name: &Ident) -> Expr {
-    match expr {
-        Expr::Field(f) => {
-            if let Expr::Path(ref base_path) = *f.base
-                && base_path.path.is_ident(recv_name) {
-                // f.recv_fieldname  →  self.fieldname
-                let member = f.member.clone();
-                return syn::parse_quote! { self.#member };
-            }
-            Expr::Field(syn::ExprField {
-                attrs: Vec::new(),
-                base: Box::new(replace_receiver(&f.base, recv_name)),
-                dot_token: f.dot_token,
-                member: f.member.clone(),
-            })
-        }
-        Expr::Binary(b) => {
-            Expr::Binary(syn::ExprBinary {
-                attrs: Vec::new(),
-                left: Box::new(replace_receiver(&b.left, recv_name)),
-                op: b.op,
-                right: Box::new(replace_receiver(&b.right, recv_name)),
-            })
-        }
-        Expr::Unary(u) => {
-            Expr::Unary(syn::ExprUnary {
-                attrs: Vec::new(),
-                op: u.op,
-                expr: Box::new(replace_receiver(&u.expr, recv_name)),
-            })
-        }
-        Expr::Call(c) => {
-            Expr::Call(syn::ExprCall {
-                attrs: Vec::new(),
-                func: Box::new(replace_receiver(&c.func, recv_name)),
-                paren_token: c.paren_token,
-                args: c.args.clone(),
-            })
-        }
-        Expr::MethodCall(mc) => {
-            Expr::MethodCall(syn::ExprMethodCall {
-                attrs: Vec::new(),
-                receiver: Box::new(replace_receiver(&mc.receiver, recv_name)),
-                dot_token: mc.dot_token,
-                method: mc.method.clone(),
-                turbofish: mc.turbofish.clone(),
-                paren_token: mc.paren_token,
-                args: mc.args.clone(),
-            })
-        }
-        Expr::Index(i) => {
-            Expr::Index(syn::ExprIndex {
-                attrs: Vec::new(),
-                expr: Box::new(replace_receiver(&i.expr, recv_name)),
-                bracket_token: i.bracket_token,
-                index: Box::new(replace_receiver(&i.index, recv_name)),
-            })
-        }
-        Expr::Array(a) => {
-            Expr::Array(syn::ExprArray {
-                attrs: Vec::new(),
-                bracket_token: a.bracket_token,
-                elems: a.elems.iter().map(|e| replace_receiver(e, recv_name)).collect(),
-            })
-        }
-        Expr::Tuple(t) => {
-            Expr::Tuple(syn::ExprTuple {
-                attrs: Vec::new(),
-                paren_token: t.paren_token,
-                elems: t.elems.iter().map(|e| replace_receiver(e, recv_name)).collect(),
-            })
-        }
-        Expr::Cast(c) => {
-            Expr::Cast(syn::ExprCast {
-                attrs: Vec::new(),
-                expr: Box::new(replace_receiver(&c.expr, recv_name)),
-                as_token: c.as_token,
-                ty: c.ty.clone(),
-            })
-        }
-        Expr::Paren(p) => {
-            Expr::Paren(syn::ExprParen {
-                attrs: Vec::new(),
-                expr: Box::new(replace_receiver(&p.expr, recv_name)),
-                paren_token: p.paren_token,
-            })
-        }
-        Expr::Group(g) => {
-            Expr::Group(syn::ExprGroup {
-                attrs: Vec::new(),
-                expr: Box::new(replace_receiver(&g.expr, recv_name)),
-                group_token: g.group_token,
-            })
-        }
-        Expr::Assign(a) => {
-            Expr::Assign(syn::ExprAssign {
-                attrs: Vec::new(),
-                left: Box::new(replace_receiver(&a.left, recv_name)),
-                eq_token: a.eq_token,
-                right: Box::new(replace_receiver(&a.right, recv_name)),
-            })
-        }
-        Expr::Path(p) => {
-            if p.path.is_ident(recv_name) {
-                Expr::Path(syn::ExprPath {
-                    attrs: Vec::new(),
-                    qself: None,
-                    path: syn::Path::from(Ident::new("self", proc_macro2::Span::call_site())),
-                })
-            } else {
-                expr.clone()
-            }
-        }
-        Expr::Lit(_l) => expr.clone(),
-        Expr::Range(r) => Expr::Range(syn::ExprRange {
-            attrs: Vec::new(),
-            start: r.start.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
-            end: r.end.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
-            limits: r.limits,
-        }),
-        Expr::Break(b) => {
-            Expr::Break(syn::ExprBreak {
-                attrs: Vec::new(),
-                break_token: b.break_token,
-                label: b.label.clone(),
-                expr: b.expr.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
-            })
-        }
-        Expr::Return(re) => {
-            Expr::Return(syn::ExprReturn {
-                attrs: Vec::new(),
-                return_token: re.return_token,
-                expr: re.expr.as_ref().map(|e| Box::new(replace_receiver(e, recv_name))),
-            })
-        }
-        Expr::If(i) => {
-            Expr::If(syn::ExprIf {
-                attrs: Vec::new(),
-                if_token: i.if_token,
-                cond: Box::new(replace_receiver(&i.cond, recv_name)),
-                then_branch: i.then_branch.clone(),
-                else_branch: i.else_branch.as_ref().map(|(e, block)| (*e, Box::new(replace_receiver(block, recv_name)))),
-            })
-        }
-        Expr::While(w) => {
-            Expr::While(syn::ExprWhile {
-                attrs: Vec::new(),
-                label: w.label.clone(),
-                while_token: w.while_token,
-                cond: Box::new(replace_receiver(&w.cond, recv_name)),
-                body: w.body.clone(),
-            })
-        }
-        Expr::Loop(l) => {
-            Expr::Loop(syn::ExprLoop {
-                attrs: Vec::new(),
-                label: l.label.clone(),
-                loop_token: l.loop_token,
-                body: l.body.clone(),
-            })
-        }
-        Expr::ForLoop(f) => {
-            Expr::ForLoop(syn::ExprForLoop {
-                attrs: Vec::new(),
-                label: f.label.clone(),
-                for_token: f.for_token,
-                in_token: f.in_token,
-                pat: f.pat.clone(),
-                expr: Box::new(replace_receiver(&f.expr, recv_name)),
-                body: f.body.clone(),
-            })
-        }
-        Expr::Block(b) => {
-            let new_stmts: Vec<syn::Stmt> = b.block.stmts.iter().map(|stm| {
-                match stm {
-                    syn::Stmt::Expr(v, s) => syn::Stmt::Expr(*Box::new(replace_receiver(v, recv_name)), *s),
-                    syn::Stmt::Local(l) => syn::Stmt::Local(replace_receiver_local(l, recv_name)),
-                    other => other.clone(),
-                }
-            }).collect();
-            Expr::Block(syn::ExprBlock {
-                attrs: Vec::new(),
-                label: b.label.clone(),
-                block: syn::parse_quote!({ #(#new_stmts);* }),
-            })
-        }
-        Expr::Let(l) => {
-            Expr::Let(syn::ExprLet {
-                attrs: Vec::new(),
-                let_token: l.let_token,
-                pat: l.pat.clone(),
-                eq_token: l.eq_token,
-                expr: Box::new(replace_receiver(&l.expr, recv_name)),
-            })
-        }
-        // All other expression types pass through unchanged
-        _ => expr.clone(),
-    }
-}
-
-/// Replace receiver references in a `syn::Local` (short variable declaration).
-pub(crate) fn replace_receiver_local(local: &syn::Local, recv_name: &Ident) -> syn::Local {
-    let attrs: Vec<syn::Attribute> = Vec::new();
-    let let_token = local.let_token;
-    let pat = local.pat.clone();
-    let semi_token = local.semi_token;
-
-    let init = match &local.init {
-        Some(init) => {
-            let expr = replace_receiver(&init.expr, recv_name);
-            Some(syn::LocalInit {
-                expr: Box::new(expr),
-                eq_token: init.eq_token,
-                diverge: init.diverge.clone(),
-            })
-        }
-        None => None,
+/// Replace receiver name with `self` in a Go expression.
+///
+/// Uses `syn::fold::Fold` to walk the AST tree and replace:
+/// - `recv_name` → `self` (path)
+/// - `recv_name.field` → `self.field` (field access)
+/// - `recv_name.method()` → `self.method()` (method call)
+pub(crate) fn replace_receiver(expr: Expr, recv_name: &Ident) -> Expr {
+    let mut replacer = ReceiverReplacer {
+        recv_name: recv_name.clone(),
     };
+    replacer.fold_expr(expr)
+}
 
-    syn::Local {
-        attrs,
-        let_token,
-        pat,
-        init,
-        semi_token,
+/// A `syn::fold::Fold` visitor that replaces the receiver name with `self`.
+struct ReceiverReplacer {
+    recv_name: Ident,
+}
+
+impl Fold for ReceiverReplacer {
+    fn fold_expr(&mut self, expr: Expr) -> Expr {
+        match expr {
+            Expr::Path(p) => {
+                if p.path.is_ident(&self.recv_name) {
+                    // recv → self
+                    Expr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(Ident::new("self", proc_macro2::Span::call_site())),
+                    })
+                } else {
+                    // Path doesn't match — recurse into it via default impl
+                    Expr::Path(syn::ExprPath {
+                        attrs: p.attrs,
+                        qself: p.qself,
+                        path: syn::fold::fold_path(self, p.path),
+                    })
+                }
+            }
+            Expr::Field(f) => {
+                // Check if base is recv_name → self.member
+                let new_base = if let Expr::Path(base_path) = &*f.base
+                    && base_path.path.is_ident(&self.recv_name)
+                {
+                    // recv.field → self.field
+                    Box::new(syn::Expr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(Ident::new("self", proc_macro2::Span::call_site())),
+                    }))
+                } else {
+                    // Base doesn't match — recurse into it
+                    Box::new(self.fold_expr(*f.base))
+                };
+                Expr::Field(syn::ExprField {
+                    attrs: Vec::new(),
+                    base: new_base,
+                    dot_token: f.dot_token,
+                    member: f.member,
+                })
+            }
+            other => syn::fold::fold_expr(self, other),
+        }
+    }
+
+    fn fold_local(&mut self, local: syn::Local) -> syn::Local {
+        syn::fold::fold_local(self, local)
     }
 }
+
+
+// Old match body removed — replaced by ReceiverReplacer using syn::fold::Fold
