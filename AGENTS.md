@@ -30,10 +30,69 @@ consumer's crate.
 ## Running
 
 ```bash
-cargo test   # → 4 tests (go! function & receiver tests)
+cargo test   # → 51 tests (go! transpilation verify + functional runtime tests)
 cargo run -p gourd  # → demo binary output
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```
+
+## `verify_rust_output` — compile-time transpilation verification
+
+The `#[verify_rust_output({ expected_rust })]` attribute macro applies to any `go!` block to **assert at compile time** that the transpiled output matches the expected Rust tokens. It lives in `gourd-codegen/src/lib.rs` and delegates to `gourd_codegen_core::verify_short()`.
+
+### Usage
+
+```rust
+use gourd_codegen::go;
+
+// Apply the attribute BEFORE the go! block
+#[verify_rust_output({
+    fn go_add(n: i32) -> i32 {
+        n + 1
+    }
+})]
+go! {
+    func goAdd(n int) int {
+        n + 1
+    }
+}
+```
+
+The brace group `{ ... }` contains the **expected Rust tokens** — exactly what the transpiler should emit. If the transpiled output doesn't match, compilation fails with a `compile_error!` showing expected vs actual.
+
+### How it works
+
+1. The attribute macro receives the expected tokens from its brace-group input.
+2. It extracts the `go! { ... }` body from the item following the attribute.
+3. It transpiles the Go body using `transpile_go()`.
+4. It normalizes both expected and actual token streams (collapsing whitespace, normalizing `::` paths).
+5. If normalized tokens match → compilation proceeds (the original `go!` input is passed through).
+6. If they differ → a `compile_error!` is emitted with the expected and actual token lists.
+
+### Important details
+
+- The proc-macro **normalizes tokens** for comparison, so you should write the expected output using standard Rust syntax and the normalizer handles whitespace/path normalization.
+- Go-style statement separators (`;`) appear in the actual output from the transpiler. These separators are Go-to-Rust translation artifacts — the expected output must include them to match.
+- Paths like `String::from` may normalize to `::std::string::String::from` in the actual output. The expected block must use the same form.
+- If the expected tokens are empty (e.g., `#[verify_rust_output({})]`), verification is skipped and the block passes through unmodified — use this to get compile errors for a specific block without breaking the build.
+
+### Common gotchas when writing expected output
+
+| Pitfall | Fix |
+|---------|-----|
+| Missing `; ;` Go-style separators | Add double semicolons where the transpiler emits them (between statements) |
+| `String::from(...)` vs `::std::string::String::from(...)` | Use the fully-qualified form in expected output |
+| `vec![1,2,3]` vs `vec ! [ 1 , 2 , 3 ]` | The normalizer handles this — just write normal Rust |
+| Multiple mismatch errors on compile | Fix one block at a time; errors are independent per block |
+
+### Pattern for adding verify to new `go!` blocks
+
+1. Add `use gourd_codegen::{go, verify_rust_output};` to the test file.
+2. Place `#[verify_rust_output({ /* dummy */ })]` above the `go!` block.
+3. Run `cargo test` — the dummy (being a comment) produces empty expected tokens, so verification is skipped. This lets you check the block compiles and runs functionally.
+4. Replace `/* dummy */` with `VERIFY_MISMATCH` (a single identifier that will never match).
+5. Run `cargo test` — the mismatch error shows the actual transpiled output in the `actual:` line.
+6. Copy the actual output back as the expected tokens (rewriting it in readable Rust form).
+7. Re-run `cargo test` — if it compiles, the verify passes.
 
 ## RFCs
 
