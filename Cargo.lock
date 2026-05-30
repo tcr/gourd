@@ -13,6 +13,16 @@ dependencies = [
 name = "gourd-codegen"
 version = "0.1.0"
 dependencies = [
+ "gourd-codegen-core",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "gourd-codegen-core"
+version = "0.1.0"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn",

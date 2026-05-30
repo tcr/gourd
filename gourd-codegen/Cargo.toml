@@ -7,6 +7,11 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full", "fold"] }
+gourd-codegen-core = { path = "../gourd-codegen-core" }
 quote = "1"
+proc-macro2 = "1"
+
+[dev-dependencies]
+gourd-codegen-core = { path = "../gourd-codegen-core" }
+syn = { version = "2", features = ["full"] }
 proc-macro2 = "1"

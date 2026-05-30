@@ -1,29 +1,70 @@
-use gourd_codegen::go;
+use gourd_codegen::{go, verify_rust_output};
 
 // ── Basic function: no params, return value ─────────────────────────
+#[verify_rust_output({
+    fn goAdd() -> i32 {
+        return 42
+    }
+})]
 go! {
-    fn go_add() -> i32 {
-        42
+    func goAdd() int {
+        return 42
     }
 }
 
 // ── Function with mapped parameter type names ───────────────────────
+#[verify_rust_output({
+    fn goSum(a: i32, b: i32) -> i32 {
+        a + b
+    }
+})]
 go! {
-    fn go_sum(a: i32, b: i32) -> i32 {
+    func goSum(a int, b int) int {
         a + b
     }
 }
 
-// ── Function with internal (returns), ───────────────────────────────
-go! {
-    fn go_abs(n: i32) -> i32 {
+// ── Verify example: compile-time check of transpilation output ───────
+#[verify_rust_output({
+    fn goAbs(n: i32) -> i32 {
         let mut ret = n;
         if n < 0 {
-            ret = -n;
+            ret = -ret
         }
-        ret
+        return ret
+    }
+})]
+go! {
+    func goAbs(n int) int {
+        ret := n
+        if n < 0 {
+            ret = -ret
+        }
+        return ret
     }
 }
+
+// NOTE: This WOULD fail compilation (intentionally commented out):
+// Uncomment to see a compile_error showing the expected vs actual mismatch:
+// #[gourd_codegen::go_verify({
+//     fn go_abs(n: i32) -> i32 {
+//         let mut ret = n;
+//         if n < 0 {
+//             ret = 0;  // Wrong: should be -n
+//         }
+//         ret
+//     }
+// })]
+// go! {
+//     fn go_abs(n int) -> i32 {
+//         let mut ret = n;
+//         if n < 0 {
+//             ret = -n;
+//         }
+//         ret
+//     }
+// }
+
 
 // ── Boolean return ─────────────────────────────────────────────────
 go! {
@@ -69,19 +110,19 @@ go! {
 
 #[test]
 fn test_fn_return() {
-    assert_eq!(go_add(), 42);
+    assert_eq!(goAdd(), 42);
 }
 
 #[test]
 fn test_fn_with_params() {
-    assert_eq!(go_sum(10, 20), 30);
+    assert_eq!(goSum(10, 20), 30);
 }
 
 #[test]
 fn test_fn_if_return() {
-    assert_eq!(go_abs(-5), 5);
-    assert_eq!(go_abs(3), 3);
-    assert_eq!(go_abs(0), 0);
+    assert_eq!(goAbs(-5), 5);
+    assert_eq!(goAbs(3), 3);
+    assert_eq!(goAbs(0), 0);
 }
 
 #[test]
