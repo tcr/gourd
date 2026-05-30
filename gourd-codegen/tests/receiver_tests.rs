@@ -1,17 +1,23 @@
-use gourd_codegen::go;
+use gourd_codegen::{go, verify_rust_output};
 
+
+#[verify_rust_output({ struct Foo { pub x : i32 } })]
 go! {
     struct Foo {
         x int
     }
 }
 
+
+#[verify_rust_output({ impl Foo { fn get ( & self , ) - > i32 { self . x } } })]
 go! {
     func (f Foo) get() int {
         f.x
     }
 }
 
+
+#[verify_rust_output({ impl Foo { fn add ( & mut self , z : i32 ) - > i32 { self . x = self . x + z ; self . x } } })]
 go! {
     func (f *Foo) add(z int) int {
         f.x = f.x + z
@@ -19,12 +25,16 @@ go! {
     }
 }
 
+
+#[verify_rust_output({ impl Foo { fn double ( & mut self , ) - > i32 { self . x * 2 } } })]
 go! {
     func (f *Foo) double() int {
         f.x * 2
     }
 }
 
+
+#[verify_rust_output({ impl Foo { fn scale ( & self , m : i32 ) - > i32 { self . x * m } } })]
 go! {
     func (f Foo) scale(m int) int {
         f.x * m
