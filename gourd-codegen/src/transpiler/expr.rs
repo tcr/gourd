@@ -48,12 +48,39 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
     }
 }
 
+/// Expression transpilation for Rust **match patterns**.
+///
+/// Unlike `go_to_rust`, this keeps string literals as `&str` patterns
+/// (raw `"..."` literal) instead of wrapping them in `String::from(...)`,
+/// because Rust match arms require patterns, not expressions.
+pub fn go_to_rust_pattern(input: &Expr) -> TokenStream {
+    match input {
+        Expr::Lit(e)        => transpile_lit_pattern(e),
+        Expr::Path(e)       => transpile_path(e),
+        Expr::Paren(e)      => go_to_rust_pattern(&e.expr),
+        Expr::Group(e)      => go_to_rust_pattern(&e.expr),
+        Expr::Tuple(e)      => transpile_tuple(e),
+        Expr::Verbatim(tokens) => transpile_verbatim(tokens),
+        _                   => emit_todo("unsupported match pattern"),
+    }
+}
+
+
 // ─── Individual handlers ───────────────────────────────────────────────
 
 fn transpile_lit(input: &syn::ExprLit) -> TokenStream {
     let lit = &input.lit;
     match lit {
         syn::Lit::Str(s) => quote! { ::std::string::String::from(#s) },
+        _                => quote! { #lit },
+    }
+}
+
+/// Pattern variant: keep string literals as `&str` patterns.
+pub fn transpile_lit_pattern(input: &syn::ExprLit) -> TokenStream {
+    let lit = &input.lit;
+    match lit {
+        syn::Lit::Str(s) => quote! { #s },  // &str pattern, not String::from
         _                => quote! { #lit },
     }
 }

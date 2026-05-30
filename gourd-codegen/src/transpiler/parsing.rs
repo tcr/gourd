@@ -104,21 +104,40 @@ impl Parse for Switch {
                         brace_content.parse::<syn::Ident>()?;
 
                         let mut exprs = Vec::new();
-                        // Parse comma-separated expressions until `:`
-                        loop {
-                            if brace_content.peek(syn::token::Colon) {
-                                break;
-                            }
-                            let expr: Expr = brace_content.parse()?;
-                            exprs.push(expr);
-                            if brace_content.peek(syn::token::Comma) {
-                                let _: syn::token::Comma = brace_content.parse()?;
+                        // Parse single case expression.
+                        // Multi-expression cases (`case 1, 2:`) would require special
+                        // handling because syn's `Expr::parse` panics on comma-sep
+                        // patterns (match-arm parsing). Emit a compile_error for now.
+                        if brace_content.peek(syn::token::Colon) {
+                            // Empty case — treat as default
+                        } else {
+                            // Parse literal or path
+                            let fork = brace_content.fork();
+                            if fork.peek(syn::Lit) {
+                                let lit: syn::Lit = fork.parse()?;
+                                brace_content.advance_to(&fork);
+                                exprs.push(Expr::Lit(syn::ExprLit {
+                                    attrs: Vec::new(),
+                                    lit,
+                                }));
+                            } else if fork.peek(syn::Ident) {
+                                let path: syn::Path = fork.parse()?;
+                                brace_content.advance_to(&fork);
+                                exprs.push(Expr::Path(syn::ExprPath {
+                                    attrs: Vec::new(),
+                                    qself: None,
+                                    path,
+                                }));
                             } else {
-                                break;
+                                // Unsupported expression — emit compile_error
+                                let rest = brace_content.to_string();
+                                return Err(syn::Error::new(
+                                    brace_content.span(),
+                                    format!("TODO: transpile case expression: {}", rest),
+                                ));
                             }
                         }
-
-                        // Consume the colon
+                        // Consume the case colon
                         let _: syn::token::Colon = brace_content.parse()?;
 
                         // Parse body statements

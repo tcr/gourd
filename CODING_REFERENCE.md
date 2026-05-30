@@ -69,6 +69,44 @@ quote! { {} #snippet };
 
 ## Rust Syntax Gotchas (syn / Rust)
 
+### Switch expressions → match patterns vs body expressions
+
+Go `switch` statements can have two roles for their case expressions:
+
+1. **Match patterns** (selector present): `case 1, 2: "one_or_two"`
+2. **Boolean conditions** (no selector): `case ok: "ok"`
+
+For **match patterns**, use `go_to_rust_pattern()` which keeps string
+literals as `&str` patterns (`"..."`) instead of wrapping them in
+`String::from(...)`. Rust match arms require patterns, not expressions.
+
+For **body expressions**, use `go_to_rust()` which wraps strings in
+`::std::string::String::from(...)` to satisfy type requirements.
+
+```rust
+// Pattern case expressions: go_to_rust_pattern(expr)
+// Body expressions: go_to_rust(expr)
+// Selector: just the identifier via go_to_rust(switch.selector)
+```
+
+### No-selector switch → if-else chain
+
+A Go `switch` without a selector (`switch { case ok: ... }`) has
+no selector expression — case expressions are boolean conditions.
+Transpile to a connected `if/else if/else` chain:
+
+```rust
+if first_cond { body } else if second_cond { body } else { default }
+```
+
+Build by:
+1. First case → initial `if`
+2. Subsequent cases → `else if`
+3. Default → final `else`
+
+The whole chain must be a **single expression** that returns the body
+value — do NOT emit independent `if` blocks.
+
 ### `syn::Type` does NOT implement `Debug` or `Display`
 
 ```rust

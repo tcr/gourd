@@ -3,7 +3,7 @@
 //! Converts Go function declarations (`fn name() { ... }`) and struct
 //! declarations (`struct Name { field type }`) into Rust.
 
-use super::expr::go_to_rust;
+use super::expr::{go_to_rust, go_to_rust_pattern};
 use super::parsing::{go_stmt_to_rust, GoFn, GoStruct, Switch};
 use super::types::map_go_types;
 use proc_macro2::TokenStream;
@@ -82,9 +82,8 @@ pub(crate) fn transpile_switch(switch: &Switch) -> TokenStream {
             continue;
         }
 
-        // Each case expression becomes a pattern in Rust match
-        // Multiple expressions in one case are comma-separated patterns
-        let pattern: Vec<_> = case.exprs.iter().map(|e| go_to_rust(e)).collect();
+        // Case expressions become match patterns (string literals stay as &str)
+        let pattern: Vec<_> = case.exprs.iter().map(|e| go_to_rust_pattern(e)).collect();
         let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
 
         // Single or multi-expression case
@@ -99,12 +98,57 @@ pub(crate) fn transpile_switch(switch: &Switch) -> TokenStream {
         arms.push(quote! { _ => { #(#default_body);* } });
     }
 
-    // Build selector
-    let selector = switch.selector.as_ref()
-        .map(|s| go_to_rust(s))
-        .unwrap_or_else(|| quote! { () });
+    // When there's no selector, use if-else chain (common for bool switches)
+    if switch.selector.is_none() {
+        // Build if-else chain: `if cond { body } else if cond { body } else { default }`
+        if switch.cases.is_empty() && switch.default_stmts.is_empty() {
+            return quote! { () };
+        }
 
-    quote! { match #selector { #(#arms),* } }
+        // Handle the first case as the initial `if` (no `else` prefix)
+        if !switch.cases.is_empty() {
+            let first_case = &switch.cases[0];
+            let first_conds: Vec<_> = first_case.exprs.iter().map(|e| go_to_rust(e)).collect();
+            let first_body: Vec<_> = first_case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+            let mut chain = quote! { if #(#first_conds)&&* { #(#first_body);* } };
+
+            // Subsequent cases become `else if`
+            for case in switch.cases.iter().skip(1) {
+                if case.exprs.is_empty() {
+                    continue;
+                }
+                let conds: Vec<_> = case.exprs.iter().map(|e| go_to_rust(e)).collect();
+                let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+                chain.extend(quote! { else if #(#conds)&&* { #(#body);* } });
+            }
+
+            // Default body as final `else`
+            if !switch.default_stmts.is_empty() {
+                let default_body: Vec<_> = switch.default_stmts.iter()
+                    .map(|s| go_stmt_to_rust(s))
+                    .collect();
+                chain.extend(quote! { else { #(#default_body);* } });
+            }
+
+            return chain;
+        }
+
+        // No cases, only default
+        if !switch.default_stmts.is_empty() {
+            let db: Vec<_> = switch.default_stmts.iter()
+                .map(|s| go_stmt_to_rust(s))
+                .collect();
+            return quote! { #(#db);* };
+        }
+        quote! { () }
+    } else {
+        // Build selector
+        let selector = switch.selector.as_ref()
+            .map(|s| go_to_rust(s))
+            .unwrap_or_else(|| quote! { () });
+
+        quote! { match #selector { #(#arms),* } }
+    }
 }
 
 /// Top-level: parse and transpile a Go struct declaration to Rust.
