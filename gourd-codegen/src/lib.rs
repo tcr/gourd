@@ -21,6 +21,9 @@ pub fn go(input: TokenStream) -> TokenStream {
                     "struct" => {
                         transpiler::go_to_rust_struct(tokens).into()
                     }
+                    "switch" => {
+                        transpiler::go_to_rust_switch(tokens).into()
+                    }
                     "func" | "fn" => {
                         let mut iter2 = tokens.clone().into_iter().skip(1);
                         if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {

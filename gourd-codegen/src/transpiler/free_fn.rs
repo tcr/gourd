@@ -3,7 +3,8 @@
 //! Converts Go function declarations (`fn name() { ... }`) and struct
 //! declarations (`struct Name { field type }`) into Rust.
 
-use super::parsing::{GoFn, GoStruct};
+use super::expr::go_to_rust;
+use super::parsing::{go_stmt_to_rust, GoFn, GoStruct, Switch};
 use super::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -60,6 +61,50 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
         }
         Err(e) => e.to_compile_error(),
     }
+}
+
+/// Top-level: parse and transpile a Go switch statement to Rust.
+pub fn go_to_rust_switch(input: TokenStream) -> TokenStream {
+    match syn::parse2::<Switch>(input) {
+        Ok(switch) => transpile_switch(&switch),
+        Err(e) => e.to_compile_error(),
+    }
+}
+
+pub(crate) fn transpile_switch(switch: &Switch) -> TokenStream {
+    // Build match arms from case expressions
+    let mut arms = Vec::new();
+
+    for case in &switch.cases {
+        if case.exprs.is_empty() {
+            // Empty exprs means this is a default-like case
+            // but we handle default separately
+            continue;
+        }
+
+        // Each case expression becomes a pattern in Rust match
+        // Multiple expressions in one case are comma-separated patterns
+        let pattern: Vec<_> = case.exprs.iter().map(|e| go_to_rust(e)).collect();
+        let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+
+        // Single or multi-expression case
+        arms.push(quote! { #(#pattern),* => { #(#body);* } });
+    }
+
+    // Handle default case with `_` pattern
+    if !switch.default_stmts.is_empty() {
+        let default_body: Vec<_> = switch.default_stmts.iter()
+            .map(|s| go_stmt_to_rust(s))
+            .collect();
+        arms.push(quote! { _ => { #(#default_body);* } });
+    }
+
+    // Build selector
+    let selector = switch.selector.as_ref()
+        .map(|s| go_to_rust(s))
+        .unwrap_or_else(|| quote! { () });
+
+    quote! { match #selector { #(#arms),* } }
 }
 
 /// Top-level: parse and transpile a Go struct declaration to Rust.

@@ -126,6 +126,31 @@ ExprField {
 }
 ```
 
+### `Expr::parse` on `name { }` consumes the whole thing as verbatim
+
+When the input stream has an identifier followed by a brace group —
+like `x { }` — `input.parse::<Expr>()` will NOT parse just `x` and
+leave `{ }` in the stream. Instead, syn captures the entire `x { }`
+as `Expr::Verbatim` (it's not a valid Rust expression, so syn falls
+back to verbatim).
+
+This breaks subsequent `syn::braced!()` calls because the braces are
+gone. The fix: parse just a `Path` instead of `Expr` for identifiers
+that precede braces:
+
+```rust
+// WRONG — consumes `x { }` as Expr::Verbatim
+let selector: Expr = input.parse()?;
+
+// RIGHT — stops at `{` boundary
+let path: syn::Path = input.parse()?;
+Some(syn::Expr::Path(syn::ExprPath {
+    attrs: Vec::new(),
+    qself: None,
+    path,
+}))
+```
+
 ### `syn::parenthesized!` must be used with `in input` syntax
 
 ```rust
@@ -170,6 +195,40 @@ let _semi: token::Semi = input.parse()?;  // ✅ consume it
 ```
 
 The syntax `Token![;]` is deprecated / does not compile.
+
+### Reserved keywords in Go (`switch`, `case`, `default`) via `Ident::parse_any`
+
+Rust keywords like `switch`, `case`, and `default` are valid identifiers
+in Go but reserved in Rust. Use `Ident::parse_any` (from `syn::ext::IdentExt`)
+which treats reserved keywords as identifiers:
+
+```rust
+use syn::ext::IdentExt;
+let kw: Ident = input.call(Ident::parse_any)?;  // parses "switch" etc.
+let kw_str = kw.to_string();
+if kw_str == "case" { /* ... */ }
+```
+
+### Case parsing: colon delimiter with speculative expression parsing
+
+Go case lines look like `case 1, 2, 3:` — comma-separated expressions
+terminated by a colon. Parse them with a fork-to-colon loop:
+
+```rust
+loop {
+    if brace_content.peek(syn::token::Colon) {
+        break;  // reached `:` — stop
+    }
+    let expr: Expr = brace_content.parse()?;
+    exprs.push(expr);
+    if brace_content.peek(syn::token::Comma) {
+        let _: syn::token::Comma = brace_content.parse()?;
+    } else {
+        break;
+    }
+}
+let _: syn::token::Colon = brace_content.parse()?;  // consume `:`
+```
 
 ### `*Type` is NOT a valid Rust type string
 
@@ -343,7 +402,25 @@ Key files:
 | `gourd-codegen/src/transpiler.rs` | Go → Rust transpiler (~650 lines) |
 | `gourd-codegen/tests/receiver_tests.rs` | Receiver scope tests |
 
-Types in `transpiler.rs`:
+Types in `gourd-codegen/src/transpiler/` (split across files):
+
+### `parsing.rs` — AST types for Go declarations
+
+| Type | Purpose |
+|------|---------|
+| `GoStruct` | `struct Name { field type }` → `struct Name { pub field: Type }` |
+| `GoStructField` | Individual struct field: `{ name, ty }` |
+| `Receiver` | `(f Foo)` or `(f *Foo)` → `name, ty, pointer` |
+| `ReceiverFn` | `(receiver) name(params) output { body }` |
+| `GoStmt` | `Expr(Expr)` — parsed statement |
+| `GoParam` | `{ id, ty, slice_elem }` |
+| `GoFnOutput` | Return type(s) as `Vec<syn::Type>` |
+| `GoFnInputs` | Parsed parameters with Go-style grouping |
+| `GoFn` | Top-level function: `{ ident, generics, inputs, output, block }` |
+| `Switch` | `switch selector { case N: ... }` → `match selector { ... }` |
+| `SwitchCase` | `{ exprs, stmts }` — case expression list + body |
+
+### `free_fn.rs` — TokenStream entry points
 
 | Type | Purpose |
 |------|---------|
@@ -359,15 +436,17 @@ Types in `transpiler.rs`:
 
 Key functions:
 
-| Function | Line | Purpose |
+| Function | File | Purpose |
 |----------|------|---------|
-| `go_to_rust` | 15 | Master dispatch per `Expr` variant |
-| `go_to_rust_struct` | 604 | Struct decl → Rust struct |
-| `go_to_rust_receiver_fn` | 750 | Receiver fn → impl block |
-| `go_to_rust_fn` | 504 | Free function declaration |
-| `Receiver::from_tokens` | 635 | Parse `(name Type)` / `(name *Type)` |
-| `ReceiverFn::parse` | 687 | Full receiver function parsing |
-| `replace_receiver` | 831 | Rename receiver ident → `self` |
+| `go_stmt_to_rust` | `parsing.rs` | Dispatch parsed `GoStmt` variants → Rust |
+| `go_to_rust_struct` | `free_fn.rs` | Struct decl → Rust struct |
+| `go_to_rust_receiver_fn` | `funcs.rs` | Receiver fn → impl block |
+| `go_to_rust_fn` | `free_fn.rs` | Free function declaration |
+| `go_to_rust_switch` | `free_fn.rs` | Switch decl → Rust match |
+| `transpile_switch` | `free_fn.rs` | `Switch` AST → `match` expression |
+| `Receiver::from_tokens` | `funcs.rs` | Parse `(name Type)` / `(name *Type)` |
+| `ReceiverFn::parse` | `funcs.rs` | Full receiver function parsing |
+| `replace_receiver` | `funcs.rs` | Rename receiver ident → `self` |
 
 ---
 
@@ -421,6 +500,18 @@ array slice pointer type `&[T]` instead.
 |----|------|
 | `[]int` | `&[i32]` |
 | `a []int` | `a: &[i32]` |
+
+## Go Switch ↔ Rust Match
+
+| Go | Rust |
+|----|------|
+| `switch n { case 1: "one" case 2: "two" default: "other" }` | `match n { 1 => "one", 2 => "two", _ => "other" }` |
+
+Switch selectors are parsed as `Path` (not `Expr`) to avoid `x { }` being
+consumed as verbatim. Multiple case expressions become comma-separated
+match patterns.
+
+---
 
 ## Eval Code Quality (File/Function Length) via MCP
 

@@ -18,6 +18,7 @@ pub(crate) enum GoStmt {
     Expr(Expr),
     GoSlice(Vec<Expr>),
     GoMap(String, Option<syn::Type>, Option<syn::Type>, Vec<(Expr, Expr)>), // (ident, key_type, val_type, entries)
+    Switch(Switch),
 }
 
 pub(crate) struct GoBlock {
@@ -55,6 +56,117 @@ pub(crate) struct GoStructField {
     pub(crate) name: Ident,
     pub(crate) ty: syn::Type,
 }
+
+// ─── Switch parsing ────────────────────────────────────────────────────
+
+pub(crate) struct Switch {
+    pub(crate) selector: Option<Expr>,
+    pub(crate) cases: Vec<SwitchCase>,
+    pub(crate) default_stmts: Vec<GoStmt>,
+}
+
+pub(crate) struct SwitchCase {
+    pub(crate) exprs: Vec<Expr>,
+    pub(crate) stmts: Vec<GoStmt>,
+}
+
+impl Parse for Switch {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let _switch_kw: Ident = input.call(Ident::parse_any)?;
+
+        // Parse optional selector expression (stop at `{` boundary)
+        let selector = if input.peek(syn::token::Brace) {
+            None
+        } else {
+            // Parse just a Path to avoid `x { }` being consumed as verbatim
+            let path: syn::Path = input.parse()?;
+            Some(syn::Expr::Path(syn::ExprPath {
+                attrs: Vec::new(),
+                qself: None,
+                path,
+            }))
+        };
+
+        let brace_content;
+        let _brace = syn::braced!(brace_content in input);
+
+        let mut cases = Vec::new();
+        let mut default_stmts = Vec::new();
+
+        while !brace_content.is_empty() {
+            // Check for case keyword
+            let fork = brace_content.fork();
+            if fork.peek(syn::Ident) {
+                if let Ok(kw) = fork.parse::<syn::Ident>() {
+                    let kw_str = kw.to_string();
+                    if kw_str == "case" {
+                        // Parse case block
+                        brace_content.parse::<syn::Ident>()?;
+
+                        let mut exprs = Vec::new();
+                        // Parse comma-separated expressions until `:`
+                        loop {
+                            if brace_content.peek(syn::token::Colon) {
+                                break;
+                            }
+                            let expr: Expr = brace_content.parse()?;
+                            exprs.push(expr);
+                            if brace_content.peek(syn::token::Comma) {
+                                let _: syn::token::Comma = brace_content.parse()?;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Consume the colon
+                        let _: syn::token::Colon = brace_content.parse()?;
+
+                        // Parse body statements
+                        let mut body_stmts = Vec::new();
+                        while !brace_content.is_empty() && !brace_content.peek(syn::Ident) {
+                            let stmt_fork = brace_content.fork();
+                            if let Ok(expr) = stmt_fork.parse::<Expr>() {
+                                brace_content.advance_to(&stmt_fork);
+                                body_stmts.push(GoStmt::Expr(expr));
+                            } else {
+                                break;
+                            }
+                        }
+
+                        cases.push(SwitchCase { exprs, stmts: body_stmts });
+                        continue;
+                    } else if kw_str == "default" {
+                        // Parse default block
+                        brace_content.parse::<syn::Ident>()?;
+                        let _: syn::token::Colon = brace_content.parse()?;
+
+                        // Parse body statements
+                        let mut body_stmts = Vec::new();
+                        while !brace_content.is_empty() && !brace_content.peek(syn::Ident) {
+                            let stmt_fork = brace_content.fork();
+                            if let Ok(expr) = stmt_fork.parse::<Expr>() {
+                                brace_content.advance_to(&stmt_fork);
+                                body_stmts.push(GoStmt::Expr(expr));
+                            } else {
+                                break;
+                            }
+                        }
+
+                        default_stmts = body_stmts;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+
+        Ok(Switch { selector, cases, default_stmts })
+    }
+}
+
+// In Go, switch is a statement within a function body.
+// We represent it as a statement variant.
+
 
 // ─── Go parameter parsing (supports shorthand grouping) ────────────────
 
@@ -338,7 +450,20 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
             }
         }
 
-        // 3. Try standard expression parsing via speculative parse
+        // 3. Check for switch statement
+        let fork = brace_content.fork();
+        if fork.peek(syn::Ident) {
+            if let Ok(kw) = fork.parse::<syn::Ident>() {
+                let kw_str = kw.to_string();
+                if kw_str == "switch" {
+                    let parsed_switch = brace_content.parse::<Switch>()?;
+                    stmts.push(GoStmt::Switch(parsed_switch));
+                    continue;
+                }
+            }
+        }
+
+        // 4. Try standard expression parsing via speculative parse
         let fork = brace_content.fork();
         if let Ok(expr) = fork.parse::<Expr>() {
             brace_content.advance_to(&fork);
@@ -464,6 +589,9 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         }
         GoStmt::GoMap(ident, key_type, val_type, entries) => {
             go_stmt_to_rust_map(ident, key_type, val_type, entries)
+        }
+        GoStmt::Switch(switch) => {
+            super::free_fn::transpile_switch(switch)
         }
     }
 }
