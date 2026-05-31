@@ -200,9 +200,17 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
 
             let body: Box<syn::ExprBlock> = syn::parse_quote!({ #(#stmts);* });
 
+            // Build the parameter list: if there are additional params, emit
+            // `self_arg, ...params`. Otherwise just `self_arg` (no trailing
+            // comma — `fn get(&self,)` is not valid Rust).
+            let param_list = if all_params.is_empty() {
+                quote! { #self_arg }
+            } else {
+                quote! { #self_arg, #(#all_params),* }
+            };
             quote! {
                 impl #generics #struct_ty {
-                    fn #fn_name (#self_arg, #(#all_params),*) #output #body
+                    fn #fn_name (#param_list) #output #body
                 }
             }
         }

@@ -62,15 +62,17 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 ### How it works
 
 1. The attribute macro receives the expected tokens from its brace-group input.
-2. It extracts the `go! { ... }` body from the item following the attribute.
-3. It transpiles the Go body using `transpile_go()`.
-4. It normalizes both expected and actual token streams (collapsing whitespace, normalizing `::` paths).
-5. If normalized tokens match → compilation proceeds (the original `go!` input is passed through).
-6. If they differ → a `compile_error!` is emitted with the expected and actual token lists.
+2. It validates the expected tokens parse as a valid `syn::File` (i.e., valid Rust). If not, a `compile_error!` is emitted immediately, so you know your expected block is syntactically broken before comparing.
+3. It extracts the `go! { ... }` body from the item following the attribute.
+4. It transpiles the Go body using `transpile_go()`.
+5. It normalizes both expected and actual token streams (collapsing whitespace, normalizing `::` paths).
+6. If normalized tokens match → compilation proceeds (the original `go!` input is passed through).
+7. If they differ → a `compile_error!` is emitted with the expected and actual token lists.
 
 ### Important details
 
 - The proc-macro **normalizes tokens** for comparison, so you should write the expected output using standard Rust syntax and the normalizer handles whitespace/path normalization.
+- The expected block **must be valid Rust syntax**. If it doesn't parse as `syn::File`, a `compile_error!` is emitted before comparison, so you get a clear error about invalid Rust rather than a confusing mismatch.
 - Go-style statement separators (`;`) appear in the actual output from the transpiler. These separators are Go-to-Rust translation artifacts — the expected output must include them to match.
 - Paths like `String::from` may normalize to `::std::string::String::from` in the actual output. The expected block must use the same form.
 - If the expected tokens are empty (e.g., `#[verify_rust_output({})]`), verification is skipped and the block passes through unmodified — use this to get compile errors for a specific block without breaking the build.

@@ -2,7 +2,7 @@ use gourd_codegen::{go, verify_rust_output};
 
 
 #[verify_rust_output({ VERIFY_MISMATCH })]
-#[verify_rust_output({ fn go_minimal ( n : i32 ) - > String { match n { 1 = > { : : std : : string : : String : : from ( "one" ) } , 2 = > { : : std : : string : : String : : from ( "two" ) } , _ = > { : : std : : string : : String : : from ( "other" ) } } } })]
+#[verify_rust_output({ fn go_minimal(n: i32) -> String { match n { 1 => { ::std::string::String::from("one") } , 2 => { ::std::string::String::from("two") } , _ => { ::std::string::String::from("other") } } } })]
 go! {
     fn go_minimal(n int) string {
         switch n {

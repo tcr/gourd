@@ -112,6 +112,19 @@ pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStr
         return transpile_go(go_input);
     }
 
+    // Validate expected tokens as valid Rust by trying to parse them as syn::File.
+    // If they don't parse, emit a compile_error so the user knows the verify block
+    // contains invalid Rust syntax (not just a mismatch).
+    if syn::parse2::<syn::File>(expected_tokens.clone()).is_err() {
+        let expected_str = normalize_tokens(&expected_tokens).join(" ");
+        return quote::quote! {
+            compile_error!(concat!(
+                "`verify_rust_output` expected block is not valid Rust:\n",
+                "  ", #expected_str
+            ))
+        };
+    }
+
     // Transpile the Go block and compare
     let transpiled = transpile_go(go_input);
     let expected_normalized = normalize_tokens(&expected_tokens);
