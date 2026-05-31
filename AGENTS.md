@@ -96,6 +96,76 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 6. Copy the actual output back as the expected tokens (rewriting it in readable Rust form).
 7. Re-run `cargo test` — if it compiles, the verify passes.
 
+## Cross-Language Validation Pattern (the `gourd-check` pattern)
+
+When adding a new language mode or validating transpiled output, **always use `gourd-check`** as the standalone pre-compilation validator. This pattern bypasses the `proc_macro` token stream limitation entirely by operating directly on raw source files.
+
+### When to use
+
+- Adding a new language mode (e.g. Go → a new target language)
+- Validating Go syntax inside `go! { ... }` blocks
+- Validating transpiled Rust output for correctness
+- Building any feature that requires source-level code inspection before macro expansion
+
+### How it works
+
+```
+Source file (.rs)
+    │
+    ▼
+[scanner.rs] Brace-matching → extracts go! { ... } raw text
+    │
+    ▼
+[validator.rs] Writes temp harness + runs real compiler
+    │                    │
+    │              go build  (for Go code)
+    │              cargo check (for Rust code)
+    │
+    ▼
+[report.rs]   Formats errors: file:line, message, code excerpt
+```
+
+### Key design decisions
+
+1. **Pre-macro expansion**: Operates on source files directly, not `proc_macro::TokenStream`. This gives access to exact formatting — no `quote!` spacing artifacts.
+2. **Brace-matching, not regex**: Recursively tracks brace depth to correctly extract nested `go! { if { ... } }` blocks.
+3. **Per-block temp dirs**: Each block validated in its own `tempfile::tempdir()` to avoid file conflicts.
+4. **Real compilers only**: Uses `go build` and `cargo check` — no custom parsers. Errors are always accurate.
+
+### Usage
+
+```bash
+gourd-check [PATHS...]       # Scan files (default: current directory)
+gourd-check -g PATHS         # Go-only validation
+gourd-check -r PATHS         # Rust-only validation
+gourd-check -v 2 PATHS       # Verbose: show block details
+gourd-check --help           # Help
+```
+
+### Example output
+
+```
+gourd-codegen/tests/go_fn.rs:21
+    Go: main.go:14:9: a + b (value of type int) is not used
+         main.go:15:5: missing return
+    1 | func goSum(a int, b int) int {
+    2 |         a + b
+    3 |     }
+```
+
+### When the proc macro IS appropriate
+
+Use `proc_macro` only for the actual **transpilation** — when you need to transform tokens at compile time in the user's crate. Use `gourd-check` for **validation** — checking that extracted source text is syntactically/semantically correct.
+
+### Pitfalls
+
+| Pitfall | Solution |
+|---------|----------|
+| `proc_macro::TokenStream::to_string()` loses formatting | Use `gourd-check` — it reads raw source files |
+| Temp dir file conflicts between blocks | Use per-block temp dirs (`tempfile::tempdir()`) |
+| `quote!` spacing (`func hello ( ) int`) breaks Go parser | Don't use `quote!` for validation — use raw source text |
+| `compile_error!` inside macro items requires `;` | Emit `compile_error!` with proper semicolons |
+
 ## RFCs
 
 RFCs are now written *after the fact* to describe an implemented feature and its design decisions. RFCs are numbered sequentially relative to other RFCs in its folder.

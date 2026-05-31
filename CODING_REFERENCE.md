@@ -5,6 +5,74 @@ gathered from implementing Go → Rust transpilation.
 
 ---
 
+## Cross-Language Validation Pattern
+
+When adding a new language mode or validating transpiled output, use the
+**`gourd-check` standalone CLI** instead of trying to validate inside the
+`proc_macro`. This bypasses the `proc_macro` token stream limitation
+e entirely and gives access to exact source text.
+
+### Architecture
+
+```
+gourd-check/
+  src/
+    scanner.rs   # Brace-matching scanner (go! { ... } extraction)
+    validator.rs # go build / cargo check in temp dirs
+    report.rs    # Formatted error output
+    main.rs      # CLI (clap)
+```
+
+### Why not validate in the proc macro?
+
+| Issue | Proc Macro | gourd-check |
+|-------|-----------|-------------|
+| Source access | `TokenStream` only (no raw text) | Raw `.rs` files |
+| Formatting | `quote!` injects spaces (`func hello ( ) int`) | Preserved exactly |
+| Temp isolation | Shared mutable state | Per-block `tempfile::tempdir()` |
+| Errors | Custom error messages | Real compiler output |
+
+### When to use
+
+- Adding Go mode support (e.g. new type mappings)
+- Adding a new target language (e.g. Go → Python)
+- Validating that transpiled output is syntactically valid Rust
+- Pre-commit checks on test files
+
+### How to use
+
+```bash
+# Scan a single file
+./target/debug/gourd-check gourd-codegen/tests/go_fn.rs
+
+# Scan all tests
+./target/debug/gourd-check gourd-codegen/tests/
+
+# Verbose: show extracted blocks
+./target/debug/gourd-check -v 2 gourd-codegen/tests/go_fn.rs
+
+# Go-only mode
+./target/debug/gourd-check -g gourd-codegen/tests/
+```
+
+### The `gourd-check` workflow for new language features
+
+1. **Write test files** with the new language syntax inside `go! { ... }` blocks.
+2. **Run `gourd-check`** to validate: `./target/debug/gourd-check -v 2 tests/`
+3. **Iterate** on the transpiler until all blocks pass validation.
+4. **Add `verify_rust_output`** attributes to pin expected output.
+5. **Commit** — the proc macro compiles, the validator passes.
+
+### Example: Adding a new Go type
+
+1. Write a test: `go! { func foo(x int64) int64 { x } }`
+2. Run `gourd-check -v 2` — errors show Go validates OK.
+3. Run `cargo test` — check that the transpiler emits valid Rust.
+4. Add `#[verify_rust_output({ fn go_foo(x: i64) -> i64 { x } })]`.
+5. Re-run `cargo test` — verification passes.
+
+---
+
 ## Useful Patterns
 
 ### Speculative Parsing (fork/advance)

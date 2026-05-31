@@ -14,9 +14,21 @@ use proc_macro::TokenStream;
 ///   1. `func (recv Type) name() { ... }` → `impl Type { fn name(&self) { ... } }`
 ///   2. `struct Name { field type }` → `struct Name { pub field: Type }`
 ///   3. `func name() { ... }` → `fn name() { ... }`
+///
+/// **Semantic validation**: the input is validated against `go build` at compile
+/// time. If the Go code doesn't compile, a `compile_error!` is emitted.
 #[proc_macro]
 pub fn go(input: TokenStream) -> TokenStream {
     let tokens: proc_macro2::TokenStream = input.into();
+
+    // Semantic validation: check that the Go code compiles.
+    // If validation fails, emit a compile_error! instead of falling back.
+    if let Err(msg) = gourd_codegen_core::validate_go(&tokens) {
+        return quote::quote! {
+            compile_error!(concat!("invalid Go in `go!` block:\n  ", #msg))
+        }.into();
+    }
+
     gourd_codegen_core::transpile_go(tokens).into()
 }
 
@@ -32,6 +44,10 @@ pub fn go(input: TokenStream) -> TokenStream {
 /// ## Longer form
 ///
 /// `#[verify_rust_output(verify = { fn foo() -> i32 { 42 } })]` — explicit `verify =` key.
+///
+/// **Semantic validation**: the Go input is validated against `go build`
+/// and the transpiled Rust against `cargo check` before comparison.
+/// If either fails, a `compile_error!` is emitted.
 ///
 /// If the transpiled output doesn't match, compilation fails with
 /// a `compile_error!` showing the expected vs actual output.
