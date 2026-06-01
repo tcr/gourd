@@ -1,10 +1,18 @@
-# Gourd
+# 🍂 Gourd
 
-Transpiles inline Go declarations into valid Rust at compile time.
+> Write Go. Get Rust. At compile time. No runtime overhead.
 
-## Quick start
+Gourd is a compile-time Go-to-Rust transpiler that lets you write Go-style code inside `go!` blocks and get valid Rust output — zero runtime cost.
 
-Write Go-style code in a `go!` block and it becomes valid Rust:
+## Why Gourd?
+
+- **Zero runtime overhead** — Go code becomes Rust at compile time, not runtime
+- **Familiar syntax** — write Go declarations, get Rust implementations
+- **Type-safe** — Go types map directly to Rust equivalents (`int` → `i32`, `string` → `String`)
+- **Macro-powered** — no external build steps, no code generation tools
+- **Standalone validation** — `gourd-check` validates Go syntax before compilation
+
+## Quick Start
 
 ```rust
 use gourd::go;
