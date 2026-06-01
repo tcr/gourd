@@ -125,7 +125,8 @@ pub(crate) fn transpile_switch(switch: &Switch) -> TokenStream {
         let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
 
         // Single or multi-expression case
-        arms.push(quote! { #(#pattern),* => { #(#body);* } });
+        // Multi-expr: `case 1, 2, 3:` → `1 | 2 | 3 =>`
+        arms.push(quote! { #(#pattern)|* => { #(#body);* } });
     }
 
     // Handle default case with `_` pattern

@@ -23,7 +23,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             // Type conversions: `int(x)` → `(x as i32)`, etc.
             "int" | "int8" | "int16" | "int32" | "int64"
             | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" => {
-                let rust_cast = match name_str.as_str() {
+                let rust_cast_str = match name_str.as_str() {
                     "int" => "i32",
                     "int8" => "i8",
                     "int16" => "i16",
@@ -37,6 +37,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                     "uintptr" => "usize",
                     _ => unreachable!(),
                 };
+                let rust_cast: syn::Ident = syn::parse_str(rust_cast_str).unwrap();
                 return quote! { (#(#args),* as #rust_cast) };
             }
             "float32" => {
@@ -76,6 +77,9 @@ pub fn go_to_rust_macro(input: &ExprMacro) -> TokenStream {
 pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     let seq = super::dispatch::go_to_rust(&input.expr);
     let idx = super::dispatch::go_to_rust(&input.index);
+    // Index expressions need usize for Rust slices; if the index is i32 (Go int),
+    // cast it to usize automatically.
+    let idx = quote! { #idx as usize };
     quote! { #seq[ #idx ] }
 }
 

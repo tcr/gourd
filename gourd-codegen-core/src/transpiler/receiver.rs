@@ -20,47 +20,54 @@ pub(crate) struct Receiver {
 
 impl Parse for Receiver {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // First token: optional `*` followed by identifier (name) or just identifier.
-        let fork = input.fork();
-        let (is_ptr, name) = if fork.peek(syn::token::Star) {
-            let _star: syn::token::Star = fork.parse()?;
-            let name: Ident = fork.parse()?;
-            (true, name)
-        } else {
-            let name: Ident = fork.parse()?;
-            (false, name)
-        };
+        // Go receiver patterns:
+        //   (c Type)          — value receiver
+        //   (c *Type)         — pointer receiver with name
+        //   (*Type)           — pointer receiver without name
+        //   (Type)            — value receiver without name
 
-        // Check if the token after name is a type (not `)` or end of input)
-        // If it's a type, consume it and the name as a separate identifier.
-        // If not, the name IS the type.
-        if input.peek(syn::token::Star) {
-            // `*Type` pattern (single token with deref prefix)
+        // Peek at first token to distinguish patterns.
+        let fork = input.fork();
+        if fork.peek(syn::token::Star) {
+            // `*Type` pattern — pointer receiver, no separate name
             let _: syn::token::Star = input.parse()?;
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: true })
-        } else if input.peek(syn::Ident) {
-            // `name Type` pattern — the first ident was the name, second is type
-            // Already consumed name from input via fork;
-            // Consume the type from the real input
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: is_ptr })
-        } else if is_ptr {
-            // Just `*Type` — use a default name
             let ty = input.parse::<syn::Type>()?;
             Ok(Receiver {
                 name: Ident::new("recv", proc_macro2::Span::call_site()),
                 _ty: ty,
                 pointer: true,
             })
-        } else {
-            // Single identifier — that's the type (receiver name default)
-            let ty = input.parse::<syn::Type>()?;
+        } else if fork.peek(syn::token::Paren) {
+            // Parenthesized receiver — shouldn't happen inside receiver parsing,
+            // but handle gracefully
             Ok(Receiver {
                 name: Ident::new("recv", proc_macro2::Span::call_site()),
-                _ty: ty,
-                pointer: is_ptr,
+                _ty: input.parse::<syn::Type>()?,
+                pointer: false,
             })
+        } else {
+            // `name Type` or `name *Type` pattern
+            let name: Ident = input.parse()?;
+            if input.peek(syn::token::Star) {
+                // `name *Type` — pointer receiver with explicit name
+                let _: syn::token::Star = input.parse()?;
+                let ty = input.parse::<syn::Type>()?;
+                Ok(Receiver { name, _ty: ty, pointer: true })
+            } else if input.peek(syn::Ident) {
+                // `name Type` — value receiver with name
+                let ty = input.parse::<syn::Type>()?;
+                Ok(Receiver { name, _ty: ty, pointer: false })
+            } else {
+                // Just `name` — name IS the type
+                Ok(Receiver {
+                    name: name.clone(),
+                    _ty: syn::Type::Path(syn::TypePath {
+                        path: syn::Path::from(name),
+                        qself: None,
+                    }),
+                    pointer: false,
+                })
+            }
         }
     }
 }

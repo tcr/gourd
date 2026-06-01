@@ -22,6 +22,13 @@ pub(crate) enum GoStmt {
     GoMap(String, Option<Box<syn::Type>>, Option<Box<syn::Type>>, Vec<(Expr, Expr)>), // (ident, key_type, val_type, entries)
     GoReturn(Vec<Expr>),  // multi-return: `return a, b`
     Switch(Switch),
+    Continue,
+    While(GoWhile),
+}
+
+pub(crate) struct GoWhile {
+    pub cond: Expr,
+    pub body: GoBlock,
 }
 
 pub(crate) struct GoIf {
@@ -114,38 +121,46 @@ impl Parse for Switch {
                         // Parse case block
                         brace_content.parse::<syn::Ident>()?;
 
+                        // Parse case expressions (supports multi: `case 1, 2, 3:`)
+                        // Use fork-to-colon loop — stop at `:` or empty case
                         let mut exprs = Vec::new();
-                        // Parse single case expression.
-                        // Multi-expression cases (`case 1, 2:`) would require special
-                        // handling because syn's `Expr::parse` panics on comma-sep
-                        // patterns (match-arm parsing). Emit a compile_error for now.
-                        if brace_content.peek(syn::token::Colon) {
-                            // Empty case — treat as default
-                        } else {
+                        while !brace_content.peek(syn::token::Colon) && !brace_content.is_empty() {
+                            // Check for Go keywords that start new statements
+                            let kw_fork = brace_content.fork();
+                            if kw_fork.peek(syn::Ident) {
+                                let kw = kw_fork.parse::<syn::Ident>();
+                                if let Ok(kw) = kw {
+                                    let kw_str = kw.to_string();
+                                    if matches!(kw_str.as_str(),
+                                        "if" | "for" | "return" | "switch" | "case" | "default") {
+                                        break;
+                                    }
+                                }
+                            }
                             // Parse literal or path
-                            let fork = brace_content.fork();
-                            if fork.peek(syn::Lit) {
-                                let lit: syn::Lit = fork.parse()?;
-                                brace_content.advance_to(&fork);
+                            let case_fork = brace_content.fork();
+                            if case_fork.peek(syn::Lit) {
+                                let lit: syn::Lit = case_fork.parse()?;
+                                brace_content.advance_to(&case_fork);
                                 exprs.push(Expr::Lit(syn::ExprLit {
                                     attrs: Vec::new(),
                                     lit,
                                 }));
-                            } else if fork.peek(syn::Ident) {
-                                let path: syn::Path = fork.parse()?;
-                                brace_content.advance_to(&fork);
+                            } else if case_fork.peek(syn::Ident) {
+                                let path: syn::Path = case_fork.parse()?;
+                                brace_content.advance_to(&case_fork);
                                 exprs.push(Expr::Path(syn::ExprPath {
                                     attrs: Vec::new(),
                                     qself: None,
                                     path,
                                 }));
                             } else {
-                                // Unsupported expression — emit compile_error
-                                let rest = brace_content.to_string();
-                                return Err(syn::Error::new(
-                                    brace_content.span(),
-                                    format!("TODO: transpile case expression: {}", rest),
-                                ));
+                                // Stop at comma — handle multi-expression
+                                if brace_content.peek(syn::token::Comma) {
+                                    let _: syn::token::Comma = brace_content.parse()?;
+                                } else {
+                                    brace_content.parse::<proc_macro2::TokenTree>()?;
+                                }
                             }
                         }
                         // Consume the case colon
@@ -372,12 +387,27 @@ impl Parse for GoStruct {
         let content;
         let _brace = syn::braced!(content in input);
         let mut fields = Vec::new();
+        // Go struct fields: `name type` (space-separated, no commas).
         while !content.is_empty() {
             let name: Ident = content.parse()?;
             let ty: syn::Type = content.parse()?;
             fields.push(GoStructField { name, ty });
-            if !content.is_empty() {
-                let _comma: token::Comma = content.parse()?;
+            // Skip whitespace/newlines between fields. Use fork to peek first.
+            loop {
+                let f = content.fork();
+                match f.parse::<proc_macro2::TokenTree>() {
+                    Ok(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',' => {
+                        let _comma: token::Comma = content.parse()?;
+                        break;  // Found comma — done
+                    }
+                    // If it's whitespace/newline, consume it and continue
+                    Ok(proc_macro2::TokenTree::Punct(_)) => {
+                        content.parse::<proc_macro2::TokenTree>()?;
+                    }
+                    // Non-whitespace token (next field name) — stop skipping
+                    Ok(_) => break,
+                    Err(_) => break,
+                }
             }
         }
         Ok(GoStruct { ident, fields })
@@ -438,8 +468,58 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         return parse_go_return(input, stmts);
     }
 
+    // 6. Check for continue statement
+    if input.peek(syn::Ident) {
+        let cont_fork = input.fork();
+        if let Ok(kw) = cont_fork.parse::<syn::Ident>() {
+            if kw.to_string() == "continue" {
+                input.parse::<syn::Ident>()?; // consume 'continue'
+                stmts.push(GoStmt::Continue);
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+        }
+    }
+
+    // 7. Check for while loop: `while cond { body }`
+    // Note: `while` is a Rust keyword, so we use `Token![while]` not `Ident`
+    if input.peek(syn::token::While) {
+        let parsed_while = parse_go_while(input)?;
+        stmts.push(GoStmt::While(parsed_while));
+        return Ok(true);
+    }
+
     // No Go-specific statement matched
     Ok(false)
+}
+
+fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
+    // Consume 'while' keyword (it's a keyword, not an identifier)
+    let _: syn::token::While = input.parse()?;
+
+    // Parse condition
+    let cond = input.parse::<Expr>()?;
+
+    // Parse body block
+    let body_content;
+    let _brace = syn::braced!(body_content in input);
+
+    // Parse body statements
+    let mut body_stmts = Vec::new();
+    while !body_content.is_empty() {
+        if parse_go_special_stmt(&body_content, &mut body_stmts)? {
+            continue;
+        }
+        // Fall back to base parser
+        parse_base_stmt(&body_content, &mut body_stmts)?;
+    }
+
+    Ok(GoWhile {
+        cond,
+        body: GoBlock { stmts: body_stmts },
+    })
 }
 
 /// Handle Go-style `id := map[K]V{entries}` map literal declaration.
@@ -795,6 +875,15 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         }
         GoStmt::Switch(switch) => {
             super::free_fn::transpile_switch(switch)
+        }
+        GoStmt::Continue => {
+            quote! { continue }
+        }
+        GoStmt::While(while_stmt) => {
+            let cond = go_to_rust(&while_stmt.cond);
+            let body: Vec<_> = while_stmt.body.stmts.iter()
+                .map(|s| go_stmt_to_rust(s)).collect();
+            quote! { while #cond { #(#body);* } }
         }
     }
 }
