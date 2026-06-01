@@ -1,9 +1,11 @@
-pub mod expr;
-pub mod free_fn;
-pub mod funcs;
-pub mod parsing;
-pub mod types;
+//! Transpiler module.
+//!
+//! Re-exports from `gourd-codegen-core` — the proc-macro crate delegates
+//! all transpilation logic to the core crate to work around the
+//! proc-macro crate limitation (can't re-export non-proc-macro items).
 
-// Re-export the public API
-pub use free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
-
+pub use gourd_codegen_core::transpiler::{
+    free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch},
+    funcs::go_to_rust_receiver_fn,
+    transpile_go,
+};
