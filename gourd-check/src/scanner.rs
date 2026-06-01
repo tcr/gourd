@@ -1,6 +1,6 @@
-//! Extract `go! { ... }` blocks from Rust source files.
+//! Extract `go!` blocks from Rust source files.
 //!
-//! Uses brace-matching to find the content inside `go! { ... }` patterns,
+//! Uses brace-matching to find the content inside `go!` patterns,
 //! preserving the exact source text including formatting.
 
 use anyhow::{Context, Result};
@@ -14,11 +14,11 @@ pub struct GoBlock {
     pub file: String,
     /// The line number where `go!` starts (1-indexed).
     pub line: usize,
-    /// The raw Go source text inside the `go! { ... }` braces.
+    /// The raw Go source text inside the `go!` braces.
     pub content: String,
 }
 
-/// Scan a path (file or directory) for `go! { ... }` blocks.
+/// Scan a path (file or directory) for `go!` blocks.
 pub fn scan_path(path: &Path) -> Result<Vec<GoBlock>> {
     let mut blocks = Vec::new();
 
@@ -44,7 +44,7 @@ pub fn scan_path(path: &Path) -> Result<Vec<GoBlock>> {
     Ok(blocks)
 }
 
-/// Scan a single file for `go! { ... }` blocks.
+/// Scan a single file for `go!` blocks.
 fn scan_file(path: &Path) -> Result<Vec<GoBlock>> {
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
@@ -58,7 +58,7 @@ fn scan_file(path: &Path) -> Result<Vec<GoBlock>> {
     Ok(blocks)
 }
 
-/// Find all `go! { ... }` blocks in source text using brace matching.
+/// Find all `go!` blocks in source text using brace matching.
 fn find_go_blocks(source: &str, file: &str) -> Vec<GoBlock> {
     let mut blocks = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
@@ -141,16 +141,20 @@ mod tests {
 
     #[test]
     fn test_single_line_block() {
-        let source = "go! { fn hello() int { return 42 } }\n";
+        let source = "go! { func hello() int { return 42 } }\n";
         let blocks = find_go_blocks(source, "test.rs");
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].content, "fn hello() int { return 42 }");
+        assert_eq!(blocks[0].content, "func hello() int { return 42 }");
         assert_eq!(blocks[0].line, 1);
     }
 
     #[test]
     fn test_multiline_block() {
-        let source = "go! {\n    func hello() int {\n        return 42\n    }\n}\n";
+        let source = r#"go! {
+    func hello() int {
+        return 42
+    }
+}"#;
         let blocks = find_go_blocks(source, "test.rs");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].content, "func hello() int {\n        return 42\n    }");
@@ -158,7 +162,14 @@ mod tests {
 
     #[test]
     fn test_nested_braces() {
-        let source = "go! {\n    func foo() int {\n        if true {\n            return 1\n        }\n        return 0\n    }\n}\n";
+        let source = r#"go! {
+    func foo() int {
+        if true {
+            return 1
+        }
+        return 0
+    }
+}"#;
         let blocks = find_go_blocks(source, "test.rs");
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].content.contains("if true"));

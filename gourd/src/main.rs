@@ -2,44 +2,44 @@ use gourd::GoGc;
 use gourd::go;
 
 go! {
-    fn go_add() -> i32 {
-        10 + 20
+    func goAdd() int {
+        return 10 + 20
     }
 }
 
 go! {
-    fn go_sub() -> i32 {
-        50 - 10
+    func goSub() int {
+        return 50 - 10
     }
 }
 
 go! {
-    fn go_mul() -> i32 {
-        4 * 5
+    func goMul() int {
+        return 4 * 5
     }
 }
 
 go! {
-    fn go_div() -> i32 {
-        100 / 4
+    func goDiv() int {
+        return 100 / 4
     }
 }
 
 go! {
-    fn go_parens() -> i32 {
-        (3 + 2) * 4
+    func goParens() int {
+        return (3 + 2) * 4
     }
 }
 
 go! {
-    fn go_neg() -> i32 {
-        -7 + 3
+    func goNeg() int {
+        return -7 + 3
     }
 }
 
 go! {
-    fn go_bool() -> bool {
-        true && false
+    func goBool() bool {
+        return true && false
     }
 }
 

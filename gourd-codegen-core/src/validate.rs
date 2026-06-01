@@ -139,11 +139,12 @@ fn go_to_main_harness(go_code: &TokenStream) -> String {
     // `func hello ( ) string` → `func hello() string`
     let code = fix_quote_spaces(&code);
 
-    // Build the harness: just wrap declarations in package main.
-    // Go rejects `package main` without imports, so we add a dummy import.
+    // Build the harness: wrap declarations in package main with a main() function.
+    // Go rejects `package main` without imports or a main() function.
     let mut harness = String::new();
-    harness.push_str("package main\n\nimport _ \"unsafe\"\n\n");
+    harness.push_str("package main\n\n");
     harness.push_str(&code);
+    harness.push_str("\n\nfunc main() {\n}");
     harness
 }
 

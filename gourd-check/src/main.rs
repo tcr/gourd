@@ -1,6 +1,6 @@
 //! `gourd-check`: standalone CLI for semantic validation of Go blocks.
 //!
-//! Scans Rust source files for `go! { ... }` blocks, extracts the exact
+//! Scans Rust source files for `go!` blocks, extracts the exact
 //! source text, and validates using `go build` and `cargo check`.
 
 mod scanner;

@@ -64,7 +64,13 @@ pub fn go(input: TokenStream) -> TokenStream {
 ///         ret
 ///     }
 /// })]
-/// go! { fn go_abs(n int) int { ... } }
+/// go! {
+///     func goAbs(n int) int {
+///         ret := n
+///         if n < 0 { ret = -n }
+///         return ret
+///     }
+/// }
 ///
 /// // Longer form (same effect)
 /// #[verify_rust_output(verify = {
@@ -74,7 +80,13 @@ pub fn go(input: TokenStream) -> TokenStream {
 ///         ret
 ///     }
 /// })]
-/// go! { fn go_abs(n int) int { ... } }
+/// go! {
+///     func goAbs(n int) int {
+///         ret := n
+///         if n < 0 { ret = -n }
+///         return ret
+///     }
+/// }
 /// ```
 #[proc_macro_attribute]
 pub fn verify_rust_output(attr: TokenStream, input: TokenStream) -> TokenStream {

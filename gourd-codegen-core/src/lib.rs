@@ -67,18 +67,28 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
 /// Short-form verify: `#[go_verify({ expected_rust_tokens })]`
 ///
 /// The attribute receives a brace group `{ ... }` containing expected
-/// Rust tokens. Extracts the Go code from the `go! { ... }` item,
+/// Rust tokens. Extracts the Go code from the `go!` item,
 /// transpiles it, and compares against the expected tokens.
 ///
 /// On match: emits the transpiled Rust tokens (go! is consumed by the attribute).
-/// On mismatch: emits `compile_error!("expected: ... \n  actual:   ...")`.
+/// On mismatch: emits compile_error!("expected vs actual mismatch.")
 ///
 /// Usage:
 /// ```ignore
 /// #[go_verify({
-///     fn go_abs(n: i32) -> i32 { ... }
+///     fn go_abs(n: i32) -> i32 {
+///         let mut ret = n;
+///         if n < 0 { ret = -n; }
+///         ret
+///     }
 /// })]
-/// go! { fn go_abs(n int) int { ... } }
+/// go! {
+///     func goAbs(n int) int {
+///         ret := n
+///         if n < 0 { ret = -n }
+///         return ret
+///     }
+/// }
 /// ```
 pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     // Extract expected tokens from the attribute input.
@@ -92,7 +102,7 @@ pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStr
             if g.delimiter() == proc_macro2::Delimiter::Brace {
                 g.stream()
             } else {
-                // Fallback: search for `verify = { ... }` inside
+                // Fallback: search for `verify = { }` inside
                 parse_verify_from_attr(&attr)
             }
         } else {
@@ -100,8 +110,8 @@ pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStr
         }
     };
 
-    // Extract the Go code from the `go! { ... }` item.
-    // The input is: `go! { fn ... }` → three token trees: Ident("go"), Punct("!"), Group(Brace, ...)
+    // Extract the Go code from the `go!` item.
+    // The input is: `go!` → three token trees: Ident("go"), Punct("!"), Group(Brace, ...)
     let go_input = extract_go_block_from_input(&input);
 
     if go_input.is_empty() {
@@ -150,13 +160,13 @@ pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStr
 }
 
 /// Extract the Go code block from the attribute input.
-/// Handles both `go! { ... }` and bare `{ ... }` inputs.
+/// Handles both `go!` and bare `{ ... }` inputs.
 fn extract_go_block_from_input(input: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     use proc_macro2::TokenTree;
 
     let trees: Vec<TokenTree> = input.clone().into_iter().collect();
 
-    // Case 1: `go! { ... }` — three tokens: Ident("go"), Punct("!"), Group(Brace, ...)
+    // Case 1: `go!` — three tokens: Ident("go"), Punct("!"), Group(Brace, ...)
     if trees.len() >= 3 {
         if let (TokenTree::Ident(id), TokenTree::Punct(p), TokenTree::Group(g)) =
             (&trees[0], &trees[1], &trees[2])
@@ -176,7 +186,7 @@ fn extract_go_block_from_input(input: &proc_macro2::TokenStream) -> proc_macro2:
         }
     }
 
-    // Case 3: go! with paren then brace: `go! (x) { ... }`
+    // Case 3: go! with paren then brace: `go! (x)`
     if trees.len() >= 4 {
         if let (TokenTree::Ident(id), TokenTree::Punct(p),
                 TokenTree::Group(_paren), TokenTree::Group(g)) =
@@ -191,7 +201,7 @@ fn extract_go_block_from_input(input: &proc_macro2::TokenStream) -> proc_macro2:
     proc_macro2::TokenStream::new()
 }
 
-/// Parse `verify = { ... }` from a longer-form attribute input.
+/// Parse `verify = { }` from a longer-form attribute input.
 fn parse_verify_from_attr(attr_stream: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     use proc_macro2::TokenTree;
 

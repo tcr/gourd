@@ -2,6 +2,9 @@
 //!
 //! Converts Go function declarations (`fn name() { ... }`) and struct
 //! declarations (`struct Name { field type }`) into Rust.
+//!
+//! Go uses camelCase for exported names (e.g., `goAdd`). The transpiler
+//! converts these to Rust snake_case (e.g., `go_add`).
 
 use super::expr::{go_to_rust, go_to_rust_pattern};
 use super::parsing::{go_stmt_to_rust, GoFn, GoStruct, Switch};
@@ -9,11 +12,36 @@ use super::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
 
+/// Convert a Go name (camelCase) to Rust snake_case.
+/// `goAdd` → `go_add`, `goShorthand2` → `go_shorthand_2`
+/// Handles consecutive caps and trailing digits.
+fn to_snake_case(name: &str) -> String {
+    let mut result = String::with_capacity(name.len() + 4);
+    let chars: Vec<char> = name.chars().collect();
+    for (i, ch) in chars.iter().enumerate() {
+        if ch.is_uppercase() {
+            if i > 0 && !name[..i].ends_with('_') {
+                result.push('_');
+            }
+            result.push(ch.to_lowercase().next().unwrap());
+        } else if ch.is_ascii_digit() && i > 0 && chars[i - 1].is_lowercase() {
+            // Add underscore before digit if preceded by lowercase
+            result.push('_');
+            result.push(*ch);
+        } else {
+            result.push(*ch);
+        }
+    }
+    result
+}
+
 /// Top-level: parse and transpile a Go function declaration to Rust.
 pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
     match syn::parse2::<GoFn>(input) {
         Ok(go_fn) => {
-            let fn_name = &go_fn.ident;
+            let fn_name_str = to_snake_case(&go_fn.ident.to_string());
+            let fn_name = syn::Ident::new(&fn_name_str, go_fn.ident.span());
+            let fn_name = &fn_name;
             let generics = &go_fn.generics;
 
             let output = go_fn.output.as_ref().map(|output| {

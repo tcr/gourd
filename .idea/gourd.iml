@@ -6,6 +6,9 @@
       <sourceFolder url="file://$MODULE_DIR$/gourd-codegen/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/gourd/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/gourd/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/gourd-check/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gourd-check/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/gourd-codegen-core/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
