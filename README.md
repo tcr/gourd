@@ -54,6 +54,7 @@ gourd transpile path/to/file.rs
 | `fn foo(a, b int) int { ... }` | `fn foo(a: i32, b: i32) -> i32 { ... }` |
 | `struct Point { x int, y int }` | `struct Point { pub x: i32, pub y: i32 }` |
 | `func (f Foo) Method() int { ... }` | `impl Foo { fn Method(&self) -> i32 { ... } }` |
+| `interface Foo { Name() string }` | `trait foo { fn name(&self) -> String; }` |
 
 ### Types
 

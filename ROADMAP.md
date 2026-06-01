@@ -38,6 +38,7 @@ The following Go constructs are fully transpiled and tested:
 | **Blocks** | `{ stmt; expr }` | `{ stmt; expr }` |
 | **Method calls** | `s.method(args)` | `s.method(args)` |
 | **Field access** | `pt.0`, `s.field` | `pt.0`, `s.field` |
+| **Interfaces** | `interface Foo { Name() string }` | `trait foo { fn name(&self) -> String; }` |
 
 ### Type Mappings
 
@@ -80,7 +81,6 @@ These Go constructs are **blocked** via `compile_error!` at compile time:
 | Category | What's missing | Notes |
 |----------|----------------|-------|
 | **Concurrency** | `go func()`, `chan`, `select` | Go's concurrency model ≠ Rust's |
-| **Interfaces** | `interface{}` → `trait` | No trait mapping yet |
 | **Goroutines** | `go foo(42)` | Would require async/spawn |
 | **Channels** | `ch <- value`, `<- ch` | Rust uses different channel patterns |
 | **`defer`** | `defer cleanup()` | No Rust equivalent |

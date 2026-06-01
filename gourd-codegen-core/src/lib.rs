@@ -16,7 +16,7 @@
 mod transpiler;
 mod validate;
 
-pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
+pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
 
@@ -93,6 +93,9 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                     }
                     "switch" => {
                         go_to_rust_switch(input)
+                    }
+                    "interface" => {
+                        go_to_rust_interface(input)
                     }
                     "func" | "fn" => {
                         let mut iter2 = input.clone().into_iter().skip(1);

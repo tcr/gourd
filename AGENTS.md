@@ -43,10 +43,10 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 | While loops | `while cond { ... }` | ✅ Implemented |
 | For range | `for i, v := range data` | ✅ Implemented |
 | Concurrency | `go func()`, `chan`, `select` | Not implemented |
-| Interfaces | `interface{}` | Not implemented |
-| Pointers | `*T` in Go → `&T` in Rust | Basic support, needs more work |
+| Interfaces | `interface{}` | ✅ Implemented |
 
 ### Recently fixed
+- ✅ Interfaces — `interface Name { Method() Type }` → `trait name { fn method(&self) -> Type; }`
 - ✅ Control flow (`if`/`else` statements)
 - ✅ Type conversions (`int()`, `uint()`, `float32()`, `float64()`, `bool()`, `byte()`, `rune()`, `string()`)
 - ✅ Semicolon insertion in Go validation harness

@@ -94,6 +94,19 @@ pub(crate) struct GoStructField {
     pub(crate) ty: syn::Type,
 }
 
+// ─── Interface parsing ─────────────────────────────────────────────────
+
+pub(crate) struct GoInterface {
+    pub(crate) ident: Ident,
+    pub(crate) methods: Vec<GoInterfaceMethod>,
+}
+
+pub(crate) struct GoInterfaceMethod {
+    pub(crate) name: Ident,
+    pub(crate) inputs: GoFnInputs,
+    pub(crate) output: Option<GoFnOutput>,
+}
+
 // ─── Switch parsing ────────────────────────────────────────────────────
 
 pub(crate) struct Switch {
@@ -430,6 +443,65 @@ impl Parse for GoStruct {
             }
         }
         Ok(GoStruct { ident, fields })
+    }
+}
+
+impl Parse for GoInterface {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let _interface_kw: Ident = input.call(Ident::parse_any)?; // consume 'interface'
+        let ident: Ident = input.parse()?;
+        let content;
+        let _brace = syn::braced!(content in input);
+
+        // Parse methods: `Name() type` or `Name(params) type`
+        let mut methods = Vec::new();
+        while !content.is_empty() {
+            let method_fork = content.fork();
+            if let Ok(name) = method_fork.parse::<Ident>() {
+                let name_str = name.to_string();
+                // Skip if it looks like a type keyword (Go type names used as field names)
+                if matches!(name_str.as_str(),
+                    "bool" | "string" | "int" | "int8" | "int16" | "int32" | "int64"
+                    | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr"
+                    | "byte" | "rune" | "float32" | "float64" | "error")
+                {
+                    break; // This is a struct field, not a method name
+                }
+                // Method names can't be Rust keywords either
+                if matches!(name_str.as_str(),
+                    "if" | "else" | "for" | "return" | "switch" | "case" | "default"
+                    | "type" | "struct" | "func" | "interface" | "package" | "import" | "const" | "var")
+                {
+                    break;
+                }
+
+                // Consume the method name
+                content.parse::<Ident>()?;
+
+                // Parse parameters
+                let param_paren;
+                let _paren = syn::parenthesized!(param_paren in content);
+                let inputs: GoFnInputs = param_paren.parse()?;
+
+                // Parse optional return type
+                let output = if !content.is_empty() {
+                    let out_fork = content.fork();
+                    if out_fork.peek(syn::token::RArrow) || out_fork.peek(Ident) || out_fork.peek(syn::token::Bracket) {
+                        Some(content.parse::<GoFnOutput>()?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                methods.push(GoInterfaceMethod { name, inputs, output });
+            } else {
+                break;
+            }
+        }
+
+        Ok(GoInterface { ident, methods })
     }
 }
 
