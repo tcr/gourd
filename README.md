@@ -7,13 +7,29 @@ Transpiles inline Go declarations into valid Rust via a procedural macro at comp
 ```
 gourd/
   gourd-codegen/       <-- proc-macro library (transpiler core)
-  gourd/               <-- demo binary using `go! { ... }`
+  gourd/               <-- CLI tool (`gourd transpile`) + runtime (`go!`)
 ```
 
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
 [`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
+[`gourd/src/main.rs`]              -- CLI tool (`gourd transpile`)
 
-## How it works
+## CLI: `gourd transpile`
+
+Transpile Go code to Rust from inline input, stdin, or files:
+
+```bash
+# Inline Go code
+gourd transpile "func goAdd(a int, b int) int { a + b }"
+
+# From stdin
+echo "func hello() int { return 42 }" | gourd transpile -
+
+# Rust file with go! blocks
+gourd transpile path/to/file.rs
+```
+
+### How it works
 
 1. User writes: `go! { fn hello() string { String::from("hello") } }`
 2. The proc-macro `go!` inspects the tokens to dispatch to the correct handler
@@ -44,6 +60,7 @@ consumer's crate.
 
 ```bash
 cargo test      # → go! integration tests
+gourd transpile "func hello() int { return 42 }"  # → transpile CLI
 cargo run -p gourd  # → demo binary
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```

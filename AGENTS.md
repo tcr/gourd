@@ -5,11 +5,12 @@ Transpiles inline Go declarations into valid Rust via a procedural macro at comp
 ```
 gourd/
   gourd-codegen/       <-- proc-macro library (transpiler core)
-  gourd/               <-- runtime + demo binary
+  gourd/               <-- runtime + CLI tool (`gourd transpile`)
 ```
 
 [`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
 [`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
+[`gourd/src/main.rs`]              -- CLI tool (`gourd transpile`)
 
 ## Example of how it works
 
@@ -59,7 +60,7 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 
 ```bash
 cargo test   # → 50 tests (go! transpilation verify + functional runtime tests + gourd-check)
-cargo run -p gourd  # → demo binary output
+gourd transpile "func hello() int { return 42 }"  # → transpile CLI tool
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 gourd-check [PATHS...]      # Standalone Go/Rust validation (same scanner + validators)
 ```
