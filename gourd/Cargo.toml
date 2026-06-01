@@ -14,6 +14,11 @@ path = "src/main.rs"
 [dependencies]
 gourd-codegen = { path = "gourd-codegen" }
 gourd-codegen-core = { path = "gourd-codegen-core" }
+gourd-check = { path = "../gourd-check" }
+clap = { version = "4", features = ["derive"] }
+prettyplease = "0.2"
+proc-macro2 = "1"
+syn = { version = "2", features = ["full"] }
 
 [dev-dependencies]
 gourd-codegen = { path = "gourd-codegen" }

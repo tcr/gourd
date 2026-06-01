@@ -15,3 +15,6 @@ pub use gourd_codegen::verify_rust_output;
 
 /// Transpile a Go declaration to Rust tokens (programmatic access).
 pub use gourd_codegen_core::transpile_go;
+
+/// Transpile raw Go code text to Rust tokens (CLI-facing).
+pub use gourd_codegen_core::transpile_go_text;

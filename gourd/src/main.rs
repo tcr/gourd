@@ -1,102 +1,94 @@
-use gourd::GoGc;
-use gourd::go;
+//! `gourd` CLI: Go → Rust transpiler.
+//!
+//! Transpile Go code (in `go!` macro blocks or raw `.go` files) to equivalent Rust.
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Transpile Go blocks from a Rust source file
+//! gourd transpile path/to/file.rs
+//!
+//! # Transpile inline Go code
+//! gourd transpile "func hello() int { return 42 }"
+//!
+//! # Transpile from stdin
+//! echo "func hello() int { return 42 }" | gourd transpile -
+//! ```
 
-go! {
-    func goAdd() int {
-        return 10 + 20
+use clap::{Parser, Subcommand};
+use gourd_check::scanner::find_go_blocks;
+use gourd_codegen_core::transpile_go_text;
+use proc_macro2::TokenStream;
+use std::io::Read;
+
+#[derive(Parser)]
+#[command(name = "gourd")]
+#[command(about = "Transpile Go code to Rust", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Transpile Go code to Rust
+    Transpile {
+        /// Input source: file path, inline Go code, or `-` for stdin
+        input: String,
+    },
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Transpile { input } => {
+            let source = read_source(&input);
+            let blocks = find_go_blocks(&source, &input);
+
+            if blocks.is_empty() {
+                // No go! blocks found — treat entire source as inline Go code
+                let rust = transpile_go_text(&source);
+                eprintln!("{}", &input);
+                println!("{}", format_rust_output(&rust));
+                return;
+            }
+
+            for block in &blocks {
+                let rust = transpile_go_text(&block.content);
+                eprintln!("{}:{}", &input, block.line);
+                println!("{}", format_rust_output(&rust));
+            }
+        }
     }
 }
 
-go! {
-    func goSub() int {
-        return 50 - 10
-    }
+/// Parse transpiled TokenStream into a syn::File and format with prettyplease.
+fn format_rust_output(ts: &TokenStream) -> String {
+    let ast: syn::File = match syn::parse2(ts.clone()) {
+        Ok(ast) => ast,
+        Err(_) => return ts.to_string().trim().to_string(),
+    };
+    prettyplease::unparse(&ast)
 }
 
-go! {
-    func goMul() int {
-        return 4 * 5
+/// Read source text from file, stdin, or treat input as inline Go code.
+fn read_source(input: &str) -> String {
+    if input == "-" {
+        let mut source = String::new();
+        std::io::stdin()
+            .read_to_string(&mut source)
+            .expect("failed to read stdin");
+        source
+    } else if input.ends_with(".go") || input.ends_with(".rs") {
+        std::fs::read_to_string(input)
+            .unwrap_or_else(|e| {
+                eprintln!("error: cannot read file '{}': {}", input, e);
+                std::process::exit(1);
+            })
+    } else {
+        // Inline Go code — wrap in macro invocation so find_go_blocks can extract it
+        let marker = String::from("go!");
+        format!("{} {{ {} }}", marker, input)
     }
-}
-
-go! {
-    func goDiv() int {
-        return 100 / 4
-    }
-}
-
-go! {
-    func goParens() int {
-        return (3 + 2) * 4
-    }
-}
-
-go! {
-    func goNeg() int {
-        return -7 + 3
-    }
-}
-
-go! {
-    func goBool() bool {
-        return true && false
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Arithmetic tests via go!
-    let sum = go_add();
-    println!("10 + 20 = {sum}");
-    assert_eq!(sum, 30);
-
-    let diff = go_sub();
-    println!("50 - 10 = {diff}");
-    assert_eq!(diff, 40);
-
-    let prod = go_mul();
-    println!("4 * 5 = {prod}");
-    assert_eq!(prod, 20);
-
-    let quot = go_div();
-    println!("100 / 4 = {quot}");
-    assert_eq!(quot, 25);
-
-    let parens = go_parens();
-    println!("(3 + 2) * 4 = {parens}");
-    assert_eq!(parens, 20);
-
-    let neg = go_neg();
-    println!("-7 + 3 = {neg}");
-    assert_eq!(neg, -4);
-
-    let bool_test = go_bool();
-    println!("true && false = {bool_test}");
-    assert!(!bool_test);
-
-    // GoGc runtime: heap-allocated, Arc-based shared ownership
-    struct Point { x: i32, y: i32 }
-
-    let p = GoGc::new(Point { x: 1, y: 2 });
-    let _q = GoGc::clone(&p);
-
-    assert_eq!(p.x, 1);
-    assert_eq!(p.y, 2);
-    println!("GoGc reference count (p.copied(q)): {}", p.strong_count());
-
-    assert_eq!(p.strong_count(), 2);
-
-    let _r = GoGc::clone(&p);
-    println!("GoGc reference count (3x): {}", p.strong_count());
-    assert_eq!(p.strong_count(), 3);
-
-    let only = GoGc::new(Point { x: 99, y: 100 });
-    match GoGc::try_unwrap(only) {
-        Ok(Point { x, y }) => println!("try_unwrap succeeded: Point {{ x: {x}, y: {y} }}"),
-        Err(_) => panic!("try_unwrap should succeed when refcount == 1"),
-    }
-
-    println!("All Go→Rust transpilation results verified!");
-    println!("GoGc runtime: Arc-based reference counting working!");
-
-    Ok(())
 }

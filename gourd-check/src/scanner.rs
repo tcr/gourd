@@ -203,7 +203,10 @@ fn find_verify_attributes(source: &str, file: &str) -> Vec<VerifyBlock> {
 }
 
 /// Find all `go!` blocks in source text using brace matching.
-fn find_go_blocks(source: &str, file: &str) -> Vec<GoBlock> {
+///
+/// This function operates on raw source text and is suitable for CLI usage
+/// where you want to extract Go code without going through the scanner.
+pub fn find_go_blocks(source: &str, file: &str) -> Vec<GoBlock> {
     let mut blocks = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
 
