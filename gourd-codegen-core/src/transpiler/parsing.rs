@@ -9,7 +9,7 @@ use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{parse_quote, Expr, Ident, Stmt};
 
-use super::expr::go_to_rust;
+use super::expr::{dispatch, go_to_rust};
 
 // ─── Go source AST types ───────────────────────────────────────────────
 
@@ -24,6 +24,25 @@ pub(crate) enum GoStmt {
     Switch(Switch),
     Continue,
     While(GoWhile),
+    GoFor(GoFor),
+}
+
+pub(crate) struct GoFor {
+    /// Optional init (e.g., `i := 0` or `i, v := `)
+    pub init: Option<GoForInit>,
+    /// Always true for `for` with `range`
+    pub is_range: bool,
+    /// The iterable expression (parsed as Path to avoid syn eating braces)
+    pub iterable: syn::Path,
+    /// The loop body
+    pub body: GoBlock,
+}
+
+pub(crate) enum GoForInit {
+    /// Single variable: `for i := range slice`
+    Single(Ident),
+    /// Two variables: `for i, v := range slice`
+    Double(Ident, Ident),
 }
 
 pub(crate) struct GoWhile {
@@ -436,6 +455,11 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
 /// Try to parse a Go-specific statement from the input.
 /// Returns `true` if a statement was parsed (consuming input), `false` to fall back.
 pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
+    // Debug: show first token tree in input via fork
+    if !input.is_empty() {
+        let fork = input.fork();
+        let first = fork.parse::<proc_macro2::TokenTree>().ok();
+    }
     // 1. Check for Go slice literal: []...{...}
     if input.peek(syn::token::Bracket) {
         if let Ok(()) = parse_go_slice_literal(input, stmts) {
@@ -443,12 +467,20 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         }
     }
 
-    // 3. Check for if statement
+    // 3. Check for if statement (if is a Rust keyword, but in some contexts tokenized as ident)
+    if input.peek(syn::token::If) {
+        return parse_go_if(input, stmts);
+    }
     if input.peek(syn::Ident) {
-        if let Ok(kw) = input.fork().parse::<syn::Ident>() {
-            if kw.to_string() == "if" {
-                return parse_go_if(input, stmts);
+        let fork = input.fork();
+        match fork.parse::<syn::Ident>() {
+            Ok(kw) => {
+                let kw_str = kw.to_string();
+                if kw_str == "if" {
+                    return parse_go_if(input, stmts);
+                }
             }
+            Err(_) => {}
         }
     }
 
@@ -468,12 +500,15 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         return parse_go_return(input, stmts);
     }
 
-    // 6. Check for continue statement
-    if input.peek(syn::Ident) {
-        let cont_fork = input.fork();
-        if let Ok(kw) = cont_fork.parse::<syn::Ident>() {
-            if kw.to_string() == "continue" {
-                input.parse::<syn::Ident>()?; // consume 'continue'
+    // 6. Check for continue statement (continue is a Rust keyword)
+    // In proc-macro context, `continue` is tokenized as TokenTree::Ident,
+    // so we use fork + TokenTree parsing to detect it
+    let cont_fork = input.fork();
+    if let Ok(token) = cont_fork.parse::<proc_macro2::TokenTree>() {
+        if let proc_macro2::TokenTree::Ident(ident) = token {
+            if ident.to_string() == "continue" {
+                // consume the continue ident token
+                let _token: proc_macro2::TokenTree = input.parse()?;
                 stmts.push(GoStmt::Continue);
                 if input.peek(token::Semi) {
                     let _semi: token::Semi = input.parse()?;
@@ -488,6 +523,14 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
     if input.peek(syn::token::While) {
         let parsed_while = parse_go_while(input)?;
         stmts.push(GoStmt::While(parsed_while));
+        return Ok(true);
+    }
+
+    // 8. Check for for range loop: `for init := range iter` or `for init, v := range iter`
+    // Note: `for` is a Rust keyword, so we use `Token![for]` not `Ident`
+    if input.peek(syn::token::For) {
+        let parsed_for = parse_go_for(input)?;
+        stmts.push(GoStmt::GoFor(parsed_for));
         return Ok(true);
     }
 
@@ -518,6 +561,87 @@ fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
 
     Ok(GoWhile {
         cond,
+        body: GoBlock { stmts: body_stmts },
+    })
+}
+
+/// Parse Go `for` with `range`: `for init := range iter { ... }` or `for init, v := range iter { ... }`
+fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
+    // Consume 'for' keyword (it's a keyword, not an identifier)
+    let _: syn::token::For = input.parse()?;
+    let peek_ident = input.peek(syn::Ident);
+    let next_ident_str = if peek_ident {
+        input.fork().parse::<syn::Ident>().ok().map(|i| i.to_string()).unwrap_or_default()
+    } else {
+        "<none>".to_string()
+    };
+
+    // Parse init OR check for `range` keyword directly
+    let init = if input.peek(syn::Ident) {
+        // Check if next ident is `range` (for `for range iter { ... }`)
+        let fork = input.fork();
+        if let Ok(first_ident) = fork.parse::<syn::Ident>() {
+            if first_ident.to_string() == "range" {
+                // No init, just `for range iter { body }`
+                None
+            } else {
+                // Has init: `i :=` or `i, v :=`
+                input.parse::<syn::Ident>()?; // consume ident
+
+                // Check for second variable: `i, v :=`
+                if input.peek(syn::token::Comma) {
+                    let _: syn::token::Comma = input.parse()?;
+                    let second_ident = input.parse::<syn::Ident>()?;
+                    // Consume `:=`
+                    let _: syn::token::Colon = input.parse()?;
+                    let _: syn::token::Eq = input.parse()?;
+                    Some(GoForInit::Double(first_ident, second_ident))
+                } else {
+                    // Single init: `i :=`
+                    let _: syn::token::Colon = input.parse()?;
+                    let _: syn::token::Eq = input.parse()?;
+                    Some(GoForInit::Single(first_ident))
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Consume 'range' keyword (if we didn't already consume it above)
+    if !matches!(&init, None) || input.peek(syn::Ident) {
+        let fork = input.fork();
+        match fork.parse::<syn::Ident>() {
+            Ok(range_kw) => {
+                if range_kw.to_string() == "range" {
+                    let _: syn::Ident = input.parse()?; // consume 'range'
+                } else {
+                    return Err(syn::Error::new(input.span(), "expected `range` keyword"));
+                }
+            }
+            Err(_) => {
+                return Err(syn::Error::new(input.span(), "expected `range` keyword"));
+            }
+        }
+    }
+    // Parse iterable as Path (not Expr) — syn's Expr::parse on `x {` consumes
+    // the brace as verbatim, swallowing the entire for loop body!
+    let iterable: syn::Path = input.parse()?;
+    let body_content;
+    let _brace = syn::braced!(body_content in input);
+    let mut body_stmts = Vec::new();
+    while !body_content.is_empty() {
+        if parse_go_special_stmt(&body_content, &mut body_stmts)? {
+            continue;
+        }
+        parse_base_stmt(&body_content, &mut body_stmts)?;
+    }
+    Ok(GoFor {
+        init,
+        is_range: true,
+        iterable,
         body: GoBlock { stmts: body_stmts },
     })
 }
@@ -625,25 +749,19 @@ fn parse_go_slice_literal(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
 
 /// Parse `if cond { body } else { ... }`.
 fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
-    input.parse::<syn::Ident>()?; // consume 'if'
+    input.parse::<syn::token::If>()?; // consume 'if' (it's a Rust keyword)
     let cond: Expr = input.parse()?;
     let then_block_content;
     let _brace = syn::braced!(then_block_content in input);
     let then_block = parse_block_stmts(&then_block_content)?;
 
-    let else_block = if input.peek(syn::Ident) {
-        let else_fork = input.fork();
-        if let Ok(else_kw) = else_fork.parse::<syn::Ident>()
-            && else_kw.to_string() == "else"
-        {
-            input.parse::<syn::Ident>()?; // consume 'else'
-            if input.peek(syn::token::Brace) {
-                let else_block_content;
-                let _brace = syn::braced!(else_block_content in input);
-                Some(GoBlock { stmts: parse_block_stmts(&else_block_content)? })
-            } else {
-                None
-            }
+    let else_block = if input.peek(syn::token::Else) {
+        input.parse::<syn::token::Else>()?; // consume 'else' (Rust keyword)
+        if input.peek(syn::token::Brace) {
+            let else_block_content;
+            let _brace = syn::braced!(else_block_content in input);
+            // Use parse_go_block for else body too
+            Some(GoBlock { stmts: parse_block_stmts(&else_block_content)? })
         } else {
             None
         }
@@ -885,6 +1003,44 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                 .map(|s| go_stmt_to_rust(s)).collect();
             quote! { while #cond { #(#body);* } }
         }
+        GoStmt::GoFor(for_stmt) => {
+            // iterable is now a Path, use directly in quote!
+            let body: Vec<_> = for_stmt.body.stmts.iter()
+                .map(|s| go_stmt_to_rust(s)).collect();
+            let body_block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#body);* });
+
+            match (&for_stmt.init, &for_stmt.is_range) {
+                (Some(GoForInit::Double(i, v)), true) => {
+                    // `for i, v := range slice` → `for (i, v) in slice.iter().copied().enumerate()`
+                    // .copied() turns &i32 into i32 so comparisons like `v > 0` work
+                    let i_ident = i.clone();
+                    let v_ident = v.clone();
+                    let iterable = &for_stmt.iterable;
+                    quote! {
+                        for ( #i_ident, #v_ident ) in #iterable.iter().copied().enumerate() #body_block
+                    }
+                }
+                (Some(GoForInit::Single(i)), true) => {
+                    // `for i := range slice` → `for i in 0..slice.len()`
+                    let i_ident = i.clone();
+                    let iterable = &for_stmt.iterable;
+                    quote! {
+                        for #i_ident in 0.. #iterable.len() #body_block
+                    }
+                }
+                (None, true) => {
+                    // `for range slice` → `for _ in 0..slice.len()`
+                    let iterable = &for_stmt.iterable;
+                    quote! {
+                        for _ in 0.. #iterable.len() #body_block
+                    }
+                }
+                _ => {
+                    // Fallback: should not happen for valid `for range`
+                    dispatch::emit_todo("unsupported for form")
+                }
+            }
+        }
     }
 }
 
@@ -950,6 +1106,11 @@ fn go_stmt_to_rust_map(
 pub(crate) fn parse_block_stmts(input: ParseStream) -> syn::Result<Vec<GoStmt>> {
     let mut stmts = Vec::new();
     while !input.is_empty() {
+        // Check for Go-specific constructs first (maps, slices, if, switch, return)
+        if parse_go_special_stmt(input, &mut stmts)? {
+            continue; // Handled by the special case
+        }
+        // Fall back to the base parser for common statements
         parse_base_stmt(input, &mut stmts)?;
     }
     Ok(stmts)
