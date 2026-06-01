@@ -34,11 +34,14 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 
 | Form | Example | Status |
 |------|---------|--------|
-| Slice literals | `[]int{1, 2, 3}` | ✅ Implemented — parsed via `[]` type marker + `Expr::Macro` dispatch |
-| Map literals | `map[int]string{1: "one"}` | ✅ Implemented — entries parsed from `map[K]V{...}` |
-| Multi-return | `func foo() (int, string)` | ✅ Implemented — `return a, b` → `return (a, b)` |
-| Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering in temp file |
-| Map access | `m[key]` | Partial — `m[a]` transpiles correctly but needs `.get(&a)` for HashMaps |
+| Slice literals | `[]int{1, 2, 3}` | ✅ Implemented |
+| Map literals | `map[int]string{1: "one"}` | ✅ Implemented |
+| Multi-return | `func foo() (int, string)` | ✅ Implemented |
+| Struct definitions | `struct Foo { x int }` | ✅ Implemented |
+| Map access | `m[key]` | ✅ Implemented |
+| Continue statement | `continue` | ✅ Implemented |
+| While loops | `while cond { ... }` | ✅ Implemented |
+| For range | `for i, v := range data` | ✅ Implemented |
 | Concurrency | `go func()`, `chan`, `select` | Not implemented |
 | Interfaces | `interface{}` | Not implemented |
 | Pointers | `*T` in Go → `&T` in Rust | Basic support, needs more work |
@@ -50,11 +53,10 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 - ✅ Multi-return values (`return a, b` → `return (a, b)`)
 - ✅ Map literals (`map[string]int{"a": 1}` → `HashMap::new(); m.insert(...)`)
 - ✅ Slice literals — `[]int{1, 2, 3}` produces `vec![1, 2, 3]`
-
-**Fixed in recent commits:**
-- ✅ Control flow (`if`/`else` statements)
-- ✅ Type conversions (`int()`, `uint()`, `float32()`, `float64()`, `bool()`, `byte()`, `rune()`, `string()`)
-- ✅ Semicolon insertion in Go validation harness
+- ✅ While loops — `while cond { ... }` → `while cond { ... }`
+- ✅ Continue statements — `continue` → `continue`
+- ✅ For range loops — `for i, v := range data` → `for (i, v) in data.iter().copied().enumerate()`
+- ✅ Nested `if`/`continue`/`while` — proper block body parsing in `parse_go_if` and `parse_block_stmts`
 
 ## Running
 
