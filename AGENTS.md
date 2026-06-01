@@ -27,10 +27,24 @@ Any Go concept missing from the transpiler (e.g. concurrency, storage, streams, 
 reports "TODO: transpile this Go form: <name>" at compile time of the
 consumer's crate.
 
+### Known unimplemented Go forms
+
+The following Go constructs are NOT yet transpiled — they are commented out in test files with explanatory notes:
+
+| Form | Example | Reason |
+|------|---------|--------|
+| Control flow | `if n < 0 { ret = -ret }` | `if`/`for` not in `GoStmt` enum |
+| Multi-return | `func foo() (int, string)` | Comma-separated return list not parsed |
+| Type conversion | `int(len(s))`, `string(bytes)` | `int()` / `string()` not stripped in Rust output |
+| Slice literals | `[]int{1, 2, 3}` | `[]...{...}` syntax produces `compile_error!` |
+| Map literals | `map[int]string{1: "one"}` | Map literal syntax not implemented |
+| Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering |
+| Switch as expression | `switch { case ok: ... }` | Switch expressions not supported |
+
 ## Running
 
 ```bash
-cargo test   # → 51 tests (go! transpilation verify + functional runtime tests)
+cargo test   # → 42 tests (go! transpilation verify + functional runtime tests)
 cargo run -p gourd  # → demo binary output
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```
@@ -95,6 +109,14 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 5. Run `cargo test` — the mismatch error shows the actual transpiled output in the `actual:` line.
 6. Copy the actual output back as the expected tokens (rewriting it in readable Rust form).
 7. Re-run `cargo test` — if it compiles, the verify passes.
+
+### Writing correct `#[verify_rust_output]` attributes
+
+- **Function names**: The transpiler converts Go names to Rust snake_case via `to_snake_case`. Handle trailing digits: `goShorthand2` → `go_shorthand_2`, `goAdd` → `go_add`, `isEven` → `is_even`.
+- **Return statements**: The transpiler always adds explicit `return` before expressions. Expected: `{ return a + b }`, not `{ a + b }`.
+- **Method calls on string/slice**: `len(s)` in Go becomes `s.len() as i32` in Rust (type conversion is wrapped in `int(...)` in the transpiler output — a known bug; see "Known unimplemented Go forms" above).
+- **String literals**: `"hello"` in Go becomes `::std::string::String::from("hello")` in Rust.
+- **Slice/map types**: `[]int` becomes `&[i32]`, but slice literals `[]int{...}` are NOT transpiled (produces `compile_error!`).
 
 ## Cross-Language Validation Pattern (the `gourd-check` pattern)
 
@@ -165,6 +187,13 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | Temp dir file conflicts between blocks | Use per-block temp dirs (`tempfile::tempdir()`) |
 | `quote!` spacing (`func hello ( ) int`) breaks Go parser | Don't use `quote!` for validation — use raw source text |
 | `compile_error!` inside macro items requires `;` | Emit `compile_error!` with proper semicolons |
+
+## Current Validation Status
+
+As of the latest commit:
+- `cargo test`: 42 tests passing, 0 failed
+- `gourd-check .`: 0 errors across entire codebase (100% pass rate)
+- `gourd-codegen/tests/`: 31 blocks scanned, 0 errors after commenting out unsupported features
 
 ## RFCs
 

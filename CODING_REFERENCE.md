@@ -73,6 +73,49 @@ gourd-check/
 
 ---
 
+### Known unimplemented Go forms
+
+The following Go constructs are NOT yet transpiled — they are commented out in `gourd-codegen/tests/go_fn.rs` with explanatory notes:
+
+| Form | Go example | Rust output | Reason |
+|------|-----------|-------------|--------|
+| Control flow | `if n < 0 { ret = -ret }` | N/A (validation error) | `if` not in `GoStmt` enum |
+| Multi-return | `func foo() (int, string)` | `compile_error!` | Comma-separated return list not parsed |
+| Type conversion | `int(len(s))` | `int(s.len() as i32)` | `int()` not valid Rust (transpiler bug) |
+| Type conversion | `string(bytes)` | `compile_error!` | `string()` not valid Rust |
+| Slice literals | `[]int{1, 2, 3}` | `compile_error!` | `[]...{...}` syntax not handled |
+| Map literals | `map[int]string{1: "one"}` | `compile_error!` | Map literal syntax not implemented |
+| Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering | Struct ordering issue in temp file |
+
+When adding new Go constructs, check which category they fall into:
+- **Parser missing**: Add to `GoStmt` enum in `parsing.rs` (e.g., `if`, `for`)
+- **Transpiler missing**: Add to the relevant `go_to_rust_*` function in `free_fn.rs`
+- **Type mapping missing**: Add to `map_go_types` in `types.rs`
+
+---
+
+## Name Mapping: `to_snake_case`
+
+Location: `gourd-codegen-core/src/transpiler/free_fn.rs`
+
+Converts Go function/variable names to Rust snake_case. Key behaviors:
+
+| Go name | Rust name | Notes |
+|---------|-----------|-------|
+| `goAdd` | `go_add` | Standard camelCase → snake_case |
+| `goShorthand2` | `go_shorthand_2` | Trailing digits after lowercase get `_` prefix |
+| `isEven` | `is_even` | No `go_` prefix in Go name → no prefix in Rust |
+| `go_is_even` | `go_is_even` | Already snake_case, no transformation |
+| `hello` | `hello` | All lowercase, no change |
+
+The function adds underscores before:
+- Uppercase letters (if not preceded by `_`)
+- ASCII digits if preceded by a lowercase letter (e.g., `Shorthand2` → `shorthand_2`)
+
+When writing `#[verify_rust_output]` attributes, the expected function name must match this conversion.
+
+---
+
 ## Useful Patterns
 
 ### Speculative Parsing (fork/advance)
