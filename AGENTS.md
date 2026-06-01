@@ -197,10 +197,6 @@ As of the latest commit:
 - `gourd-check .`: 0 errors across entire codebase (100% pass rate)
 - `gourd-codegen/tests/`: 31 blocks scanned, 0 errors after commenting out unsupported features
 
-## RFCs
-
-RFCs are now written *after the fact* to describe an implemented feature and its design decisions. RFCs are numbered sequentially relative to other RFCs in its folder.
-
 ## Working with files
 
 - If a file is over 400 lines long, consider breaking it into multiple files. 
