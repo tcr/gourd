@@ -274,21 +274,22 @@ fn test_error_signature_check() {
 // ── Slice/map literals inside go! function bodies ────────────────────
 
 
-// NOTE: slice literals not yet implemented in transpiler
-// #[verify_rust_output({fn go_slice_literal() -> Vec<i32> {
-//         return vec![1, 2, 3]
-//     }})]
-// go! {
-//     func goSliceLiteral() []int {
-//         return []int{1, 2, 3}
-//     }
-// }
+// ── Slice literals inside go! function bodies ────────────────────
 
-// #[test]
-// fn test_slice_literal_in_body() {
-//     let v = go_slice_literal();
-//     assert_eq!(v, vec![1i32, 2i32, 3i32]);
-// }
+#[verify_rust_output({fn go_slice_literal() -> Vec<i32> {
+        return vec![1, 2, 3]
+    }})]
+go! {
+    func goSliceLiteral() []int {
+        return []int{1, 2, 3}
+    }
+}
+
+#[test]
+fn test_slice_literal_in_body() {
+    let v = go_slice_literal();
+    assert_eq!(v, vec![1i32, 2i32, 3i32]);
+}
 
 
 // NOTE: empty slice literals not yet implemented

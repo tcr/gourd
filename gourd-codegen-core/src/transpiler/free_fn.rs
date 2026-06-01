@@ -52,7 +52,11 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                     match mapped.len() {
                         1 => {
                             let m = &mapped[0];
-                            quote! { -> #m }
+                            if output.is_slice {
+                                quote! { -> Vec< #m > }
+                            } else {
+                                quote! { -> #m }
+                            }
                         }
                         _ => quote! { -> ( #(#mapped),* ) },
                     }
