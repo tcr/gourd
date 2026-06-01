@@ -1,12 +1,12 @@
 # 🍂 Gourd
 
-> Write Go. Get Rust. At compile time. No runtime overhead.
+> Write Go. Get Rust. At compile time.
 
-Gourd is a compile-time Go-to-Rust transpiler that lets you write Go-style code inside `go!` blocks and get valid Rust output — zero runtime cost.
+Gourd lets you write Go-style code and get valid Rust output — zero runtime overhead, no external tools, no code generation steps.
 
 ## Why Gourd?
 
-- **Zero runtime overhead** — Go code becomes Rust at compile time, not runtime
+- **Zero runtime overhead** — Go code becomes Rust at compile time
 - **Familiar syntax** — write Go declarations, get Rust implementations
 - **Type-safe** — Go types map directly to Rust equivalents (`int` → `i32`, `string` → `String`)
 - **Macro-powered** — no external build steps, no code generation tools
@@ -126,16 +126,6 @@ gourd-check [PATHS...]      # Scan files (default: current directory)
 gourd-check -g PATHS         # Go-only validation
 gourd-check -r PATHS         # Rust-only validation
 ```
-
-## Unsupported forms
-
-Missing Go constructs expand to a compile-time error:
-
-```
-error: TODO: transpile this Go form: channels
-```
-
-Not yet implemented: channels, goroutines, interfaces, `defer`, `panic`, labels, `string(byte_slice)` conversions, closures, async/await.
 
 ## Running tests
 
