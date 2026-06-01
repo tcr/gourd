@@ -103,7 +103,6 @@ fn ts_to_string(ts: &TokenStream) -> String {
                     && matches!(id_str.as_str(), "if" | "for" | "switch" | "return" | "break" | "continue")
                 {
                     s.push(';');
-                    expect_statement_end = false;
                 }
                 if need_space && !s.is_empty() && !s.ends_with(' ') {
                     s.push(' ');

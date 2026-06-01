@@ -77,18 +77,19 @@ gourd-check/
 
 The following Go constructs are NOT yet transpiled — they are commented out in `gourd-codegen/tests/go_fn.rs` with explanatory notes:
 
-| Form | Go example | Rust output | Reason |
-|------|-----------|-------------|--------|
-| Control flow | `if n < 0 { ret = -ret }` | N/A (validation error) | `if` not in `GoStmt` enum |
-| Multi-return | `func foo() (int, string)` | `compile_error!` | Comma-separated return list not parsed |
-| Type conversion | `int(len(s))` | `int(s.len() as i32)` | `int()` not valid Rust (transpiler bug) |
-| Type conversion | `string(bytes)` | `compile_error!` | `string()` not valid Rust |
-| Slice literals | `[]int{1, 2, 3}` | `compile_error!` | `[]...{...}` syntax not handled |
-| Map literals | `map[int]string{1: "one"}` | `compile_error!` | Map literal syntax not implemented |
-| Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering | Struct ordering issue in temp file |
+| Form | Go example | Status |
+|------|-----------|--------|
+| Multi-return | `func foo() (int, string)` | `compile_error!` — comma-separated return list not parsed |
+| Slice literals | `[]int{1, 2, 3}` | `compile_error!` — `[]...{...}` syntax not handled |
+| Map literals | `map[int]string{1: "one"}` | `compile_error!` — map literal syntax not implemented |
+| Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering in temp file |
+
+**Fixed in recent commits:**
+- ✅ Control flow (`if`/`else`) — added `GoIf` variant, `parse_block_stmts`
+- ✅ Type conversions (`int()`, `uint()`, `float32()`, `float64()`, `bool()`, `byte()`, `rune()`, `string()`)
 
 When adding new Go constructs, check which category they fall into:
-- **Parser missing**: Add to `GoStmt` enum in `parsing.rs` (e.g., `if`, `for`)
+- **Parser missing**: Add to `GoStmt` enum in `parsing.rs` (e.g., `for`, `switch` already implemented)
 - **Transpiler missing**: Add to the relevant `go_to_rust_*` function in `free_fn.rs`
 - **Type mapping missing**: Add to `map_go_types` in `types.rs`
 
