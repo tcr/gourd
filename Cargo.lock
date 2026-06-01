@@ -194,6 +194,10 @@ name = "gourd"
 version = "0.1.0"
 dependencies = [
  "gourd-codegen",
+ "gourd-codegen-core",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

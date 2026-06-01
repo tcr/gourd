@@ -13,3 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 gourd-codegen = { path = "gourd-codegen" }
+gourd-codegen-core = { path = "gourd-codegen-core" }
+
+[dev-dependencies]
+gourd-codegen = { path = "gourd-codegen" }
+gourd-codegen-core = { path = "gourd-codegen-core" }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

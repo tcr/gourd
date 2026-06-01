@@ -9,3 +9,9 @@ pub use go_gc::GoGc;
 
 /// Re-export the declaration macro for Go declarations.
 pub use gourd_codegen::go;
+
+/// Compile-time verification attribute for Go declarations.
+pub use gourd_codegen::verify_rust_output;
+
+/// Transpile a Go declaration to Rust tokens (programmatic access).
+pub use gourd_codegen_core::transpile_go;
