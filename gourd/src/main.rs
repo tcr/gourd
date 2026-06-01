@@ -16,10 +16,11 @@
 //! ```
 
 use clap::{Parser, Subcommand};
-use gourd_check::scanner::find_go_blocks;
+use gourd_check::scanner::scan_path;
 use gourd_codegen_core::transpile_go_text;
 use proc_macro2::TokenStream;
 use std::io::Read;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "gourd")]
@@ -44,19 +45,44 @@ fn main() {
     match cli.command {
         Commands::Transpile { input } => {
             let source = read_source(&input);
-            let blocks = find_go_blocks(&source, &input);
+
+            // If input is inline Go code, wrap it in a go! block and parse directly
+            if !input.ends_with(".go") && !input.ends_with(".rs") && input != "-" {
+                // Inline Go code — wrap in macro invocation so scan can extract it
+                let wrapped = format!("go! {{ {} }}", source);
+                let blocks = gourd_check::scanner::find_go_blocks_from_source(
+                    &wrapped, &input,
+                );
+
+                if blocks.is_empty() {
+                    let rust = transpile_go_text(&source);
+                    println!("{}", format_rust_output(&rust));
+                    return;
+                }
+
+                for block in &blocks {
+                    let rust = transpile_go_text(&block.content);
+                    println!("{}", format_rust_output(&rust));
+                }
+                return;
+            }
+
+            // File-based: scan the file
+            let path = PathBuf::from(&input);
+            let blocks = scan_path(&path).unwrap_or_else(|e| {
+                eprintln!("error scanning '{}': {}", input, e);
+                std::process::exit(1);
+            });
 
             if blocks.is_empty() {
-                // No go! blocks found — treat entire source as inline Go code
+                // No go! blocks — print the Go code as-is (or transpile inline)
                 let rust = transpile_go_text(&source);
-                eprintln!("{}", &input);
                 println!("{}", format_rust_output(&rust));
                 return;
             }
 
             for block in &blocks {
                 let rust = transpile_go_text(&block.content);
-                eprintln!("{}:{}", &input, block.line);
                 println!("{}", format_rust_output(&rust));
             }
         }

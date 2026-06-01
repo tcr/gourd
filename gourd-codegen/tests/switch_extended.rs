@@ -1,4 +1,4 @@
-use gourd_codegen::{go, verify_rust_output};
+use gourd_codegen::go;
 
 // NOTE: Switch expressions are commented out because Go doesn't support
 // switch as an expression that returns a value. In Go, switch is a statement.

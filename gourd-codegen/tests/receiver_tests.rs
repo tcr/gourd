@@ -1,4 +1,4 @@
-use gourd_codegen::{go, verify_rust_output};
+use gourd_codegen::go;
 
 
 // NOTE: This block is commented out because Go struct definitions must
