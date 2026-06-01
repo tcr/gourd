@@ -52,8 +52,14 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                     match mapped.len() {
                         1 => {
                             let m = &mapped[0];
-                            if output.is_slice {
-                                quote! { -> Vec< #m > }
+                                                        if output.is_slice {
+                                // Use the stored element type for slices
+                                if let Some(elem) = &output.elem_type {
+                                    let mapped_elem = map_go_types(elem);
+                                    quote! { -> Vec< #mapped_elem > }
+                                } else {
+                                    quote! { -> Vec< #m > }
+                                }
                             } else {
                                 quote! { -> #m }
                             }

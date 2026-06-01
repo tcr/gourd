@@ -80,7 +80,7 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 | Form | Go example | Status |
 |------|-----------|--------|
 | Multi-return | `func foo() (int, string)` | `compile_error!` — comma-separated return list not parsed |
-| Slice literals | `[]int{1, 2, 3}` | `compile_error!` — `[]...{...}` syntax not handled |
+| Slice literals | `[]int{1, 2, 3}` | `vec![1, 2, 3]` — detected via `[]` bracket marker in `GoFnOutput::parse` + `Expr::Macro` dispatch |
 | Map literals | `map[int]string{1: "one"}` | `compile_error!` — map literal syntax not implemented |
 | Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering in temp file |
 
@@ -650,6 +650,15 @@ array slice pointer type `&[T]` instead.
 |----|------|
 | `[]int` | `&[i32]` |
 | `a []int` | `a: &[i32]` |
+| `[]int{1, 2, 3}` (literal) | `vec![1, 2, 3]` |
+
+Slice type detection works via a `[]` bracket marker in `GoFnOutput::parse`.
+When a `[]T` return type is encountered, the element type `T` is stored in
+`GoFnOutput.elem_type` (e.g., `int` → element type for `Vec<i32>`). In
+function bodies, `return []int{1, 2, 3}` is handled by the slice literal
+handler in `parse_go_block` which extracts elements from the brace group
+and generates `vec![1, 2, 3]`. The `Expr::Macro` dispatch in `go_to_rust`
+ensures macro invocations like `vec!` pass through correctly.
 
 ## Go Switch ↔ Rust Match
 

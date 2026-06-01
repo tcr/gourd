@@ -34,8 +34,8 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 | Form | Example | Status |
 |------|---------|--------|
 | Multi-return | `func foo() (int, string)` | Not yet implemented — comma-separated return list |
-| Slice literals | `[]int{1, 2, 3}` | Not yet implemented — `[]...{...}` syntax |
-| Map literals | `map[int]string{1: "one"}` | Not yet implemented — map literal syntax |
+| Slice literals | `[]int{1, 2, 3}` | ✅ Implemented — parsed via `[]` type marker + `Expr::Macro` dispatch |
+| Map literals | `map[int]string{1: "one"}` | Partial — slice type marker detection present but map literal body not yet transpiled |
 | Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering in temp file |
 
 **Fixed in recent commits:**
@@ -46,7 +46,7 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 ## Running
 
 ```bash
-cargo test   # → 43 tests (go! transpilation verify + functional runtime tests)
+cargo test   # → 50 tests (go! transpilation verify + functional runtime tests)
 cargo run -p gourd  # → demo binary output
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```
@@ -118,7 +118,7 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 - **Return statements**: The transpiler always adds explicit `return` before expressions. Expected: `{ return a + b }`, not `{ a + b }`.
 - **Method calls on string/slice**: `len(s)` in Go becomes `s.len() as i32` in Rust (type conversion is wrapped in `int(...)` in (now fully handled — see "Type conversions" section above).
 - **String literals**: `"hello"` in Go becomes `::std::string::String::from("hello")` in Rust.
-- **Slice/map types**: `[]int` becomes `&[i32]`, but slice literals `[]int{...}` are NOT transpiled (produces `compile_error!`).
+- **Slice/map types**: `[]int` becomes `&[i32]`, slice literals `[]int{...}` inside function bodies ARE transpiled (produce `vec![...]`). Go slice type `[]int` in function signatures is detected via `[]` bracket marker in `GoFnOutput::parse` and the element type is stored for `Vec<i32>` return generation.
 
 ## Cross-Language Validation Pattern (the `gourd-check` pattern)
 
@@ -193,7 +193,7 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 ## Current Validation Status
 
 As of the latest commit:
-- `cargo test`: 42 tests passing, 0 failed
+- `cargo test`: 50 tests passing, 0 failed
 - `gourd-check .`: 0 errors across entire codebase (100% pass rate)
 - `gourd-codegen/tests/`: 31 blocks scanned, 0 errors after commenting out unsupported features
 

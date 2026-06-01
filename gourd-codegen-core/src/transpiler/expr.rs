@@ -41,10 +41,11 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Tuple(e)      => transpile_tuple(e),
         Expr::Cast(e)       => transpile_cast(e),
         Expr::Assign(e)     => transpile_assign(e),
-        Expr::Break(e)      => transpile_break(e),
-        Expr::Return(e)     => transpile_return(e),
+        Expr::Break(e)        => transpile_break(e),
+        Expr::Return(e)       => transpile_return(e),
+        Expr::Macro(e)        => go_to_rust_macro(e),
         Expr::Verbatim(tokens) => transpile_verbatim(tokens),
-        _                   => emit_todo("unsupported Go form"),
+        _                     => emit_todo("unsupported Go form"),
     }
 }
 
@@ -175,6 +176,12 @@ fn transpile_return(input: &syn::ExprReturn) -> TokenStream {
         Some(e) => quote! { return #e },
         None => quote! { return },
     }
+}
+
+/// Handle Rust macro invocations (e.g. `vec![...]`) passed through `quote!`.
+/// These are valid Rust already — just emit the macro tokens as-is.
+fn go_to_rust_macro(input: &syn::ExprMacro) -> TokenStream {
+    quote! { #input }
 }
 
 fn transpile_call(input: &syn::ExprCall) -> TokenStream {
