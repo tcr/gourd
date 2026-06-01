@@ -12,4 +12,4 @@ name = "gourd"
 path = "src/main.rs"
 
 [dependencies]
-gourd-codegen = { path = "../gourd-codegen" }
+gourd-codegen = { path = "gourd-codegen" }
