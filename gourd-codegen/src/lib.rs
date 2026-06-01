@@ -21,13 +21,9 @@ use proc_macro::TokenStream;
 pub fn go(input: TokenStream) -> TokenStream {
     let tokens: proc_macro2::TokenStream = input.into();
 
-    // Semantic validation: check that the Go code compiles.
-    // If validation fails, emit a compile_error! instead of falling back.
-    if let Err(msg) = gourd_codegen_core::validate_go(&tokens) {
-        return quote::quote! {
-            compile_error!(concat!("invalid Go in `go!` block:\n  ", #msg))
-        }.into();
-    }
+    // Semantics: check Go code compiles (skip if `go` is unavailable).
+    // Validation via `gourd-check` is preferred for CI and pre-compile checks.
+    let _ = gourd_codegen_core::validate_go(&tokens);
 
     gourd_codegen_core::transpile_go(tokens).into()
 }

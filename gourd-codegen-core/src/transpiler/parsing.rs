@@ -19,7 +19,7 @@ pub(crate) enum GoStmt {
     If(GoIf),
     Expr(Expr),
     GoSlice(Vec<Expr>),
-    GoMap(String, Option<syn::Type>, Option<syn::Type>, Vec<(Expr, Expr)>), // (ident, key_type, val_type, entries)
+    GoMap(String, Option<Box<syn::Type>>, Option<Box<syn::Type>>, Vec<(Expr, Expr)>), // (ident, key_type, val_type, entries)
     GoReturn(Vec<Expr>),  // multi-return: `return a, b`
     Switch(Switch),
 }
@@ -392,463 +392,311 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
 
     let mut stmts = Vec::new();
     while !brace_content.is_empty() {
-        // 1. Try syn::Local (handles `let x = ...` declarations)
-        let fork = brace_content.fork();
-        if fork.peek(syn::token::Let) {
-            match fork.parse::<Stmt>() {
-                Ok(Stmt::Local(_)) => {
-                    if let Ok(Stmt::Local(local)) = brace_content.parse() {
-                        stmts.push(GoStmt::Local(local));
-                        if brace_content.peek(token::Semi) {
-                            let _semi: token::Semi = brace_content.parse()?;
-                        }
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-            // Handle `let m = map[K]V{...}` when syn can't parse the value
-            let let_fork = brace_content.fork();
-            if let_fork.parse::<syn::token::Let>().is_ok()
-                && let_fork.parse::<syn::Ident>().is_ok()
-                && let_fork.parse::<syn::token::Eq>().is_ok()
-            {
-                if let_fork.peek(syn::Ident) {
-                    let map_fork = let_fork.fork();
-                    if let Ok(kw) = map_fork.parse::<syn::Ident>() {
-                        if kw == "map" && map_fork.peek(syn::token::Bracket) {
-                            // Parse: `let m = map[K]V{entries}`
-                            brace_content.parse::<syn::token::Let>()?;
-                            let ident = brace_content.parse::<syn::Ident>()?;
-                            let ident_str = ident.to_string();
-                            brace_content.parse::<syn::token::Eq>()?;
-                            // Parse map literal `map[K]V{entries}`
-                            brace_content.parse::<syn::Ident>()?;
-                            // Capture key type
-                            let k_content;
-                            let _ = syn::bracketed!(k_content in brace_content);
-                            let key_type = if !k_content.is_empty() {
-                                if let Ok(t) = k_content.parse::<syn::Type>() {
-                                    Some(t)
-                                } else {
-                                    let _: TokenStream = k_content.parse()?;
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-                            // Capture value type
-                            let val_type = if brace_content.peek(syn::Ident) || brace_content.peek(syn::token::Bracket) {
-                                if let Ok(t) = brace_content.parse::<syn::Type>() {
-                                    Some(t)
-                                } else {
-                                    let _: TokenStream = brace_content.parse()?;
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-                            // Skip `{...}` group and parse entries
-                            let m_content = brace_content.step(|cursor| {
-                                if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
-                                    Ok((inner.token_stream(), rest))
-                                } else {
-                                    Err(cursor.error("expected `{`"))
-                                }
-                            });
-                            let mut entries = Vec::new();
-                            if let Ok(inner_ts) = m_content {
-                                                                if !inner_ts.is_empty() {
-                                    let parser: MapEntryParser = syn::parse2(inner_ts).unwrap_or_default();
-                                    entries = parser.entries;
-                                }
-                                stmts.push(GoStmt::GoMap(ident_str, key_type, val_type, entries));
-                                if brace_content.peek(token::Semi) {
-                                    let _semi: token::Semi = brace_content.parse()?;
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
+        // Check for Go-specific constructs first (maps, slices, if, switch, return)
+        if parse_go_special_stmt(&brace_content, &mut stmts)? {
+            continue; // Handled by the special case
         }
-
-        // 2. Check for Go slice literal: []...{...}
-        let fork = brace_content.fork();
-        if fork.peek(syn::token::Bracket) {
-            let _bracket;
-            let bracket_content;
-            _bracket = syn::bracketed!(bracket_content in fork);
-
-            if !bracket_content.is_empty() {
-                let type_fork = bracket_content.fork();
-                if type_fork.parse::<syn::Type>().is_ok() {
-                    let _: syn::Type = bracket_content.parse()?;
-                } else {
-                    let _: TokenStream = bracket_content.parse()?;
-                }
-            }
-
-            let type_fork = fork.fork();
-            if type_fork.parse::<syn::Type>().is_ok() {
-                let _: syn::Type = fork.parse()?;
-            }
-
-            if fork.peek(syn::token::Brace) {
-                use proc_macro2::TokenTree;
-                brace_content.advance_to(&fork);
-                let group_stream: TokenStream = fork.parse()?;
-                if let Some(TokenTree::Group(group)) = group_stream
-                    .into_iter()
-                    .next()
-                    .and_then(|t| {
-                        if let TokenTree::Group(g) = t { Some(TokenTree::Group(g)) } else { None }
-                    })
-                    && group.delimiter() == proc_macro2::Delimiter::Brace
-                {
-                    let inner_ts = group.stream();
-                    let mut elems = Vec::new();
-                    if !inner_ts.is_empty() {
-                        let parser: ElemParser = syn::parse2(inner_ts).unwrap_or_default();
-                        elems = parser.elems;
-                    }
-                    let _rest = brace_content.step(|cursor| {
-                        if let Some((_, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
-                            Ok(((), rest))
-                        } else {
-                            Err(cursor.error("expected `{`"))
-                        }
-                    });
-                    stmts.push(GoStmt::GoSlice(elems));
-                    continue;
-                }
-            }
-        }
-
-        // 3. Check for if statement
-        let fork = brace_content.fork();
-        if fork.peek(syn::Ident) {
-            if let Ok(kw) = fork.parse::<syn::Ident>() {
-                let kw_str = kw.to_string();
-                if kw_str == "if" {
-                    brace_content.parse::<syn::Ident>()?; // consume 'if'
-                    let cond: Expr = brace_content.parse()?;
-                    let then_block_content;
-                    let _brace = syn::braced!(then_block_content in brace_content);
-                    let then_block = parse_block_stmts(&then_block_content)?;
-
-                    // Check for else/else if
-                    let else_block = if brace_content.peek(syn::Ident) {
-                        let else_fork = brace_content.fork();
-                        if let Ok(else_kw) = else_fork.parse::<syn::Ident>()
-                            && else_kw.to_string() == "else"
-                        {
-                            brace_content.parse::<syn::Ident>()?; // consume 'else'
-                            if brace_content.peek(syn::token::Brace) {
-                                let else_block_content;
-                                let _brace = syn::braced!(else_block_content in brace_content);
-                                Some(GoBlock { stmts: parse_block_stmts(&else_block_content)? })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    stmts.push(GoStmt::If(GoIf {
-                        cond,
-                        then_block: GoBlock { stmts: then_block },
-                        else_block,
-                    }));
-                    continue;
-                }
-            }
-        }
-
-        // 3. Check for switch statement
-        let fork = brace_content.fork();
-        if fork.peek(syn::Ident) {
-            if let Ok(kw) = fork.parse::<syn::Ident>() {
-                let kw_str = kw.to_string();
-                if kw_str == "switch" {
-                    let parsed_switch = brace_content.parse::<Switch>()?;
-                    stmts.push(GoStmt::Switch(parsed_switch));
-                    continue;
-                }
-            }
-        }
-
-        // 3.5. Handle Go short variable declaration: `id := expr`
-        let fork = brace_content.fork();
-        if fork.peek(syn::Ident) {
-            let id_fork = fork.fork();
-            if id_fork.parse::<syn::Ident>().is_ok()
-                && id_fork.parse::<syn::token::Colon>().is_ok()
-                && id_fork.peek(syn::token::Eq)
-            {
-                let ident = brace_content.parse::<syn::Ident>()?;
-                let ident_str = ident.to_string();
-                let _: syn::token::Colon = brace_content.parse()?;
-                let _: syn::token::Eq = brace_content.parse()?;
-
-                // Check if the value is a map literal: `map[K]V{...}`
-                {
-                    // Verify: next token is `map`, followed by `[`
-                    let map_fork = brace_content.fork();
-                    let is_map_keyword = map_fork.parse::<syn::Ident>().is_ok();
-                    if is_map_keyword && map_fork.peek(syn::token::Bracket) {
-                        // Consume `map` from the main stream
-                        brace_content.parse::<syn::Ident>()?;
-
-                        // Skip past `[K]V` — tokens between `map` and `{`
-                        while !brace_content.is_empty() && !brace_content.peek(syn::token::Brace) {
-                            let token = brace_content.parse::<proc_macro2::TokenTree>()?;
-                            // If it's a brace group, entries are inside it
-                            if let proc_macro2::TokenTree::Group(g) = &token
-                                && g.delimiter() == proc_macro2::Delimiter::Brace
-                            {
-                                let parser: MapEntryParser = syn::parse2(g.stream()).unwrap_or_default();
-                                let entries = parser.entries;
-                                stmts.push(GoStmt::GoMap(ident_str.clone(), None, None, entries));
-                                if brace_content.peek(token::Semi) {
-                                    let _semi: token::Semi = brace_content.parse()?;
-                                }
-                                continue;
-                            }
-                        }
-                        // At this point we should be at `{` — parse entries
-                        if brace_content.peek(syn::token::Brace) {
-                            let m_content;
-                            let _ = syn::braced!(m_content in brace_content);
-                            let mut entries = Vec::new();
-                            if !m_content.is_empty() {
-                                let parser: MapEntryParser = m_content.parse().unwrap_or_default();
-                                entries = parser.entries;
-                            }
-                            stmts.push(GoStmt::GoMap(ident_str, None, None, entries));
-                            if brace_content.peek(token::Semi) {
-                                let _semi: token::Semi = brace_content.parse()?;
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                // Standard case: `id := expr`
-                let val: Expr = brace_content.parse()?;
-                let val_rust = go_to_rust(&val);
-                stmts.push(GoStmt::GoLocal(ident, val_rust));
-                if brace_content.peek(token::Semi) {
-                    let _semi: token::Semi = brace_content.parse()?;
-                }
-                continue;
-            }
-        }
-
-        // 3.8. Handle `return []...{...}` (Go slice literal in return)
-        let adv_fork = brace_content.fork();
-        if adv_fork.peek(syn::token::Return) {
-            let _ret: syn::token::Return = adv_fork.parse()?;
-            let after_ret = adv_fork.fork();
-            if after_ret.peek(syn::token::Bracket) {
-                let _br;
-                let br_content;
-                _br = syn::bracketed!(br_content in after_ret);
-                if !after_ret.peek(syn::token::Brace) {
-                    let _ = after_ret.parse::<syn::Ident>();
-                }
-                if after_ret.peek(syn::token::Brace) {
-                    // Make adv_fork consume everything up to and including `{`
-                    brace_content.parse::<syn::token::Return>()?;
-                    brace_content.advance_to(&adv_fork);
-                    // Consume `[]` and type from main stream
-                    let _br2;
-                    let br2;
-                    _br2 = syn::bracketed!(br2 in brace_content);
-                    if !brace_content.peek(syn::token::Brace) {
-                        let _ = brace_content.parse::<syn::Ident>();
-                    }
-                    // Parse the brace group with elements
-                    let mut inner_group: Option<proc_macro2::TokenStream> = None;
-                    let elems_fork = brace_content.fork();
-                    if let Ok(_result) = elems_fork.step(|cursor| {
-                        match cursor.group(proc_macro2::Delimiter::Brace) {
-                            Some((inner, _span, rest)) => {
-                                inner_group = Some(inner.token_stream());
-                                Ok((inner.token_stream(), rest))
-                            }
-                            None => Err(syn::Error::new(proc_macro2::Span::call_site(), "expected `{`")),
-                        }
-                    }) {
-                        if let Some(inner_ts) = inner_group.take() {
-                            if !inner_ts.is_empty() {
-                                let parser: ElemParser = syn::parse2(inner_ts.clone()).unwrap_or_default();
-                                let rust_elems: Vec<_> = parser.elems.iter().map(|e| go_to_rust(e)).collect();
-                                let body = quote! { return vec![ #(#rust_elems),* ] };
-                                stmts.push(GoStmt::Expr(parse_quote! { #body }));
-                                // Skip the group token from the main stream
-                                let _ = brace_content.parse::<proc_macro2::TokenTree>();
-                                if brace_content.peek(token::Semi) {
-                                    let _semi: token::Semi = brace_content.parse()?;
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3.9. Handle multi-return: `return a, b`
-        // Go's return statement can have multiple comma-separated expressions.
-        // Transpile to Rust tuple: `return (a, b)`
-        {
-            let ret_fork = brace_content.fork();
-            if ret_fork.peek(syn::token::Return) {
-                let after_ret = ret_fork.fork();
-                let _ = after_ret.parse::<syn::token::Return>();
-                if !after_ret.is_empty() {
-                    let expr_fork = after_ret.fork();
-                    if expr_fork.parse::<Expr>().is_ok() {
-                        brace_content.parse::<syn::token::Return>()?;
-                        brace_content.advance_to(&after_ret);
-                        // Collect comma-separated expressions after return
-                        let mut multi_exprs: Vec<Expr> = Vec::new();
-                        // Parse first expression
-                        let first = brace_content.parse::<Expr>()?;
-                        // Check if there's a comma → multi-return
-                        let multi_fork = brace_content.fork();
-                        if multi_fork.peek(token::Comma) {
-                            // Multi-return: collect all expressions
-                            multi_exprs.push(first);
-                            brace_content.parse::<token::Comma>()?;
-                            loop {
-                                if brace_content.peek(syn::token::Brace) {
-                                    break;
-                                }
-                                let local_fork = brace_content.fork();
-                                // Stop at Go keywords that start new statements
-                                if local_fork.peek(syn::Ident) {
-                                    let kw_fork = local_fork.fork();
-                                    if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
-                                        let kw_str = kw.to_string();
-                                        if matches!(kw_str.as_str(),
-                                            "if" | "for" | "return" | "switch" | "case" | "default") {
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Try to parse an expression
-                                let next_fork = brace_content.fork();
-                                if next_fork.parse::<Expr>().is_ok() {
-                                    let expr = brace_content.parse::<Expr>()?;
-                                    multi_exprs.push(expr);
-                                    if brace_content.peek(token::Comma) {
-                                        brace_content.parse::<token::Comma>()?;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                            stmts.push(GoStmt::GoReturn(multi_exprs));
-                        } else {
-                            // Single return
-                            stmts.push(GoStmt::Expr(parse_quote! { return #first }));
-                        }
-                        if brace_content.peek(token::Semi) {
-                            let _semi: token::Semi = brace_content.parse()?;
-                        }
-                        continue;
-                    }
-                }
-                // `return` with no expression
-                stmts.push(GoStmt::Expr(parse_quote! { return }));
-                if brace_content.peek(token::Semi) {
-                    let _semi: token::Semi = brace_content.parse()?;
-                }
-                continue;
-            }
-        }
-
-        // 4. Try standard expression parsing via speculative parse
-        let fork = brace_content.fork();
-        if let Ok(expr) = fork.parse::<Expr>() {
-            brace_content.advance_to(&fork);
-            stmts.push(GoStmt::Expr(expr));
-            if brace_content.peek(token::Semi) {
-                let _semi: token::Semi = brace_content.parse()?;
-            }
-            continue;
-        }
-
-        // 4. Check for Go map literal: map[K]V{...}
-        let fork = brace_content.fork();
-        if fork.peek(syn::Ident) {
-            if let Ok(ident) = fork.parse::<syn::Ident>() {
-                if ident == "map" && fork.peek(syn::token::Bracket) {
-    brace_content.parse::<syn::Ident>()?;
-    let k_content;
-    let _ = syn::bracketed!(k_content in brace_content);
-    if !k_content.is_empty() {
-                        if k_content.parse::<syn::Type>().is_err() {
-                            let _: TokenStream = k_content.parse()?;
-                        }
-                    }
-                    if brace_content.peek(syn::Ident) || brace_content.peek(syn::token::Bracket) {
-                        if brace_content.parse::<syn::Type>().is_err() {
-                            let _: TokenStream = brace_content.parse()?;
-                        }
-                    }
-                    let m_content = brace_content.step(|cursor| {
-                        if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
-                            Ok((inner.token_stream(), rest))
-                        } else {
-                            Err(cursor.error("expected `{`"))
-                        }
-                    });
-                    let mut entries = Vec::new();
-                    if let Ok(inner_ts) = m_content {
-                        if !inner_ts.is_empty() {
-                            let parser: MapEntryParser = syn::parse2(inner_ts).unwrap_or_default();
-                            entries = parser.entries;
-                        }
-                        stmts.push(GoStmt::GoMap(String::new(), None, None, entries));
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // 5. Nothing matched — advance past one token to avoid infinite loop
-        // Use a fork + advance_to pattern since syn::Expr::parse() doesn't
-        // advance on failure
-        let skip_fork = brace_content.fork();
-        if let Ok(_expr) = skip_fork.parse::<syn::Expr>() {
-            brace_content.advance_to(&skip_fork);
-            if brace_content.peek(token::Semi) {
-                let _semi: token::Semi = brace_content.parse()?;
-            }
-        } else {
-            // Failed to parse as Expr — skip one token tree to make progress
-            // This handles unparseable tokens like map syntax that slipped through
-            let _ = brace_content.parse::<proc_macro2::TokenTree>();
-        }
+        // Fall back to the base parser for common statements
+        parse_base_stmt(&brace_content, &mut stmts)?;
     }
 
     Ok(GoBlock { stmts })
 }
 
+/// Try to parse a Go-specific statement from the input.
+/// Returns `true` if a statement was parsed (consuming input), `false` to fall back.
+pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
+    // 1. Check for Go slice literal: []...{...}
+    if input.peek(syn::token::Bracket) {
+        if let Ok(()) = parse_go_slice_literal(input, stmts) {
+            return Ok(true);
+        }
+    }
+
+    // 3. Check for if statement
+    if input.peek(syn::Ident) {
+        if let Ok(kw) = input.fork().parse::<syn::Ident>() {
+            if kw.to_string() == "if" {
+                return parse_go_if(input, stmts);
+            }
+        }
+    }
+
+    // 4. Check for switch statement
+    if input.peek(syn::Ident) {
+        if let Ok(kw) = input.fork().parse::<syn::Ident>() {
+            if kw.to_string() == "switch" {
+                let parsed_switch = input.parse::<Switch>()?;
+                stmts.push(GoStmt::Switch(parsed_switch));
+                return Ok(true);
+            }
+        }
+    }
+
+    // 5. Check for return (including multi-return and slice returns)
+    if input.peek(syn::token::Return) {
+        return parse_go_return(input, stmts);
+    }
+
+    // No Go-specific statement matched
+    Ok(false)
+}
+
+/// Handle Go-style `id := map[K]V{entries}` map literal declaration.
+/// Called from `parse_base_stmt` when a map short-declaration is detected.
+fn parse_go_map_decl(input: ParseStream, ident_str: String, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
+    eprintln!("DEBUG parse_go_map_decl: ident_str={:?}", ident_str);
+    // Parse map literal: `map[K]V{entries}`
+    let _kw: syn::Ident = input.parse()?; // consume 'map'
+
+    // Capture key type from `[K]` using manual token advancement
+    // (Go tokenizes [ and ] as separate punctuation, not a bracket group)
+    let mut key_type: Option<Box<syn::Type>> = None;
+    let bracket_fork = input.fork();
+    if bracket_fork.peek(syn::token::Bracket) {
+        input.advance_to(&bracket_fork);
+        let _ts: proc_macro2::TokenTree = input.parse()?; // skip `[`
+        // Parse the key type directly from input
+        key_type = input.parse::<syn::Type>().ok().map(Box::new);
+        // Skip the `]` punctuation token
+        if !input.is_empty() && input.peek(syn::token::Bracket) {
+            let _ts: proc_macro2::TokenTree = input.parse()?;
+        }
+    }
+
+    // Capture value type (only if next token isn't `{`)
+    let val_type = if !input.peek(syn::token::Brace) {
+        input.parse::<syn::Type>().ok().map(Box::new)
+    } else {
+        None
+    };
+    // Parse `{...}` entries
+    let m_content = input.step(|cursor| {
+        if let Some((inner, _, rest)) = cursor.group(proc_macro2::Delimiter::Brace) {
+            Ok((inner.token_stream(), rest))
+        } else {
+            Err(cursor.error("expected `{`"))
+        }
+    });
+    let mut entries = Vec::new();
+    if let Ok(inner_ts) = m_content {
+        if !inner_ts.is_empty() {
+            let parser: MapEntryParser = syn::parse2(inner_ts).unwrap_or_default();
+            entries = parser.entries;
+        }
+    }
+    stmts.push(GoStmt::GoMap(ident_str, key_type, val_type, entries));
+    if input.peek(token::Semi) {
+        let _semi: token::Semi = input.parse()?;
+    }
+    Ok(())
+}
+
+/// Parse `[]T{...}` slice literal at the start of a statement.
+/// Manually advances past `[` and `]` punctuation, then parses elements from `{...}`.
+fn parse_go_slice_literal(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
+    let fork = input.fork();
+    // Check `[` punctuation (not a bracket group — Go has separate `[` and `]` punctuation)
+    if fork.peek(syn::token::Bracket) {
+        // Manually advance past `[` and `]` punctuation, consuming any type between them
+        input.advance_to(&fork); // advance to `[`
+        // Skip the `[` punctuation as a TokenTree
+        let _ts: proc_macro2::TokenTree = input.parse()?;
+
+        // Consume tokens until we reach `]` or `{`
+        while !input.is_empty() && !input.peek(syn::token::Bracket) && !input.peek(syn::token::Brace) {
+            let _ = input.parse::<proc_macro2::TokenTree>()?;
+        }
+        if !input.is_empty() && input.peek(syn::token::Bracket) {
+            // Skip the `]` punctuation as a TokenTree
+            let _ts: proc_macro2::TokenTree = input.parse()?;
+        }
+        // Skip any type tokens between `]` and `{`
+        while !input.is_empty() && !input.peek(syn::token::Brace) {
+            let _ = input.parse::<proc_macro2::TokenTree>()?;
+        }
+
+        // Now we should be at `{` — manually parse elements, consume `}`
+        if input.peek(syn::token::Brace) {
+            let _ts: proc_macro2::TokenTree = input.parse()?; // consume `{`
+            // Parse elements until we hit `}`
+            let mut elems = Vec::new();
+            while !input.is_empty() && !input.peek(syn::token::Brace) {
+                let _expr: Expr = input.parse()?;
+                elems.push(_expr);
+                if input.peek(syn::token::Comma) {
+                    let _ = input.parse::<syn::token::Comma>();
+                } else {
+                    break;
+                }
+            }
+            if input.peek(syn::token::Brace) {
+                let _ts: proc_macro2::TokenTree = input.parse()?; // consume `}`
+            }
+            stmts.push(GoStmt::GoSlice(elems));
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(());
+        }
+    }
+    // Not a slice literal — return error to signal "no match"
+    Err(syn::Error::new(proc_macro2::Span::call_site(), "expected slice literal"))
+}
+
+/// Parse `if cond { body } else { ... }`.
+fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
+    input.parse::<syn::Ident>()?; // consume 'if'
+    let cond: Expr = input.parse()?;
+    let then_block_content;
+    let _brace = syn::braced!(then_block_content in input);
+    let then_block = parse_block_stmts(&then_block_content)?;
+
+    let else_block = if input.peek(syn::Ident) {
+        let else_fork = input.fork();
+        if let Ok(else_kw) = else_fork.parse::<syn::Ident>()
+            && else_kw.to_string() == "else"
+        {
+            input.parse::<syn::Ident>()?; // consume 'else'
+            if input.peek(syn::token::Brace) {
+                let else_block_content;
+                let _brace = syn::braced!(else_block_content in input);
+                Some(GoBlock { stmts: parse_block_stmts(&else_block_content)? })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    stmts.push(GoStmt::If(GoIf {
+        cond,
+        then_block: GoBlock { stmts: then_block },
+        else_block,
+    }));
+    Ok(true)
+}
+
+/// Parse `return` — handles `return val`, `return a, b` (multi-return),
+/// and `return []T{...}` (slice in return).
+fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
+    input.parse::<syn::token::Return>()?;
+
+    // Check for `return []T{...}` (Go slice literal in return)
+    let adv_fork = input.fork();
+    if adv_fork.peek(syn::token::Bracket) {
+        // Manually advance past `[` and `]` punctuation, consuming type tokens
+        input.advance_to(&adv_fork); // advance to `[`
+        // Skip the `[` punctuation token
+        let _ts: proc_macro2::TokenTree = input.parse()?;
+        // Skip tokens between `[]` and `{`
+        while !input.is_empty() && !input.peek(syn::token::Bracket) && !input.peek(syn::token::Brace) {
+            let _ = input.parse::<proc_macro2::TokenTree>()?;
+        }
+        if !input.is_empty() && input.peek(syn::token::Bracket) {
+            // Skip the `]` punctuation token
+            let _ts: proc_macro2::TokenTree = input.parse()?;
+        }
+        // Skip any type tokens between `]` and `{`
+        while !input.is_empty() && !input.peek(syn::token::Brace) {
+            let _ = input.parse::<proc_macro2::TokenTree>()?;
+        }
+        if input.peek(syn::token::Brace) {
+            // Parse the brace-delimited group (Go `{1, 2, 3}` in the token stream)
+            let m_content;
+            let _ = syn::braced!(m_content in input);
+            let mut elems = Vec::new();
+            while !m_content.is_empty() {
+                if let Ok(expr) = m_content.parse::<Expr>() {
+                    elems.push(expr);
+                    if m_content.peek(syn::token::Comma) {
+                        let _ = m_content.parse::<syn::token::Comma>();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            let rust_elems: Vec<_> = elems.iter().map(|e| go_to_rust(e)).collect();
+            stmts.push(GoStmt::Expr(parse_quote! { return vec![ #(#rust_elems),* ] }));
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+    }
+
+    // Check for multi-return: `return a, b`
+    let after_ret = input.fork();
+    if !after_ret.is_empty() {
+        let expr_fork = after_ret.fork();
+        if expr_fork.parse::<Expr>().is_ok() {
+            input.advance_to(&after_ret);
+            let first = input.parse::<Expr>()?;
+            let multi_fork = input.fork();
+            if multi_fork.peek(token::Comma) {
+                // Multi-return: collect all expressions
+                let mut multi_exprs: Vec<Expr> = vec![first];
+                input.parse::<token::Comma>()?;
+                loop {
+                    if input.peek(syn::token::Brace) {
+                        break;
+                    }
+                    let local_fork = input.fork();
+                    // Stop at Go keywords that start new statements
+                    if local_fork.peek(syn::Ident) {
+                        let kw_fork = local_fork.fork();
+                        if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
+                            let kw_str = kw.to_string();
+                            if matches!(kw_str.as_str(),
+                                "if" | "for" | "return" | "switch" | "case" | "default") {
+                                break;
+                            }
+                        }
+                    }
+                    let next_fork = input.fork();
+                    if next_fork.parse::<Expr>().is_ok() {
+                        let expr = input.parse::<Expr>()?;
+                        multi_exprs.push(expr);
+                        if input.peek(token::Comma) {
+                            input.parse::<token::Comma>()?;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                stmts.push(GoStmt::GoReturn(multi_exprs));
+            } else {
+                // Single return
+                stmts.push(GoStmt::Expr(parse_quote! { return #first }));
+            }
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+    }
+
+    // `return` with no expression
+    stmts.push(GoStmt::Expr(parse_quote! { return }));
+    if input.peek(token::Semi) {
+        let _semi: token::Semi = input.parse()?;
+    }
+    Ok(true)
+}
+
 // ─── Inline parse helpers used inside parse_go_block and free_fn ───────
 
+/// Parse comma-separated expressions from a group (e.g., slice elements).
 #[derive(Default)]
-struct ElemParser {
-    elems: Vec<Expr>,
+pub(crate) struct ElemParser {
+    pub(crate) elems: Vec<Expr>,
 }
 impl Parse for ElemParser {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -866,9 +714,10 @@ impl Parse for ElemParser {
     }
 }
 
+/// Parse key:value map entries from a group (e.g., map literal contents).
 #[derive(Default)]
-struct MapEntryParser {
-    entries: Vec<(Expr, Expr)>,
+pub(crate) struct MapEntryParser {
+    pub(crate) entries: Vec<(Expr, Expr)>,
 }
 impl Parse for MapEntryParser {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -898,6 +747,9 @@ impl Parse for MapEntryParser {
     }
 }
 
+// ─── Helper functions for parsing slice/map elements ───────────────────
+
+/// Parse key:value map entries from a token stream.
 // ─── Free function: go_stmt_to_rust (bridging function) ────────────────
 
 pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
@@ -950,11 +802,15 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
 
 fn go_stmt_to_rust_map(
     ident: &str,
-    key_type: &Option<syn::Type>,
-    val_type: &Option<syn::Type>,
+    key_type: &Option<Box<syn::Type>>,
+    val_type: &Option<Box<syn::Type>>,
     entries: &[(Expr, Expr)],
 ) -> TokenStream {
     use super::types::map_go_types;
+
+    eprintln!("DEBUG map: ident={:?}, key={:?}, val={:?}, entries={}",
+        ident, key_type.as_ref().map(|t| quote! { #t }),
+        val_type.as_ref().map(|t| quote! { #t }), entries.len());
 
     if entries.is_empty() {
         if ident.is_empty() {
@@ -1010,57 +866,102 @@ fn go_stmt_to_rust_map(
 pub(crate) fn parse_block_stmts(input: ParseStream) -> syn::Result<Vec<GoStmt>> {
     let mut stmts = Vec::new();
     while !input.is_empty() {
-        // 1. Try syn::Local (handles `let x = ...` declarations)
-        let fork = input.fork();
-        if fork.peek(syn::token::Let) {
-            match fork.parse::<Stmt>() {
-                Ok(Stmt::Local(_)) => {
-                    if let Ok(Stmt::Local(local)) = input.parse() {
-                        stmts.push(GoStmt::Local(local));
-                        if input.peek(token::Semi) {
-                            let _semi: token::Semi = input.parse()?;
-                        }
-                        continue;
+        parse_base_stmt(input, &mut stmts)?;
+    }
+    Ok(stmts)
+}
+
+/// Parse a single statement from a block — the common case shared between
+/// `parse_block_stmts` and `parse_go_block`. Handles:
+///   - `let` local declarations
+///   - Go short declarations (`id := expr`)
+///   - Standard expressions
+///   - Skips tokens that don't match (to avoid infinite loops)
+fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
+    // 1. Try syn::Local (handles `let x = ...` declarations)
+    let fork = input.fork();
+    if fork.peek(syn::token::Let) {
+        match fork.parse::<Stmt>() {
+            Ok(Stmt::Local(_)) => {
+                if let Ok(Stmt::Local(local)) = input.parse() {
+                    stmts.push(GoStmt::Local(local));
+                    if input.peek(token::Semi) {
+                        let _semi: token::Semi = input.parse()?;
+                    }
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
+
+        // Handle Go-style `let m = map[K]V{entries}` when syn can't parse
+        let let_fork = input.fork();
+        if let_fork.parse::<syn::token::Let>().is_ok()
+            && let_fork.parse::<syn::Ident>().is_ok()
+            && let_fork.parse::<syn::token::Eq>().is_ok()
+        {
+            if let_fork.peek(syn::Ident) {
+                let map_fork = let_fork.fork();
+                if let Ok(kw) = map_fork.parse::<syn::Ident>() {
+                    if kw == "map" && map_fork.peek(syn::token::Bracket) {
+                        // Parse: `let m = map[K]V{entries}`
+                        input.parse::<syn::token::Let>()?;
+                        let ident = input.parse::<syn::Ident>()?;
+                        let ident_str = ident.to_string();
+                        input.parse::<syn::token::Eq>()?;
+                        // Use the map decl parser
+                        eprintln!("DEBUG: let path calling parse_go_map_decl, ident_str={:?}", ident_str);
+                        return parse_go_map_decl(input, ident_str, stmts);
                     }
                 }
-                _ => {}
             }
         }
+    }
 
-        // Handle Go short variable declaration: `id := expr`
-        let fork = input.fork();
-        if fork.peek(syn::Ident) {
-            let id_fork = fork.fork();
-            if id_fork.parse::<syn::Ident>().is_ok()
-                && id_fork.parse::<syn::token::Colon>().is_ok()
-                && id_fork.peek(syn::token::Eq)
-            {
-                let ident = input.parse::<syn::Ident>()?;
-                let _: syn::token::Colon = input.parse()?;
-                let _: syn::token::Eq = input.parse()?;
-                let val: Expr = input.parse()?;
-                let val_rust = go_to_rust(&val);
-                stmts.push(GoStmt::GoLocal(ident, val_rust));
-                if input.peek(token::Semi) {
-                    let _semi: token::Semi = input.parse()?;
+    // Handle Go short variable declaration: `id := expr`
+    let fork = input.fork();
+    if fork.peek(syn::Ident) {
+        let id_fork = fork.fork();
+        if id_fork.parse::<syn::Ident>().is_ok()
+            && id_fork.parse::<syn::token::Colon>().is_ok()
+            && id_fork.peek(syn::token::Eq)
+        {
+            let ident = input.parse::<syn::Ident>()?;
+            let _: syn::token::Colon = input.parse()?;
+            let _: syn::token::Eq = input.parse()?;
+            // Check if the value is a Go map literal: `map[K]V{...}`
+            let val_fork = input.fork();
+            let map_fork = val_fork.fork();
+            if let Ok(first_tt) = map_fork.parse::<proc_macro2::TokenTree>() {
+                if let proc_macro2::TokenTree::Ident(map_kw) = &first_tt {
+                    if *map_kw == "map" {
+                        return parse_go_map_decl(input, ident.to_string(), stmts);
+                    }
                 }
-                continue;
             }
-        }
-
-        // Try standard expression parsing
-        let fork = input.fork();
-        if let Ok(expr) = fork.parse::<Expr>() {
-            input.advance_to(&fork);
-            stmts.push(GoStmt::Expr(expr));
+            // Standard value expression
+            let val: Expr = input.parse()?;
+            let val_rust = go_to_rust(&val);
+            stmts.push(GoStmt::GoLocal(ident, val_rust));
             if input.peek(token::Semi) {
                 let _semi: token::Semi = input.parse()?;
             }
-            continue;
+            return Ok(());
         }
-
-        // Nothing matched — skip one token tree to make progress
-        let _ = input.parse::<proc_macro2::TokenTree>();
     }
-    Ok(stmts)
+
+    // Try standard expression parsing
+    let fork = input.fork();
+    if let Ok(expr) = fork.parse::<Expr>() {
+        input.advance_to(&fork);
+        stmts.push(GoStmt::Expr(expr));
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(());
+    }
+
+    // Nothing matched — skip one token tree to make progress
+    let _ = input.parse::<proc_macro2::TokenTree>();
+    Ok(())
 }

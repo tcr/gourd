@@ -4,57 +4,72 @@ use super::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::parse::discouraged::Speculative;
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{Expr, Ident};
 
 use syn::fold::Fold;
 
-/// Receiver parsing: (name Type) or (name *Type) where * means pointer receiver
+/// Receiver parsing: `(name Type)` or `(name *Type)` where * means pointer receiver.
+///
+/// Implemented as a proper `syn::parse` impl so it works with nested parsing.
 pub(crate) struct Receiver {
     pub(crate) name: Ident,
     pub(crate) _ty: syn::Type,
     pub(crate) pointer: bool,  // true for `*Foo` → `&mut self`
 }
 
-impl Receiver {
-    pub(crate) fn from_tokens(tokens: TokenStream) -> syn::Result<Self> {
-        let text: String = tokens.to_string();
-        let words: Vec<&str> = text.split_whitespace().collect();
+impl Parse for Receiver {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // First token: optional `*` followed by identifier (name) or just identifier.
+        let fork = input.fork();
+        let (is_ptr, name) = if fork.peek(syn::token::Star) {
+            let _star: syn::token::Star = fork.parse()?;
+            let name: Ident = fork.parse()?;
+            (true, name)
+        } else {
+            let name: Ident = fork.parse()?;
+            (false, name)
+        };
 
-        match words.len() {
-            1 => {
-                let (name, is_ptr, type_str) = if words[0].starts_with('*') {
-                    ("recv", true, &words[0][1..])
-                } else {
-                    ("recv", false, words[0])
-                };
-                let ty = syn::parse_str::<syn::Type>(type_str)?;
-                let name = Ident::new(name, proc_macro2::Span::call_site());
-                Ok(Receiver { name, _ty: ty, pointer: is_ptr })
-            }
-            2 => {
-                let name = Ident::new(words[0], proc_macro2::Span::call_site());
-                let is_ptr = words[1].starts_with('*');
-                let type_str = if is_ptr { &words[1][1..] } else { words[1] };
-                let ty = syn::parse_str::<syn::Type>(type_str)?;
-                Ok(Receiver { name, _ty: ty, pointer: is_ptr })
-            }
-            3 => {
-                if words[1] == "*" {
-                    let name = Ident::new(words[0], proc_macro2::Span::call_site());
-                    let type_str = words[2];
-                    let ty = syn::parse_str::<syn::Type>(type_str)?;
-                    Ok(Receiver { name, _ty: ty, pointer: true })
-                } else {
-                    Ok(Receiver { name: Ident::new("recv", proc_macro2::Span::call_site()), _ty: syn::parse_str("unknown").ok().unwrap_or_else(|| syn::Type::Path(syn::TypePath { path: syn::Path::from(Ident::new("unknown", proc_macro2::Span::call_site())), qself: None })), pointer: false })
-                }
-            }
-            _ => Ok(Receiver { name: Ident::new("recv", proc_macro2::Span::call_site()), _ty: syn::parse_str("unknown").ok().unwrap_or_else(|| syn::Type::Path(syn::TypePath { path: syn::Path::from(Ident::new("unknown", proc_macro2::Span::call_site())), qself: None })), pointer: false }),
+        // Check if the token after name is a type (not `)` or end of input)
+        // If it's a type, consume it and the name as a separate identifier.
+        // If not, the name IS the type.
+        if input.peek(syn::token::Star) {
+            // `*Type` pattern (single token with deref prefix)
+            let _: syn::token::Star = input.parse()?;
+            let ty = input.parse::<syn::Type>()?;
+            Ok(Receiver { name, _ty: ty, pointer: true })
+        } else if input.peek(syn::Ident) {
+            // `name Type` pattern — the first ident was the name, second is type
+            // Already consumed name from input via fork;
+            // Consume the type from the real input
+            let ty = input.parse::<syn::Type>()?;
+            Ok(Receiver { name, _ty: ty, pointer: is_ptr })
+        } else if is_ptr {
+            // Just `*Type` — use a default name
+            let ty = input.parse::<syn::Type>()?;
+            Ok(Receiver {
+                name: Ident::new("recv", proc_macro2::Span::call_site()),
+                _ty: ty,
+                pointer: true,
+            })
+        } else {
+            // Single identifier — that's the type (receiver name default)
+            let ty = input.parse::<syn::Type>()?;
+            Ok(Receiver {
+                name: Ident::new("recv", proc_macro2::Span::call_site()),
+                _ty: ty,
+                pointer: is_ptr,
+            })
         }
     }
+}
+
+/// Convert token stream to Receiver — fallback for callers that already have tokens.
+pub(crate) fn receiver_from_tokens(tokens: TokenStream) -> syn::Result<Receiver> {
+    syn::parse2::<Receiver>(tokens)
 }
 
 /// A receiver function: `func (recv Type) name(params) output { body }`
@@ -80,8 +95,8 @@ impl Parse for ReceiverFn {
         let recv_paren;
         let _paren = syn::parenthesized!(recv_paren in input);
 
-        // Convert the receiver tokens to a Receiver struct
-        let recv = Receiver::from_tokens(recv_paren.parse::<proc_macro2::TokenStream>()?)?;
+        // Convert the receiver tokens to a Receiver struct via proper parsing
+        let recv = receiver_from_tokens(recv_paren.parse::<proc_macro2::TokenStream>()?)?;
 
         // Parse function name
         let ident: Ident = input.parse()?;

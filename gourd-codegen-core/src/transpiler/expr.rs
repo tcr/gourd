@@ -6,8 +6,9 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::parse::Parse;
 use syn::{BinOp, Expr, ExprArray, ExprBlock, ExprField, ExprForLoop, ExprIf, ExprIndex, ExprLoop, ExprMethodCall, ExprRange, ExprWhile, UnOp};
+
+use super::parsing::ElemParser;
 
 /// Emit a compile-time error for forms we don't support.
 pub(crate) fn emit_todo(msg: &'static str) -> TokenStream {
@@ -366,26 +367,6 @@ fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
             && g.delimiter() == proc_macro2::Delimiter::Brace
         {
             let brace_content = g.stream();
-
-            // Parse elements from the brace group using a custom parser
-            #[derive(Default)]
-            struct ElemParser { elems: Vec<Expr>, }
-            impl Parse for ElemParser {
-                fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-                    let mut elems = Vec::new();
-                    while !input.is_empty() {
-                        let expr: Expr = input.parse()?;
-                        elems.push(expr);
-                        if input.peek(syn::token::Comma) {
-                            let _: syn::token::Comma = input.parse()?;
-                        } else {
-                            break;
-                        }
-                    }
-                    Ok(ElemParser { elems })
-                }
-            }
-
             let parser: ElemParser = syn::parse2(brace_content).unwrap_or_default();
             let elems: Vec<_> = parser.elems.iter().map(|expr| go_to_rust(expr)).collect();
             return quote! { vec![ #(#elems),* ] };

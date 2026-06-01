@@ -160,13 +160,13 @@ pub fn verify_short(attr: proc_macro2::TokenStream, input: proc_macro2::TokenStr
 }
 
 /// Extract the Go code block from the attribute input.
-/// Handles both `go!` and bare `{ ... }` inputs.
+/// Handles the `go` macro, raw brace groups, and `go!(x) { ... }` variants.
 fn extract_go_block_from_input(input: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     use proc_macro2::TokenTree;
 
     let trees: Vec<TokenTree> = input.clone().into_iter().collect();
 
-    // Case 1: `go!` — three tokens: Ident("go"), Punct("!"), Group(Brace, ...)
+    // Case 1: `go!(...)` with brace-delimited body
     if trees.len() >= 3 {
         if let (TokenTree::Ident(id), TokenTree::Punct(p), TokenTree::Group(g)) =
             (&trees[0], &trees[1], &trees[2])
@@ -177,22 +177,21 @@ fn extract_go_block_from_input(input: &proc_macro2::TokenStream) -> proc_macro2:
         }
     }
 
-    // Case 2: bare `{ ... }` — single token
-    if trees.len() == 1 {
-        if let TokenTree::Group(g) = &trees[0] {
-            if g.delimiter() == proc_macro2::Delimiter::Brace {
+    // Case 2: `go! (x) { ... }` — Ident("go"), Punct("!"), Group(Paren), Group(Brace, ...)
+    if trees.len() >= 4 {
+        if let (TokenTree::Ident(id), TokenTree::Punct(p), TokenTree::Group(_), TokenTree::Group(g)) =
+            (&trees[0], &trees[1], &trees[2], &trees[3])
+        {
+            if id == "go" && p.as_char() == '!' && g.delimiter() == proc_macro2::Delimiter::Brace {
                 return g.stream();
             }
         }
     }
 
-    // Case 3: go! with paren then brace: `go! (x)`
-    if trees.len() >= 4 {
-        if let (TokenTree::Ident(id), TokenTree::Punct(p),
-                TokenTree::Group(_paren), TokenTree::Group(g)) =
-            (&trees[0], &trees[1], &trees[2], &trees[3])
-        {
-            if id == "go" && p.as_char() == '!' && g.delimiter() == proc_macro2::Delimiter::Brace {
+    // Case 3: bare `{ ... }` — single brace group
+    if trees.len() == 1 {
+        if let TokenTree::Group(g) = &trees[0] {
+            if g.delimiter() == proc_macro2::Delimiter::Brace {
                 return g.stream();
             }
         }
@@ -254,65 +253,38 @@ fn parse_verify_from_attr(attr_stream: &proc_macro2::TokenStream) -> proc_macro2
     proc_macro2::TokenStream::new()
 }
 
-/// Normalize a token stream for comparison: remove punctuation separators,
-/// strip literal suffixes, keep identifiers and group contents.
+/// Normalize a token stream for comparison: flatten into a vector of strings.
+/// Recursively handles groups, strips literal suffixes, and keeps punctuation.
 pub fn normalize_tokens(tokens: &proc_macro2::TokenStream) -> Vec<String> {
     use proc_macro2::TokenTree;
 
     let mut result = Vec::new();
     for tree in tokens.clone().into_iter() {
         match tree {
-            TokenTree::Ident(id) => {
-                result.push(id.to_string());
-            }
-            TokenTree::Literal(lit) => {
-                let s = lit.to_string();
-                if let Some(sans) = strip_literal_suffix(&s) {
-                    result.push(sans);
-                } else {
-                    result.push(s);
-                }
-            }
+            TokenTree::Ident(id) => result.push(id.to_string()),
+            TokenTree::Literal(lit) => result.push(strip_literal_suffix(&lit.to_string())),
+            TokenTree::Punct(p) => result.push(p.as_char().to_string()),
             TokenTree::Group(g) => {
                 let inner = normalize_tokens(&g.stream());
-                match g.delimiter() {
-                    proc_macro2::Delimiter::Parenthesis => {
-                        result.push("(".to_string());
-                        result.extend(inner);
-                        result.push(")".to_string());
-                    }
-                    proc_macro2::Delimiter::Brace => {
-                        result.push("{".to_string());
-                        result.extend(inner);
-                        result.push("}".to_string());
-                    }
-                    proc_macro2::Delimiter::Bracket => {
-                        result.push("[".to_string());
-                        result.extend(inner);
-                        result.push("]".to_string());
-                    }
-                    proc_macro2::Delimiter::None => {
-                        result.extend(inner);
-                    }
-                }
-            }
-            TokenTree::Punct(p) => {
-                result.push(p.as_char().to_string());
+                let (open, close) = match g.delimiter() {
+                    proc_macro2::Delimiter::Parenthesis => (String::from("("), String::from(")")),
+                    proc_macro2::Delimiter::Brace => (String::from("{"), String::from("}")),
+                    proc_macro2::Delimiter::Bracket => (String::from("["), String::from("]")),
+                    proc_macro2::Delimiter::None => return inner, // Transparent
+                };
+                result.push(open);
+                result.extend(inner);
+                result.push(close);
             }
         }
     }
     result
 }
 
-fn strip_literal_suffix(s: &str) -> Option<String> {
+fn strip_literal_suffix(s: &str) -> String {
     let len = s.len();
-    if len == 0 { return None; }
     let suffix_start = s.rfind(|c: char| !c.is_ascii_digit() && c != '.' && c != '_' && c != '-')
         .map(|i| i + 1)
         .unwrap_or(len);
-    if suffix_start >= len {
-        Some(s.to_string())
-    } else {
-        Some(s[..suffix_start].to_string())
-    }
+    s[..suffix_start].to_string()
 }
