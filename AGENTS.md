@@ -33,10 +33,22 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 
 | Form | Example | Status |
 |------|---------|--------|
-| Multi-return | `func foo() (int, string)` | Not yet implemented — comma-separated return list |
 | Slice literals | `[]int{1, 2, 3}` | ✅ Implemented — parsed via `[]` type marker + `Expr::Macro` dispatch |
-| Map literals | `map[int]string{1: "one"}` | Partial — slice type marker detection present but map literal body not yet transpiled |
+| Map literals | `map[int]string{1: "one"}` | ✅ Implemented — entries parsed from `map[K]V{...}` |
+| Multi-return | `func foo() (int, string)` | ✅ Implemented — `return a, b` → `return (a, b)` |
 | Struct definitions | `struct Foo { x int }` | Requires non-declaration ordering in temp file |
+| Map access | `m[key]` | Partial — `m[a]` transpiles correctly but needs `.get(&a)` for HashMaps |
+| Concurrency | `go func()`, `chan`, `select` | Not implemented |
+| Interfaces | `interface{}` | Not implemented |
+| Pointers | `*T` in Go → `&T` in Rust | Basic support, needs more work |
+
+### Recently fixed
+- ✅ Control flow (`if`/`else` statements)
+- ✅ Type conversions (`int()`, `uint()`, `float32()`, `float64()`, `bool()`, `byte()`, `rune()`, `string()`)
+- ✅ Semicolon insertion in Go validation harness
+- ✅ Multi-return values (`return a, b` → `return (a, b)`)
+- ✅ Map literals (`map[string]int{"a": 1}` → `HashMap::new(); m.insert(...)`)
+- ✅ Slice literals — `[]int{1, 2, 3}` produces `vec![1, 2, 3]`
 
 **Fixed in recent commits:**
 - ✅ Control flow (`if`/`else` statements)
@@ -46,9 +58,10 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 ## Running
 
 ```bash
-cargo test   # → 50 tests (go! transpilation verify + functional runtime tests)
+cargo test   # → 50 tests (go! transpilation verify + functional runtime tests + gourd-check)
 cargo run -p gourd  # → demo binary output
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
+gourd-check [PATHS...]      # Standalone Go/Rust validation (same scanner + validators)
 ```
 
 ## `verify_rust_output` — compile-time transpilation verification
@@ -165,6 +178,8 @@ gourd-check -r PATHS         # Rust-only validation
 gourd-check -v 2 PATHS       # Verbose: show block details
 gourd-check --help           # Help
 ```
+
+> **Note**: Running `cargo test` at the workspace root automatically runs `gourd-check` — Go blocks are validated via `go build` and `#[verify_rust_output]` blocks are validated via `cargo check`.
 
 ### Example output
 

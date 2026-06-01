@@ -1,36 +1,25 @@
 //! Format validation results as human-readable output.
 
-use crate::validator::{CheckResult, Validation};
+use crate::validator::{FormatResult, Validation};
 
-pub fn format_results(results: &[CheckResult]) -> String {
+pub fn format_results(results: &[FormatResult]) -> String {
     let mut output = String::new();
 
     for r in results {
-        if let Some(ref v) = r.go_valid {
+        if let Some(ref v) = r.validation {
             if let Validation::Error(msg) = v {
                 let code_lines: Vec<String> = r
-                    .go_code
+                    .content
                     .lines()
                     .enumerate()
                     .map(|(i, line)| format!("{} | {}", i + 1, line))
                     .collect();
                 output.push_str(&format!(
-                    "  {}:{}\n    Go: {}\n    {}\n\n",
+                    "  {}:{}\n    {}\n    {}\n\n",
                     r.file,
                     r.line,
                     colorize_error(msg),
                     code_lines.join("\n")
-                ));
-            }
-        }
-
-        if let Some(ref v) = r.rust_valid {
-            if let Validation::Error(msg) = v {
-                output.push_str(&format!(
-                    "  {}:{}\n    Rust: {}\n\n",
-                    r.file,
-                    r.line,
-                    colorize_error(msg)
                 ));
             }
         }

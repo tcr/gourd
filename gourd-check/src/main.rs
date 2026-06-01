@@ -2,14 +2,16 @@
 //!
 //! Scans Rust source files for `go!` blocks, extracts the exact
 //! source text, and validates using `go build` and `cargo check`.
-
-mod scanner;
-mod validator;
-mod report;
+//!
+//! Also validates `#[verify_rust_output]` attributes by extracting
+//! the expected Rust tokens and running `cargo check` on them.
 
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+
+// Re-export lib crate modules for CLI use
+use gourd_check::{scanner, validator, report};
 
 #[derive(Parser, Debug)]
 #[command(name = "gourd-check")]
@@ -19,11 +21,11 @@ struct Cli {
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
 
-    /// Only validate Go code (default: both Go and Rust)
+    /// Only validate Go code
     #[arg(short, long)]
     go_only: bool,
 
-    /// Only validate transpiled Rust code
+    /// Only validate verify_rust_output Rust code
     #[arg(short, long)]
     rust_only: bool,
 
@@ -36,37 +38,42 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let results = run_check(&cli)?;
     if cli.verbose >= 2 {
-        // Print full details for debugging
         for r in &results {
-            eprintln!("Block: {}:{} ({} bytes)", r.file, r.line, r.go_code.len());
+            eprintln!("Block: {}:{} ({} bytes)", r.file, r.line, r.content.len());
         }
     }
     println!("{}", report::format_results(&results));
     if results.iter().any(|r| {
-        r.go_valid.as_ref().map_or(false, |v| matches!(v, validator::Validation::Error(_)))
-            || r.rust_valid.as_ref().map_or(false, |v| matches!(v, validator::Validation::Error(_)))
+        matches!(r.validation.as_ref(), Some(validator::Validation::Error(_)))
     }) {
         std::process::exit(1);
     }
     Ok(())
 }
 
-fn run_check(cli: &Cli) -> Result<Vec<validator::CheckResult>> {
-    let mut all_blocks = Vec::new();
+fn run_check(cli: &Cli) -> Result<Vec<validator::FormatResult>> {
+    let mut all_results: Vec<validator::FormatResult> = Vec::new();
 
     for path in &cli.paths {
-        all_blocks.extend(scanner::scan_path(path)?);
+        if cli.go_only {
+            let blocks = scanner::scan_path(path)?;
+            let results = validator::validate_go(&blocks);
+            all_results.extend(validator::check_results_to_format(results));
+        } else if cli.rust_only {
+            let blocks = scanner::scan_verify(path)?;
+            let results = validator::validate_verify_blocks(&blocks);
+            all_results.extend(validator::verify_checks_to_format(results));
+        } else {
+            // Default: validate both Go blocks and verify attributes
+            let go_blocks = scanner::scan_path(path)?;
+            let go_results = validator::validate_go(&go_blocks);
+            all_results.extend(validator::check_results_to_format(go_results));
+
+            let verify_blocks = scanner::scan_verify(path)?;
+            let verify_results = validator::validate_verify_blocks(&verify_blocks);
+            all_results.extend(validator::verify_checks_to_format(verify_results));
+        }
     }
 
-    let results: Vec<validator::CheckResult> = if cli.go_only {
-        validator::validate_go(&all_blocks)
-    } else {
-        validator::validate_go(&all_blocks)
-    };
-
-    if cli.verbose >= 2 {
-        eprintln!("Found {} blocks, validated {}", all_blocks.len(), results.len());
-    }
-
-    Ok(results)
+    Ok(all_results)
 }

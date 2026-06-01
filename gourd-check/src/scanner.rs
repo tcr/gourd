@@ -1,4 +1,4 @@
-//! Extract `go!` blocks from Rust source files.
+//! Extract `go!` blocks and `#[verify_rust_output]` attributes from Rust source files.
 //!
 //! Uses brace-matching to find the content inside `go!` patterns,
 //! preserving the exact source text including formatting.
@@ -15,6 +15,18 @@ pub struct GoBlock {
     /// The line number where `go!` starts (1-indexed).
     pub line: usize,
     /// The raw Go source text inside the `go!` braces.
+    pub content: String,
+}
+
+/// A discovered `#[verify_rust_output]` attribute with its source location.
+/// The `content` contains the expected Rust tokens from the brace group.
+#[derive(Debug, Clone)]
+pub struct VerifyBlock {
+    /// The source file path containing this attribute.
+    pub file: String,
+    /// The line number where `#[verify_rust_output]` starts (1-indexed).
+    pub line: usize,
+    /// The expected Rust source text inside the verify brace group.
     pub content: String,
 }
 
@@ -44,6 +56,32 @@ pub fn scan_path(path: &Path) -> Result<Vec<GoBlock>> {
     Ok(blocks)
 }
 
+/// Scan a path (file or directory) for `#[verify_rust_output]` attributes.
+pub fn scan_verify(path: &Path) -> Result<Vec<VerifyBlock>> {
+    let mut blocks = Vec::new();
+
+    if path.is_file() {
+        blocks.extend(scan_file_verify(path)?);
+    } else if path.is_dir() {
+        for entry in WalkDir::new(path)
+            .into_iter()
+            .filter_entry(|e| {
+                e.file_type().is_dir() || {
+                    e.path().extension().map_or(false, |ext| ext == "rs")
+                }
+            })
+        {
+            let entry = entry?;
+            if entry.file_type().is_file() {
+                blocks.extend(scan_file_verify(entry.path())?);
+            }
+        }
+    }
+
+    blocks.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.line.cmp(&b.line)));
+    Ok(blocks)
+}
+
 /// Scan a single file for `go!` blocks.
 fn scan_file(path: &Path) -> Result<Vec<GoBlock>> {
     let source = std::fs::read_to_string(path)
@@ -56,6 +94,112 @@ fn scan_file(path: &Path) -> Result<Vec<GoBlock>> {
 
     let blocks = find_go_blocks(&source, &file);
     Ok(blocks)
+}
+
+/// Scan a single file for `#[verify_rust_output]` attributes.
+fn scan_file_verify(path: &Path) -> Result<Vec<VerifyBlock>> {
+    let source = std::fs::read_to_string(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+
+    let file = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-UTF8 path: {}", path.display()))?
+        .to_string();
+
+    let blocks = find_verify_attributes(&source, &file);
+    Ok(blocks)
+}
+
+/// Find all `#[verify_rust_output]` attributes in source text.
+/// Extracts the expected Rust code from the brace group.
+fn find_verify_attributes(source: &str, file: &str) -> Vec<VerifyBlock> {
+    let mut blocks = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        // Skip commented-out lines (// or /* ... */)
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("///") {
+            continue;
+        }
+
+        // Look for `verify_rust_output` in attribute lines
+        let verify_pos = match line.find("verify_rust_output") {
+            Some(pos) => pos,
+            None => continue,
+        };
+
+        // Make sure this is actually an attribute (starts with `#[` or `[#`)
+        let before = line[..verify_pos].trim_end();
+        if !before.ends_with('[') {
+            continue;
+        }
+
+        // Find the opening `{` of the brace group (short form: `[{...}]` or longer form: `[{verify = {...}}]`)
+        // Search for `{` after `verify_rust_output`
+        let after_keyword = &line[verify_pos + "verify_rust_output".len()..];
+        let brace_pos = match after_keyword.find('{') {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Found the opening brace — extract the brace group content.
+        // The first '{' sets depth to 1; don't include it in content.
+        let open_col = verify_pos + "verify_rust_output".len() + brace_pos;
+        let mut content = String::new();
+        let mut brace_depth = 0;
+
+        // First '{' sets brace_depth to 1 (outer delimiter)
+        brace_depth += 1;
+        // Continue from the character AFTER the opening '{'
+        for col in (open_col + 1)..line.len() {
+            let ch = line[col..].chars().next().unwrap();
+            if ch == '{' {
+                brace_depth += 1;
+            } else if ch == '}' {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    break;
+                }
+            }
+            content.push(ch);
+        }
+
+        // Continue across multiple lines if brace group spans lines
+        let mut line_num = line_idx + 1;
+        while brace_depth > 0 && line_num < lines.len() {
+            let line = lines[line_num];
+            for ch in line.chars() {
+                if ch == '{' {
+                    brace_depth += 1;
+                    content.push(ch);
+                } else if ch == '}' {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        break;
+                    } else {
+                        content.push(ch);
+                    }
+                } else {
+                    content.push(ch);
+                }
+            }
+            if brace_depth > 0 {
+                content.push('\n');
+            }
+            line_num += 1;
+        }
+
+        if brace_depth == 0 {
+            blocks.push(VerifyBlock {
+                file: file.to_string(),
+                line: line_idx + 1,
+                content: content.trim().to_string(),
+            });
+        }
+    }
+
+    blocks
 }
 
 /// Find all `go!` blocks in source text using brace matching.
