@@ -445,7 +445,6 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
 /// Handle Go-style `id := map[K]V{entries}` map literal declaration.
 /// Called from `parse_base_stmt` when a map short-declaration is detected.
 fn parse_go_map_decl(input: ParseStream, ident_str: String, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
-    eprintln!("DEBUG parse_go_map_decl: ident_str={:?}", ident_str);
     // Parse map literal: `map[K]V{entries}`
     let _kw: syn::Ident = input.parse()?; // consume 'map'
 
@@ -808,10 +807,6 @@ fn go_stmt_to_rust_map(
 ) -> TokenStream {
     use super::types::map_go_types;
 
-    eprintln!("DEBUG map: ident={:?}, key={:?}, val={:?}, entries={}",
-        ident, key_type.as_ref().map(|t| quote! { #t }),
-        val_type.as_ref().map(|t| quote! { #t }), entries.len());
-
     if entries.is_empty() {
         if ident.is_empty() {
             return quote! { std::collections::HashMap::default() };
@@ -910,7 +905,6 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
                         let ident_str = ident.to_string();
                         input.parse::<syn::token::Eq>()?;
                         // Use the map decl parser
-                        eprintln!("DEBUG: let path calling parse_go_map_decl, ident_str={:?}", ident_str);
                         return parse_go_map_decl(input, ident_str, stmts);
                     }
                 }

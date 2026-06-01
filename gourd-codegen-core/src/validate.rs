@@ -23,7 +23,7 @@ pub fn validate_go(go_code: &TokenStream) -> Result<(), String> {
     fs::write(dir.join("go.mod"), "module gourd-test\ngo 1.21\n")
         .map_err(|e| format!("failed to write go.mod: {}", e))?;
     let harness = go_to_main_harness(go_code);
-    eprintln!("GO HARNESS: [{}]", harness);
+
     fs::write(dir.join("main.go"), harness)
         .map_err(|e| format!("failed to write main.go: {}", e))?;
 
@@ -200,7 +200,6 @@ fn rust_to_main_harness(rust_code: &TokenStream) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proc_macro2::Literal;
 
     #[test]
     fn test_valid_go() {
@@ -230,10 +229,6 @@ mod tests {
                 String::from("world")
             }
         };
-        match validate_rust(&code) {
-            Ok(_) => {}
-            Err(e) => eprintln!("RUST VALID ERR: {e}"),
-        }
         assert!(validate_rust(&code).is_ok());
     }
 

@@ -1,0 +1,64 @@
+//! Expression dispatch: top-level `go_to_rust()` and `go_to_rust_pattern()`.
+//!
+//! Routes `syn::Expr` variants to the appropriate `transpile_*` handler.
+
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::Expr;
+
+/// Emit a compile-time error for forms we don't support.
+pub(crate) fn emit_todo(msg: &'static str) -> TokenStream {
+    quote! { {
+        compile_error!(concat!("TODO: ", #msg));
+        unreachable!()
+    }}
+}
+
+/// Dispatch the AST per expression node.
+pub fn go_to_rust(input: &Expr) -> TokenStream {
+    match input {
+        Expr::Lit(e)            => super::literals::transpile_lit(e),
+        Expr::Binary(e)         => super::operators::transpile_binary(e),
+        Expr::Unary(e)          => super::operators::transpile_unary(e),
+        Expr::Path(e)           => super::literals::transpile_path(e),
+        Expr::Call(e)           => super::calls::transpile_call(e),
+        Expr::Paren(e)          => super::literals::transpile_paren(e),
+        Expr::Group(e)          => go_to_rust(&e.expr),
+        Expr::Block(e)          => super::control_flow::transpile_block(e),
+        Expr::If(e)             => super::control_flow::transpile_if(e),
+        Expr::Range(e)          => super::control_flow::transpile_range(e),
+        Expr::Index(e)          => super::calls::transpile_index(e),
+        Expr::Array(e)          => super::literals::transpile_array(e),
+        Expr::Loop(e)           => super::control_flow::transpile_loop(e),
+        Expr::ForLoop(e)        => super::control_flow::transpile_for_loop(e),
+        Expr::While(e)          => super::control_flow::transpile_while(e),
+        Expr::MethodCall(c)     => super::calls::transpile_method_call(c),
+        Expr::Field(e)          => super::calls::transpile_field(e),
+        Expr::Let(e)            => super::control_flow::transpile_let(e),
+        Expr::Tuple(e)          => super::control_flow::transpile_tuple(e),
+        Expr::Cast(e)           => super::operators::transpile_cast(e),
+        Expr::Assign(e)         => super::operators::transpile_assign(e),
+        Expr::Break(e)          => super::operators::transpile_break(e),
+        Expr::Return(e)         => super::control_flow::transpile_return(e),
+        Expr::Macro(e)          => super::calls::go_to_rust_macro(e),
+        Expr::Verbatim(tokens)  => super::literals::transpile_verbatim(tokens),
+        _                       => emit_todo("unsupported Go form"),
+    }
+}
+
+/// Expression transpilation for Rust **match patterns**.
+///
+/// Unlike `go_to_rust`, this keeps string literals as `&str` patterns
+/// (raw `"..."` literal) instead of wrapping them in `String::from(...)`,
+/// because Rust match arms require patterns, not expressions.
+pub fn go_to_rust_pattern(input: &Expr) -> TokenStream {
+    match input {
+        Expr::Lit(e)            => super::literals::transpile_lit_pattern(e),
+        Expr::Path(e)           => super::literals::transpile_path(e),
+        Expr::Paren(e)          => go_to_rust_pattern(&e.expr),
+        Expr::Group(e)          => go_to_rust_pattern(&e.expr),
+        Expr::Tuple(e)          => super::control_flow::transpile_tuple(e),
+        Expr::Verbatim(tokens)  => super::literals::transpile_verbatim(tokens),
+        _                       => emit_todo("unsupported match pattern"),
+    }
+}

@@ -1,154 +1,19 @@
+//! Receiver function output generation.
+//!
+//! Converts parsed `ReceiverFn` AST into Rust `impl` block tokens.
+
 use super::expr::go_to_rust;
-use super::parsing::{GoFnInputs, GoFnOutput};
+use super::receiver::{Receiver, ReceiverFn};
 use super::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::ext::IdentExt;
-use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{Expr, Ident};
 
 use syn::fold::Fold;
 
-/// Receiver parsing: `(name Type)` or `(name *Type)` where * means pointer receiver.
-///
-/// Implemented as a proper `syn::parse` impl so it works with nested parsing.
-pub(crate) struct Receiver {
-    pub(crate) name: Ident,
-    pub(crate) _ty: syn::Type,
-    pub(crate) pointer: bool,  // true for `*Foo` → `&mut self`
-}
-
-impl Parse for Receiver {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        // First token: optional `*` followed by identifier (name) or just identifier.
-        let fork = input.fork();
-        let (is_ptr, name) = if fork.peek(syn::token::Star) {
-            let _star: syn::token::Star = fork.parse()?;
-            let name: Ident = fork.parse()?;
-            (true, name)
-        } else {
-            let name: Ident = fork.parse()?;
-            (false, name)
-        };
-
-        // Check if the token after name is a type (not `)` or end of input)
-        // If it's a type, consume it and the name as a separate identifier.
-        // If not, the name IS the type.
-        if input.peek(syn::token::Star) {
-            // `*Type` pattern (single token with deref prefix)
-            let _: syn::token::Star = input.parse()?;
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: true })
-        } else if input.peek(syn::Ident) {
-            // `name Type` pattern — the first ident was the name, second is type
-            // Already consumed name from input via fork;
-            // Consume the type from the real input
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: is_ptr })
-        } else if is_ptr {
-            // Just `*Type` — use a default name
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver {
-                name: Ident::new("recv", proc_macro2::Span::call_site()),
-                _ty: ty,
-                pointer: true,
-            })
-        } else {
-            // Single identifier — that's the type (receiver name default)
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver {
-                name: Ident::new("recv", proc_macro2::Span::call_site()),
-                _ty: ty,
-                pointer: is_ptr,
-            })
-        }
-    }
-}
-
-/// Convert token stream to Receiver — fallback for callers that already have tokens.
-pub(crate) fn receiver_from_tokens(tokens: TokenStream) -> syn::Result<Receiver> {
-    syn::parse2::<Receiver>(tokens)
-}
-
-/// A receiver function: `func (recv Type) name(params) output { body }`
-pub(crate) struct ReceiverFn {
-    pub(crate) recv: Receiver,
-    pub(crate) ident: Ident,
-    pub(crate) inputs: GoFnInputs,
-    pub(crate) output: Option<GoFnOutput>,
-    /// Parsed body statements as Go AST elements (single tree per statement)
-    pub(crate) stmts: Vec<GoStmt>,
-}
-
-/// A Go statement (expression or local declaration)
-pub(crate) enum GoStmt {
-    Expr(Expr),
-}
-
-impl Parse for ReceiverFn {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let _fn_kw: Ident = input.call(Ident::parse_any)?;
-
-        // Parse `(receiver)` — this is a Parenthesis Group
-        let recv_paren;
-        let _paren = syn::parenthesized!(recv_paren in input);
-
-        // Convert the receiver tokens to a Receiver struct via proper parsing
-        let recv = receiver_from_tokens(recv_paren.parse::<proc_macro2::TokenStream>()?)?;
-
-        // Parse function name
-        let ident: Ident = input.parse()?;
-
-        // Parse parameters (still in parenthesized group)
-        let param_paren;
-        let _paren2 = syn::parenthesized!(param_paren in input);
-        let inputs: GoFnInputs = param_paren.parse()?;
-
-        // Parse optional return type
-        let output = if !input.is_empty() && !input.peek(syn::token::Brace) {
-            if input.peek(syn::token::RArrow) {
-                let _: syn::token::RArrow = input.parse()?;
-            }
-            Some(input.parse::<GoFnOutput>()?)
-        } else {
-            None
-        };
-
-        // Parse body: parse as a block with no semicolons, split by newlines,
-        // parse each statement individually using speculative parsing.
-        let brace_content;
-        let _brace = syn::braced!(brace_content in input);
-
-        // Parse Go-style: no semicolons required between statements.
-        // We parse expressions one at a time from the brace content,
-        // optionally consuming a trailing semicolon.
-        let mut stmts = Vec::new();
-        while !brace_content.is_empty() {
-            // Speculatively try to parse a syn::Expr (covers field, binary,
-            // unary, call, paren, let ":=", assign, return, etc.)
-            let fork = brace_content.fork();
-            match fork.parse::<Expr>() {
-                Ok(expr) => {
-                    brace_content.advance_to(&fork);
-                    // Consume optional semicolon
-                    if brace_content.peek(token::Semi) {
-                        let _semi: token::Semi = brace_content.parse()?;
-                    }
-                    stmts.push(GoStmt::Expr(expr));
-                }
-                Err(_) => {
-                    // Can't parse anything — error
-                    return Err(brace_content.error("expected Go statement (expression or local declaration)"));
-                }
-            }
-        }
-
-        Ok(ReceiverFn { recv, ident, inputs, output, stmts })
-    }
-}
-
+/// Transpile a receiver function to Rust: `impl Struct { fn method(...) { ... } }`
 pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
     match syn::parse2::<ReceiverFn>(input) {
         Ok(parsed) => {
@@ -203,14 +68,10 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
             // Transpile the body: For each statement, first rename the receiver
             // to "self" in the Go AST, then transpile to Rust via go_to_rust.
             let mut stmts: Vec<TokenStream> = Vec::new();
-            for stm in &parsed.stmts {
-                match stm {
-                    GoStmt::Expr(expr) => {
-                        let renamed = replace_receiver(expr.clone(), &recv_name);
-                        let transpiled = go_to_rust(&renamed);
-                        stmts.push(transpiled);
-                    }
-                }
+            for expr in &parsed.stmts {
+                let renamed = replace_receiver(expr.clone(), &recv_name);
+                let transpiled = go_to_rust(&renamed);
+                stmts.push(transpiled);
             }
 
             let body: Box<syn::ExprBlock> = syn::parse_quote!({ #(#stmts);* });
@@ -301,6 +162,3 @@ impl Fold for ReceiverReplacer {
         syn::fold::fold_local(self, local)
     }
 }
-
-
-// Old match body removed — replaced by ReceiverReplacer using syn::fold::Fold
