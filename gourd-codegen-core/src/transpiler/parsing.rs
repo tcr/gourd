@@ -16,10 +16,17 @@ use super::expr::go_to_rust;
 pub(crate) enum GoStmt {
     Local(syn::Local),
     GoLocal(Ident, TokenStream),  // Go short variable declaration: `id := expr`
+    If(GoIf),
     Expr(Expr),
     GoSlice(Vec<Expr>),
     GoMap(String, Option<syn::Type>, Option<syn::Type>, Vec<(Expr, Expr)>), // (ident, key_type, val_type, entries)
     Switch(Switch),
+}
+
+pub(crate) struct GoIf {
+    pub cond: Expr,
+    pub then_block: GoBlock,
+    pub else_block: Option<GoBlock>,
 }
 
 pub(crate) struct GoBlock {
@@ -470,6 +477,49 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
             }
         }
 
+        // 3. Check for if statement
+        let fork = brace_content.fork();
+        if fork.peek(syn::Ident) {
+            if let Ok(kw) = fork.parse::<syn::Ident>() {
+                let kw_str = kw.to_string();
+                if kw_str == "if" {
+                    brace_content.parse::<syn::Ident>()?; // consume 'if'
+                    let cond: Expr = brace_content.parse()?;
+                    let then_block_content;
+                    let _brace = syn::braced!(then_block_content in brace_content);
+                    let then_block = parse_block_stmts(&then_block_content)?;
+
+                    // Check for else/else if
+                    let else_block = if brace_content.peek(syn::Ident) {
+                        let else_fork = brace_content.fork();
+                        if let Ok(else_kw) = else_fork.parse::<syn::Ident>()
+                            && else_kw.to_string() == "else"
+                        {
+                            brace_content.parse::<syn::Ident>()?; // consume 'else'
+                            if brace_content.peek(syn::token::Brace) {
+                                let else_block_content;
+                                let _brace = syn::braced!(else_block_content in brace_content);
+                                Some(GoBlock { stmts: parse_block_stmts(&else_block_content)? })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    stmts.push(GoStmt::If(GoIf {
+                        cond,
+                        then_block: GoBlock { stmts: then_block },
+                        else_block,
+                    }));
+                    continue;
+                }
+            }
+        }
+
         // 3. Check for switch statement
         let fork = brace_content.fork();
         if fork.peek(syn::Ident) {
@@ -638,6 +688,18 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         GoStmt::GoLocal(ident, val) => {
             quote! { let mut #ident = #val; }
         }
+        GoStmt::If(go_if) => {
+            let cond = go_to_rust(&go_if.cond);
+            let then_body: Vec<_> = go_if.then_block.stmts.iter()
+                .map(|s| go_stmt_to_rust(s)).collect();
+            let then_block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#then_body);* });
+            let else_block = go_if.else_block.as_ref().map(|eb| {
+                let else_body: Vec<_> = eb.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+                let block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#else_body);* });
+                quote! { else #block }
+            });
+            quote! { if #cond #then_block #else_block }
+        }
         GoStmt::Expr(expr) => go_to_rust(expr),
         GoStmt::GoSlice(elems) => {
             let elems: Vec<_> = elems.iter().map(go_to_rust).collect();
@@ -705,4 +767,66 @@ fn go_stmt_to_rust_map(
         let name: syn::Ident = syn::parse_str(ident).unwrap();
         quote! { let #name = #block; }
     }
+}
+
+// ─── Block parsing helper (used by if statement parsing) ──────────────
+
+/// Parse statements from a ParseStream without consuming braces.
+/// Used by `if` statement parsing for nested then/else blocks.
+pub(crate) fn parse_block_stmts(input: ParseStream) -> syn::Result<Vec<GoStmt>> {
+    let mut stmts = Vec::new();
+    while !input.is_empty() {
+        // 1. Try syn::Local (handles `let x = ...` declarations)
+        let fork = input.fork();
+        if fork.peek(syn::token::Let) {
+            match fork.parse::<Stmt>() {
+                Ok(Stmt::Local(_)) => {
+                    if let Ok(Stmt::Local(local)) = input.parse() {
+                        stmts.push(GoStmt::Local(local));
+                        if input.peek(token::Semi) {
+                            let _semi: token::Semi = input.parse()?;
+                        }
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Handle Go short variable declaration: `id := expr`
+        let fork = input.fork();
+        if fork.peek(syn::Ident) {
+            let id_fork = fork.fork();
+            if id_fork.parse::<syn::Ident>().is_ok()
+                && id_fork.parse::<syn::token::Colon>().is_ok()
+                && id_fork.peek(syn::token::Eq)
+            {
+                let ident = input.parse::<syn::Ident>()?;
+                let _: syn::token::Colon = input.parse()?;
+                let _: syn::token::Eq = input.parse()?;
+                let val: Expr = input.parse()?;
+                let val_rust = go_to_rust(&val);
+                stmts.push(GoStmt::GoLocal(ident, val_rust));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                continue;
+            }
+        }
+
+        // Try standard expression parsing
+        let fork = input.fork();
+        if let Ok(expr) = fork.parse::<Expr>() {
+            input.advance_to(&fork);
+            stmts.push(GoStmt::Expr(expr));
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            continue;
+        }
+
+        // Nothing matched — skip one token tree to make progress
+        let _ = input.parse::<proc_macro2::TokenTree>();
+    }
+    Ok(stmts)
 }

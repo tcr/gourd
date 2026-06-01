@@ -86,19 +86,33 @@ fn temp_dir(prefix: &str) -> PathBuf {
 }
 
 /// Convert token stream to string, preserving original formatting.
+/// Adds semicolons between statements when needed for Go validation.
 fn ts_to_string(ts: &TokenStream) -> String {
     use proc_macro2::TokenTree;
     let mut s = String::new();
     let mut need_space = false;
+    let mut expect_statement_end = false;
 
     for tree in ts.clone().into_iter() {
         match tree {
             TokenTree::Ident(id) => {
+                let id_str = id.to_string();
+                // Insert semicolon before statement keywords when transitioning
+                // from a statement-ending context to a new statement
+                if expect_statement_end
+                    && matches!(id_str.as_str(), "if" | "for" | "switch" | "return" | "break" | "continue")
+                {
+                    s.push(';');
+                    expect_statement_end = false;
+                }
                 if need_space && !s.is_empty() && !s.ends_with(' ') {
                     s.push(' ');
                 }
-                s.push_str(&id.to_string());
+                s.push_str(&id_str);
                 need_space = true;
+                // These keywords end a statement context
+                expect_statement_end = !matches!(id_str.as_str(),
+                    "else" | "case" | "default" | "map" | "struct" | "func");
             }
             TokenTree::Literal(lit) => {
                 if need_space && !s.is_empty() && !s.ends_with(' ') {
@@ -106,6 +120,7 @@ fn ts_to_string(ts: &TokenStream) -> String {
                 }
                 s.push_str(&lit.to_string());
                 need_space = false;
+                expect_statement_end = true;
             }
             TokenTree::Group(g) => {
                 if need_space && !s.is_empty() && !s.ends_with(' ') {
@@ -119,11 +134,18 @@ fn ts_to_string(ts: &TokenStream) -> String {
                     proc_macro2::Delimiter::None => s.push_str(&inner),
                 }
                 need_space = true;
+                // A closing brace often ends a statement
+                expect_statement_end = matches!(g.delimiter(),
+                    proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket | proc_macro2::Delimiter::Parenthesis);
             }
             TokenTree::Punct(p) => {
                 let ch = p.as_char();
                 s.push(ch);
                 need_space = true;
+                // Semicolons are explicit statement terminators
+                if ch == ';' {
+                    expect_statement_end = false;
+                }
             }
         }
     }

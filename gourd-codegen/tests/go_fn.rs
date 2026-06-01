@@ -25,25 +25,22 @@ go! {
 }
 
 // ── Verify example: compile-time check of transpilation output ───────
-// NOTE: control flow (if statements) not yet implemented in Go parser
-// #[verify_rust_output({
-//     fn go_abs(n: i32) -> i32 {
-//         let mut ret = n; ;
-//         if n < 0 {
-//             ret = -ret
-//         } ;
-//         return ret
-//     }
-// })]
-// go! {
-//     func go_abs(n int) int {
-//         ret := n
-//         if n < 0 {
-//             ret = -ret
-//         }
-//         return ret
-//     }
-// }
+// ── Control flow: if statements ──────────────────────────────────────
+
+#[verify_rust_output({fn go_abs(n: i32) -> i32 {
+        let mut ret = n; ;
+        if n < 0 { ret = -ret } ;
+        return ret
+    }})]
+go! {
+    func go_abs(n int) int {
+        ret := n
+        if n < 0 {
+            ret = -ret
+        }
+        return ret
+    }
+}
 
 // NOTE: This WOULD fail compilation (intentionally commented out):
 // Uncomment to see a compile_error showing the expected vs actual mismatch:
@@ -145,13 +142,12 @@ fn test_fn_with_params() {
     assert_eq!(go_sum(10, 20), 30);
 }
 
-// NOTE: control flow (if statements) not yet implemented
-// #[test]
-// fn test_fn_if_return() {
-//     assert_eq!(go_abs(-5), 5);
-//     assert_eq!(go_abs(3), 3);
-//     assert_eq!(go_abs(0), 0);
-// }
+#[test]
+fn test_fn_if_return() {
+    assert_eq!(go_abs(-5), 5);
+    assert_eq!(go_abs(3), 3);
+    assert_eq!(go_abs(0), 0);
+}
 
 #[test]
 fn test_fn_bool_return() {
