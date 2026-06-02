@@ -57,14 +57,16 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 - ✅ Continue statements — `continue` → `continue`
 - ✅ For range loops — `for i, v := range data` → `for (i, v) in data.iter().copied().enumerate()`
 - ✅ Nested `if`/`continue`/`while` — proper block body parsing in `parse_go_if` and `parse_block_stmts`
+- ✅ Concurrency primitives — real `crossbeam`-backed schedulers, channels, and select operations
 
 ## Running
 
 ```bash
-cargo test   # → 50 tests (go! transpilation verify + functional runtime tests + gourd-check)
-gourd transpile "func hello() int { return 42 }"  # → transpile CLI tool
-cargo expand -p gourd  # → see expanded Go → Rust transpilation.
-gourd-check [PATHS...]      # Standalone Go/Rust validation (same scanner + validators)
+cargo test           # run all tests
+cargo test --lib     # unit tests only
+cargo expand -p gourd # see expanded Go → Rust transpilation.
+gourd transpile "func hello() int { return 42 }"  # transpile CLI tool
+gourd-check [PATHS...]  # standalone Go/Rust validation
 ```
 
 ## `verify_rust_output` — compile-time transpilation verification
@@ -139,6 +141,27 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 ## Cross-Language Validation Pattern (the `gourd-check` pattern)
 
 When adding a new language mode or validating transpiled output, **always use `gourd-check`** as the standalone pre-compilation validator. This pattern bypasses the `proc_macro` token stream limitation entirely by operating directly on raw source files.
+
+## Concurrency Primitives (`go_scheduler.rs`)
+
+The `gourd` runtime crate provides real concurrent primitives powered by `crossbeam`. These replace the previous stub implementations:
+
+| Type | Purpose |
+|------|--------|
+| `GoScheduler` | Thread-safe task scheduler — `submit()` adds closures, `run()` executes them sequentially |
+| `GoChannel<T>` | Generic channel — `send()`, `recv()`, `try_send()`, `try_recv()`, `with_capacity()` |
+| `GoSelect<T>` | Select with `send_case()`, `recv_case()`, `with_default()`, `with_timeout()` |
+| `SchedulerMap` | Multi-scheduler keyed by ID for multiple goroutines |
+| `GoFuture` | Closure-as-future (unchanged) |
+
+When working with the concurrency primitives:
+
+1. **Channels are crossbeam-backed** — not stubs. Unbuffered channels (`bounded(0)`) block senders until a receiver is ready.
+2. **`GoSelect` requires `T: Clone`** — because send cases need to clone values for retry attempts during polling.
+3. **Scheduler runs sequentially** — goroutines are submitted and executed in order, simulating Go's scheduler.
+4. **Use buffered channels** when sending on unbuffered channels from a single thread — unbuffered channels block send until a receiver is ready.
+5. **Add `crossbeam` and `num-traits`** to your Cargo.toml dependencies.
+6. **Include `go_scheduler.rs`** in your lib.rs: `mod go_scheduler; pub use go_scheduler::*;`
 
 ### When to use
 

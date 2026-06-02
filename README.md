@@ -101,6 +101,19 @@ gourd transpile path/to/file.rs
 - **Switch**: selector-based (`switch n { case 1, 2: "one_or_two" }`) and boolean (`switch { case ok: "ok" }`)
 - **Loops**: `while`, `for` (range and index variants), `continue`, `break`
 
+### Concurrency (crossbeam-powered)
+
+| Go | Rust | Notes |
+|----|------|-------|
+| `go func() { ... }` | `GoScheduler::new().submit(|| { ... })` | Sequential goroutine simulation |
+| `chan int` | `GoChannel::<i32>::new()` | Unbuffered channel |
+| `chan int{10}` | `GoChannel::<i32>::with_capacity(10)` | Buffered channel |
+| `ch <- 42` | `ch.send(42)` | Send to channel |
+| `<-ch` | `ch.recv()` | Receive from channel |
+| `select { case ... }` | `GoSelect::<T>::new().run()` | Channel select |
+
+Concurrency primitives are real `crossbeam`-backed types — not stubs. The scheduler runs goroutines sequentially (simulating Go's scheduler), channels support `send`, `recv`, `try_send`, `try_recv`, and `select` supports send cases, receive cases, default cases, and timeouts.
+
 ## Compile-time verification
 
 Use `#[verify_rust_output({ ... })]` to assert at compile time that your Go code transpiles correctly:
@@ -135,7 +148,8 @@ gourd-check -r PATHS         # Rust-only validation
 ## Running tests
 
 ```bash
-cargo test   # → 61 tests (go! transpilation verify + functional runtime tests + gourd-check)
-gourd transpile "func hello() int { return 42 }"  # → transpile CLI tool
-cargo expand -p gourd  # → see expanded Go → Rust transpilation.
+cargo test           # run all tests
+cargo test --lib     # unit tests only
+cargo expand -p gourd # see expanded Go → Rust transpilation.
+gourd transpile "func hello() int { return 42 }"  # transpile CLI tool
 ```
