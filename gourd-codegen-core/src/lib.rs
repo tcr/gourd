@@ -54,6 +54,9 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
             proc_macro2::TokenTree::Ident(first_ident) => {
                 let first_name = first_ident.to_string();
                 match first_name.as_str() {
+                    "interface" => {
+                        go_to_rust_interface(input)
+                    }
                     "struct" => {
                         go_to_rust_struct(input)
                     }
