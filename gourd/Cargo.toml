@@ -19,6 +19,8 @@ clap = { version = "4", features = ["derive"] }
 prettyplease = "0.2"
 proc-macro2 = "1"
 syn = { version = "2", features = ["full"] }
+crossbeam = "0.8"
+num-traits = "0.2"
 
 [dev-dependencies]
 gourd-codegen = { path = "../gourd-codegen" }

@@ -7,6 +7,10 @@
 mod go_gc;
 pub use go_gc::GoGc;
 
+// Concurrent runtime primitives powered by crossbeam.
+mod go_scheduler;
+pub use go_scheduler::*;
+
 /// Re-export the declaration macro for Go declarations.
 pub use gourd_codegen::go;
 
