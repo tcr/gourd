@@ -530,7 +530,7 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
     // Debug: show first token tree in input via fork
     if !input.is_empty() {
         let fork = input.fork();
-        let first = fork.parse::<proc_macro2::TokenTree>().ok();
+        let _first = fork.parse::<proc_macro2::TokenTree>().ok();
     }
     // 1. Check for Go slice literal: []...{...}
     if input.peek(syn::token::Bracket) {
@@ -642,7 +642,7 @@ fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
     // Consume 'for' keyword (it's a keyword, not an identifier)
     let _: syn::token::For = input.parse()?;
     let peek_ident = input.peek(syn::Ident);
-    let next_ident_str = if peek_ident {
+    let _next_ident_str = if peek_ident {
         input.fork().parse::<syn::Ident>().ok().map(|i| i.to_string()).unwrap_or_default()
     } else {
         "<none>".to_string()

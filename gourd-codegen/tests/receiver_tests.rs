@@ -1,5 +1,3 @@
-use gourd_codegen::go;
-
 
 // NOTE: This block is commented out because Go struct definitions must
 // appear before any function definitions. The gourd-check validator wraps

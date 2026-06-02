@@ -39,7 +39,6 @@ pub use validate::{validate_go, validate_rust};
 /// 
 pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
     use proc_macro2::TokenStream;
-    use quote::ToTokens;
     let ts: TokenStream = input.parse().unwrap_or_default();
     transpile_go(ts)
 }
@@ -74,6 +73,51 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                         } else {
                             go_to_rust_fn(input)
                         }
+                    }
+                    "go" => {
+                        // Goroutine: `go func() { body }`
+                        // Transpile to: `GoScheduler::new().submit(|| { body })`
+                        let mut iter2 = input.clone().into_iter().skip(1);
+                        // Skip the `func` keyword
+                        if let Some(proc_macro2::TokenTree::Ident(func_ident)) = iter2.next() {
+                            if func_ident.to_string() == "func" {
+                                // Skip parameters paren group
+                                loop {
+                                    if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
+                                        if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                // Now find the brace group with the body
+                                loop {
+                                    if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
+                                        if g.delimiter() == proc_macro2::Delimiter::Brace {
+                                            // Extract body and wrap in GoScheduler
+                                            let body: proc_macro2::TokenStream = g.stream();
+                                            return quote::quote! {
+                                                GoScheduler::new().submit(|| { #body });
+                                            };
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        go_to_rust_fn(input) // fallback
+                    }
+                    "chan" => {
+                        // Channel literal: `chan T` or `chan T{n}`
+                        // Transpile to: `GoChannel::<T>::new()`
+                        go_to_rust_fn(input) // placeholder - full impl TBD
+                    }
+                    "select" => {
+                        // Select statement: `select { case ... default: ... }`
+                        // Transpile to: `GoScheduler::new().submit(|| { /* case handlers */ })`
+                        go_to_rust_fn(input) // placeholder - full impl TBD
                     }
                     _ => go_to_rust_fn(input),
                 }
