@@ -16,7 +16,7 @@
 mod transpiler;
 mod validate;
 
-pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
+pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
 
