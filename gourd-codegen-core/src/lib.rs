@@ -16,6 +16,8 @@
 mod transpiler;
 mod validate;
 
+use proc_macro2::TokenStream;
+
 pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
@@ -116,7 +118,56 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                     "chan" => {
                         // Channel literal: `chan T` or `chan T{n}`
                         // Transpile to: `GoChannel::<T>::new()`
-                        go_to_rust_fn(input) // placeholder - full impl TBD
+                        let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();
+                        if trees.len() >= 2 {
+                            // Find the type after `chan`
+                            for tree in trees.iter().skip(1) {
+                                match tree {
+                                    proc_macro2::TokenTree::Ident(ty_ident) => {
+                                        let type_name = ty_ident.to_string();
+                                        let mapped_type = match type_name.as_str() {
+                                            "int" => quote::quote! { i32 },
+                                            "int8" => quote::quote! { i8 },
+                                            "int16" => quote::quote! { i16 },
+                                            "int32" => quote::quote! { i32 },
+                                            "int64" => quote::quote! { i64 },
+                                            "uint" => quote::quote! { u32 },
+                                            "uint8" => quote::quote! { u8 },
+                                            "uint16" => quote::quote! { u16 },
+                                            "uint32" => quote::quote! { u32 },
+                                            "uint64" => quote::quote! { u64 },
+                                            "uintptr" => quote::quote! { usize },
+                                            "byte" => quote::quote! { u8 },
+                                            "rune" => quote::quote! { char },
+                                            "float32" => quote::quote! { f32 },
+                                            "float64" => quote::quote! { f64 },
+                                            "bool" => quote::quote! { bool },
+                                            "string" => quote::quote! { String },
+                                            "error" => quote::quote! { Box<dyn std::error::Error> },
+                                            other => quote::quote! { #other },
+                                        };
+                                        return quote::quote! {
+                                            GoChannel::<#mapped_type>::new()
+                                        };
+                                    }
+                                    proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Bracket => {
+                                        // Slice type like `chan []int` → `GoChannel::<Vec<i32>>::new()`
+                                        let inner: TokenStream = g.stream();
+                                        let mapped_inner = match inner.to_string().as_str() {
+                                            "int" => quote::quote! { Vec<i32> },
+                                            "string" => quote::quote! { Vec<String> },
+                                            "bool" => quote::quote! { Vec<bool> },
+                                            _ => quote::quote! { Vec<#inner> },
+                                        };
+                                        return quote::quote! {
+                                            GoChannel::<#mapped_inner>::new()
+                                        };
+                                    }
+                                    _ => continue,
+                                }
+                            }
+                        }
+                        go_to_rust_fn(input) // fallback
                     }
                     "select" => {
                         // Select statement: `select { case ... default: ... }`

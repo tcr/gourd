@@ -39,6 +39,9 @@ The following Go constructs are fully transpiled and tested:
 | **Method calls** | `s.method(args)` | `s.method(args)` |
 | **Field access** | `pt.0`, `s.field` | `pt.0`, `s.field` |
 | **Interfaces** | `interface Foo { Name() string }` | `trait foo { fn name(&self) -> String; }` |
+| **Channels** | `chan int`, `chan []int` | `GoChannel::<i32>::new()`, `GoChannel::<Vec<i32>>::new()` |
+| **Select** | `select { case ... }` | `GoSelect::new().run()` |
+| **Goroutines** | `go func() { body }` | `GoScheduler::new().submit(|| { body })` |
 
 ### Type Mappings
 
@@ -71,6 +74,7 @@ The following Go constructs are fully transpiled and tested:
 | `gourd transpile` | CLI tool: transpile Go blocks from source files or stdin |
 | `gourd-check` | Standalone validator: checks Go syntax via `go build`, Rust via `cargo check` |
 | `cargo expand` | See expanded `go!` → Rust output in your crate |
+| `validate_go()` / `validate_rust()` | Cross-language validation via temp dirs + real compilers |
 
 ---
 
@@ -80,9 +84,8 @@ These Go constructs are **blocked** via `compile_error!` at compile time:
 
 | Category | What's missing | Notes |
 |----------|----------------|-------|
-| **Concurrency** | `go func()`, `chan`, `select` | Go's concurrency model ≠ Rust's |
-| **Goroutines** | `go foo(42)` | Would require async/spawn |
-| **Channels** | `ch <- value`, `<- ch` | Rust uses different channel patterns |
+| **Channel send/recv** | `ch <- value`, `<- ch` | Rust uses different channel patterns |
+| **Select with multiple cases** | Multiple `case` blocks in `select` | Partial — basic select works |
 | **`defer`** | `defer cleanup()` | No Rust equivalent |
 | **`panic`/`recover`** | `panic("msg")`, `recover()` | Rust has `panic!` / `catch_unwind` |
 | **`sync` primitives** | `sync.Mutex`, `sync.WaitGroup` | No sync crate mapping |

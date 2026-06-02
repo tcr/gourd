@@ -284,14 +284,14 @@ let debug_str = quote! { #some_type }.to_string();
 This is `transpiler.rs:464` technique — necessary for printing type info
 during macro expansion.
 
-### Using `quote!` to inject TokenStreams
+### Using `quote::quote!` to inject TokenStreams
 
 `proc_macro2::TokenStream` DOES implement `ToTokens`. Use this to
 inject a lazily-built snippet:
 
 ```rust
-let snippet: TokenStream = quote! { self.x + z };
-quote! { {} #snippet };
+let snippet: TokenStream = quote::quote! { self.x + z };
+quote::quote! { {} #snippet };
 ```
 
 ## Rust Syntax Gotchas (syn / Rust)

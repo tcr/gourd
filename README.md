@@ -55,6 +55,9 @@ gourd transpile path/to/file.rs
 | `struct Point { x int, y int }` | `struct Point { pub x: i32, pub y: i32 }` |
 | `func (f Foo) Method() int { ... }` | `impl Foo { fn Method(&self) -> i32 { ... } }` |
 | `interface Foo { Name() string }` | `trait foo { fn name(&self) -> String; }` |
+| `chan int` | `GoChannel::<i32>::new()` |
+| `chan []int` | `GoChannel::<Vec<i32>>::new()` |
+| `select { case ... }` | `GoSelect::new().run()` |
 
 ### Types
 
@@ -90,6 +93,7 @@ gourd transpile path/to/file.rs
 | `x as T` (cast) | `x as T` |
 | `x[i]` (index) | `x[i as usize]` |
 | `x + y`, `x - y`, etc. | same |
+| `go func() { ... }` | `GoScheduler::new().submit(|| { ... })` |
 
 ### Control flow
 
@@ -131,7 +135,7 @@ gourd-check -r PATHS         # Rust-only validation
 ## Running tests
 
 ```bash
-cargo test   # → 50 tests (go! transpilation verify + functional runtime tests + gourd-check)
+cargo test   # → 61 tests (go! transpilation verify + functional runtime tests + gourd-check)
 gourd transpile "func hello() int { return 42 }"  # → transpile CLI tool
 cargo expand -p gourd  # → see expanded Go → Rust transpilation.
 ```
