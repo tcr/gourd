@@ -2,14 +2,8 @@
 //!
 //! Replaces receiver names with `self` in Go expressions.
 
-use super::super::types::map_go_types;
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::punctuated::Punctuated;
-use syn::token;
-use syn::{Expr, Ident};
-
 use syn::fold::Fold;
+use syn::{Expr, Ident};
 
 /// Replace receiver name with `self` in a Go expression.
 ///

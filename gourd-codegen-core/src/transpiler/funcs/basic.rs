@@ -10,7 +10,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::token;
-use syn::{Expr, Ident};
 
 /// Transpile a receiver function to Rust: `impl Struct { fn method(...) { ... } }`
 pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
