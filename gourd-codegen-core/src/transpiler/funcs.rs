@@ -9,7 +9,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::token;
-use syn::{Expr, ExprAssign, Ident};
+use syn::{Expr, Ident};
 
 use syn::fold::Fold;
 
@@ -152,17 +152,6 @@ impl Fold for ReceiverReplacer {
                     base: new_base,
                     dot_token: f.dot_token,
                     member: f.member,
-                })
-            }
-            Expr::Assign(assign) => {
-                // Handle struct field assignment: `f.x = val` → `self.x = val`
-                let new_left = self.fold_expr(*assign.left);
-                let new_right = self.fold_expr(*assign.right);
-                Expr::Assign(ExprAssign {
-                    attrs: Vec::new(),
-                    left: Box::new(new_left),
-                    eq_token: assign.eq_token,
-                    right: Box::new(new_right),
                 })
             }
             other => syn::fold::fold_expr(self, other),

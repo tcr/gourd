@@ -16,60 +16,9 @@
 mod transpiler;
 mod validate;
 
-pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_struct, go_to_rust_switch};
+pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
-
-/// Transpile raw Go code text to Rust token stream.
-///
-/// This is the CLI-facing entry point. Takes raw Go code as a string
-/// (optionally wrapped in the macro invocation form) and dispatches to the
-/// appropriate transpiler based on the first token.
-///
-/// # Examples
-///
-/// ```ignore
-/// let rust = transpile_go_text("func hello() int { return 42 }");
-/// println!("{}", quote! { #rust });
-/// ```
-pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
-    use proc_macro2::TokenStream;
-    use std::str::FromStr;
-
-    // Extract Go block content if the input is wrapped in the macro invocation form
-    let prefix: String = "go".chars().chain(['!', ' ', '{']).collect();
-    let content = if let Some(idx) = input.find(&prefix) {
-        // Find matching closing brace
-        let start = idx + prefix.len(); // skip past the prefix string
-        let inner = &input[start..];
-        let mut depth = 1;
-        let mut end = 0;
-        for (i, ch) in inner.char_indices() {
-            if ch == '{' {
-                depth += 1;
-            } else if ch == '}' {
-                depth -= 1;
-                if depth == 0 {
-                    end = i;
-                    break;
-                }
-            }
-        }
-        inner[..end].trim().to_string()
-    } else {
-        input.trim().to_string()
-    };
-
-    // Convert string to TokenStream — this works because the Rust lexer
-    // tokenizes Go syntax (func, if, etc.) as valid token trees.
-    let ts = match TokenStream::from_str(&content) {
-        Ok(ts) => ts,
-        Err(_) => return proc_macro2::TokenStream::new(),
-    };
-
-    // Dispatch to existing transpiler
-    transpile_go(ts)
-}
 
 /// Public transpilation entry point.
 ///
@@ -79,6 +28,23 @@ pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
 ///   - `struct Name { field type }` → Rust struct
 ///   - `switch x { ... }` → Rust match/if-else
 ///   - `func name() { ... }` → free function
+/// Transpile raw Go code text to Rust token stream.
+///
+/// This is the CLI-facing entry point. Takes raw Go code as a string
+/// (optionally wrapped in the macro invocation form) and dispatches to the
+/// appropriate transpiler based on the first token.
+///
+/// # Examples
+///
+/// 
+pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    let ts: TokenStream = input.parse().unwrap_or_default();
+    transpile_go(ts)
+}
+
+
 pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let mut iter = input.clone().into_iter();
 
@@ -93,9 +59,6 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                     }
                     "switch" => {
                         go_to_rust_switch(input)
-                    }
-                    "interface" => {
-                        go_to_rust_interface(input)
                     }
                     "func" | "fn" => {
                         let mut iter2 = input.clone().into_iter().skip(1);
