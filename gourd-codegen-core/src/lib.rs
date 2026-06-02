@@ -16,7 +16,7 @@
 mod transpiler;
 mod validate;
 
-pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_struct, go_to_rust_switch};
+pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
 
@@ -91,7 +91,8 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                                         break;
                                     }
                                 }
-                                // Now find the brace group with the body
+                                // Skip return type if present
+                                // Skip the brace group with the body
                                 loop {
                                     if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
                                         if g.delimiter() == proc_macro2::Delimiter::Brace {
@@ -100,6 +101,9 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                                             return quote::quote! {
                                                 GoScheduler::new().submit(|| { #body });
                                             };
+                                        } else if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                                            // Return type paren group
+                                            break;
                                         }
                                     } else {
                                         break;
@@ -116,8 +120,8 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                     }
                     "select" => {
                         // Select statement: `select { case ... default: ... }`
-                        // Transpile to: `GoScheduler::new().submit(|| { /* case handlers */ })`
-                        go_to_rust_fn(input) // placeholder - full impl TBD
+                        // Transpile to: `GoSelect::new().run()`
+                        go_to_rust_select(input)
                     }
                     _ => go_to_rust_fn(input),
                 }

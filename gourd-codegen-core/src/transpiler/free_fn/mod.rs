@@ -5,10 +5,12 @@
 
 mod basic;
 mod interface;
+mod select;
 mod switch;
 
 // Re-export the public API
 pub use basic::{go_to_rust_fn, go_to_rust_struct};
 pub use interface::go_to_rust_interface;
+pub use select::go_to_rust_select;
 pub use switch::{go_to_rust_switch, transpile_switch};
 mod util;
