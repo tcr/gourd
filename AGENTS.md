@@ -42,7 +42,7 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 | Continue statement | `continue` | ✅ Implemented |
 | While loops | `while cond { ... }` | ✅ Implemented |
 | For range | `for i, v := range data` | ✅ Implemented |
-| Concurrency | `go func()`, `chan`, `select` | Not implemented |
+| Concurrency | `go func()`, `chan`, `select`, `ch <-`, `<- ch` | ✅ Implemented |
 | Interfaces | `interface{}` | ✅ Implemented |
 
 ### Recently fixed
@@ -58,6 +58,8 @@ The following Go constructs are NOT yet transpiled — they are commented out in
 - ✅ For range loops — `for i, v := range data` → `for (i, v) in data.iter().copied().enumerate()`
 - ✅ Nested `if`/`continue`/`while` — proper block body parsing in `parse_go_if` and `parse_block_stmts`
 - ✅ Concurrency primitives — real `crossbeam`-backed schedulers, channels, and select operations
+- ✅ Channel send — `ch <- value` transpiles to `ch.send(value)`
+- ✅ Channel receive — `return <-ch` transpiles to `return ch.recv().unwrap()`
 
 ## Running
 

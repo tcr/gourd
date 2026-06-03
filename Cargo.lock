@@ -253,6 +253,7 @@ dependencies = [
 name = "gourd-codegen"
 version = "0.1.0"
 dependencies = [
+ "gourd",
  "gourd-codegen-core",
  "proc-macro2",
  "quote",

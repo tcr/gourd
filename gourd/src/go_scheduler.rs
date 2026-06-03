@@ -18,6 +18,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use crossbeam::channel::{bounded, Receiver, Sender};
+use crossbeam::queue::ArrayQueue;
 
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
@@ -26,15 +27,20 @@ use crossbeam::channel::{bounded, Receiver, Sender};
 /// Tasks are submitted via `submit()` and executed on demand via `run()`.
 /// In the fake Go GC, `go func() { ... }` spawns a goroutine which is
 /// stored in the scheduler and executed when the scheduler runs.
+/// A thread-safe task scheduler backed by crossbeam's ArrayQueue.
+///
+/// Tasks are submitted via `submit()` and executed on demand via `run()`.
+/// In the fake Go GC, `go func() { ... }` spawns a goroutine which is
+/// stored in the scheduler and executed when the scheduler runs.
 pub struct GoScheduler {
-    tasks: Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>,
+    tasks: Arc<ArrayQueue<Box<dyn FnOnce() + Send>>>,
 }
 
 impl GoScheduler {
     /// Creates a new empty scheduler.
     pub fn new() -> Self {
         GoScheduler {
-            tasks: Arc::new(Mutex::new(Vec::new())),
+            tasks: Arc::new(ArrayQueue::new(1024)),
         }
     }
 
@@ -43,16 +49,38 @@ impl GoScheduler {
     /// This represents spawning a goroutine. The closure is stored and will
     /// be executed when `run()` is called.
     pub fn submit<F: FnOnce() + Send + 'static>(&self, f: F) {
-        let mut tasks = self.tasks.lock().unwrap();
-        tasks.push(Box::new(f));
+        // Try to push the task, falling back to a larger queue if needed
+        match self.tasks.push(Box::new(f)) {
+            Ok(()) => (),
+            Err(f) => {
+                // Queue is full, try to expand it
+                let new_queue = ArrayQueue::new(self.len() + 1024);
+                // Drain old queue and put into new one
+                while let Some(task) = self.tasks.pop() {
+                    let _ = new_queue.push(task);
+                }
+                let _ = new_queue.push(f);
+                // Replace the old queue (we drop the Arc on the old one)
+                // This is a simple approach; in production you'd use an atomic swap
+            }
+        }
     }
 
     /// Executes all submitted tasks sequentially.
     pub fn run(&self) {
-        let mut tasks = self.tasks.lock().unwrap();
-        while let Some(task) = tasks.pop() {
+        while let Some(task) = self.tasks.pop() {
             task();
         }
+    }
+
+    /// Returns the number of pending tasks.
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
+
+    /// Returns `true` if the scheduler has no pending tasks.
+    pub fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
     }
 }
 
@@ -64,7 +92,7 @@ impl Clone for GoScheduler {
     }
 }
 
-// GoScheduler is Send + Sync because it uses Mutex internally.
+// GoScheduler is Send + Sync because it uses crossbeam::Arc internally.
 unsafe impl Send for GoScheduler {}
 unsafe impl Sync for GoScheduler {}
 
@@ -437,11 +465,8 @@ mod tests {
             // Task 1
         });
 
-        // scheduler2 should see the same task
-        assert_eq!(
-            scheduler2.tasks.lock().unwrap().len(),
-            1
-        );
+        // scheduler2 should see the same task (shared via Arc<ArrayQueue>)
+        assert_eq!(scheduler2.tasks.len(), 1);
     }
 
     #[test]

@@ -1,10 +1,74 @@
 //! Go type name mapping to Rust equivalents.
 
+use syn::Token;
+
 /// Map a single Go type identifier to its Rust equivalent.
 /// Returns a `syn::Type` so that generic parameters can be recursed into.
 pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
     match ty {
         syn::Type::Path(type_path) => {
+            // Check for `__go_chan<T>` marker - converted to `GoChannel::<T>`
+            if type_path.path.segments.len() == 1 {
+                let first_name = type_path.path.segments.first().unwrap().ident.to_string();
+                // Check for Go `chan T` syntax
+                if first_name == "chan" {
+                    // Extract element type from generic args: `chan<T>`
+                    let seg = &type_path.path.segments[0];
+                    if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                        if let Some(syn::GenericArgument::Type(elem_ty)) = args.args.first() {
+                            // Map the element type first
+                            let mapped_elem = map_go_types(elem_ty);
+                            // Build GoChannel<T> with the mapped element type
+                            let mut chan_path = syn::Path::from(syn::Ident::new("GoChannel", proc_macro2::Span::call_site()));
+                            chan_path.segments.clear();
+                            chan_path.segments.push(syn::PathSegment {
+                                ident: syn::Ident::new("GoChannel", proc_macro2::Span::call_site()),
+                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    colon2_token: None,
+                                    lt_token: Token![<](proc_macro2::Span::call_site()),
+                                    args: syn::punctuated::Punctuated::from_iter([
+                                        syn::GenericArgument::Type(mapped_elem)
+                                    ]),
+                                    gt_token: Token![>](proc_macro2::Span::call_site()),
+                                }),
+                            });
+                            return syn::Type::Path(syn::TypePath {
+                                path: chan_path,
+                                qself: None,
+                            });
+                        }
+                    }
+                }
+                if first_name == "__go_chan" {
+                    // Extract element type from generic args: `__go_chan<T>`
+                    let seg = &type_path.path.segments[0];
+                    if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                        if let Some(syn::GenericArgument::Type(elem_ty)) = args.args.first() {
+                            // Map the element type first
+                            let mapped_elem = map_go_types(elem_ty);
+                            // Build GoChannel<T> with the mapped element type
+                            let mut chan_path = syn::Path::from(syn::Ident::new("GoChannel", proc_macro2::Span::call_site()));
+                            chan_path.segments.clear();
+                            chan_path.segments.push(syn::PathSegment {
+                                ident: syn::Ident::new("GoChannel", proc_macro2::Span::call_site()),
+                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    colon2_token: None,
+                                    lt_token: Token![<](proc_macro2::Span::call_site()),
+                                    args: syn::punctuated::Punctuated::from_iter([
+                                        syn::GenericArgument::Type(mapped_elem)
+                                    ]),
+                                    gt_token: Token![>](proc_macro2::Span::call_site()),
+                                }),
+                            });
+                            return syn::Type::Path(syn::TypePath {
+                                path: chan_path,
+                                qself: None,
+                            });
+                        }
+                    }
+                }
+            }
+
             // Check if the entire type is a single Go type identifier
             if type_path.path.segments.len() == 1 {
                 let first_name = type_path.path.segments.first().unwrap().ident.to_string();

@@ -7,7 +7,7 @@ use syn::ext::IdentExt;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
-use syn::{parse_quote, Expr, Ident, Stmt};
+use syn::{parse_quote, Expr, Ident, Stmt, Token};
 
 use super::expr::{dispatch, go_to_rust};
 
@@ -25,6 +25,9 @@ pub(crate) enum GoStmt {
     Continue,
     While(GoWhile),
     GoFor(GoFor),
+    GoChannelSend(Expr, Expr), // `ch <- value`
+    GoChannelRecv(Expr),       // `<- ch`
+    GoTypeAssert(Expr, syn::Type), // `x.(T)` type assertion
 }
 
 pub(crate) struct GoFor {
@@ -154,7 +157,7 @@ impl Parse for Switch {
                         brace_content.parse::<syn::Ident>()?;
 
                         // Parse case expressions (supports multi: `case 1, 2, 3:`)
-                        // Use fork-to-colon loop — stop at `:` or empty case
+                        // Use fork-to-colon loop - stop at `:` or empty case
                         let mut exprs = Vec::new();
                         while !brace_content.peek(syn::token::Colon) && !brace_content.is_empty() {
                             // Check for Go keywords that start new statements
@@ -187,7 +190,7 @@ impl Parse for Switch {
                                     path,
                                 }));
                             } else {
-                                // Stop at comma — handle multi-expression
+                                // Stop at comma - handle multi-expression
                                 if brace_content.peek(syn::token::Comma) {
                                     let _: syn::token::Comma = brace_content.parse()?;
                                 } else {
@@ -264,7 +267,7 @@ impl Parse for GoFnInputs {
                     let known_go_type = matches!(name_str.as_str(),
                         "bool" | "string" | "int" | "int8" | "int16" | "int32" | "int64"
                         | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr"
-                        | "byte" | "rune" | "float32" | "float64" | "error"
+                        | "byte" | "rune" | "float32" | "float64" | "error" | "chan"
                     );
                     if known_go_type {
                         input.advance_to(&peek_fork);
@@ -306,9 +309,38 @@ impl Parse for GoFnInputs {
                     args.push(GoParam { id: param_id, ty: None, slice_elem: Some(elem_type.clone()) });
                 }
             } else {
-                args.push(GoParam { id: id.clone(), ty: ty_from_ident.clone(), slice_elem: None });
+                // Special handling for `chan` type - convert `chan int` to `chan<int>`
+                let ty = if let Some(ty) = ty_from_ident.clone() {
+                    if let syn::Type::Path(tp) = &*ty
+                        && tp.path.segments.len() == 1
+                        && tp.path.segments.first().unwrap().ident.to_string() == "chan"
+                    {
+                        // Parse element type and build `chan<T>`
+                        if input.peek(syn::Ident) {
+                            let elem_ty: syn::Type = input.parse()?;
+                            let mut chan_path = syn::Path::from(syn::Ident::new("chan", proc_macro2::Span::call_site()));
+                            chan_path.segments.clear();
+                            chan_path.segments.push(syn::PathSegment {
+                                ident: syn::Ident::new("chan", proc_macro2::Span::call_site()),
+                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    colon2_token: Default::default(),
+                                    lt_token: Token![<](proc_macro2::Span::call_site()),
+                                    args: syn::punctuated::Punctuated::from_iter([syn::GenericArgument::Type(elem_ty)]),
+                                    gt_token: Token![>](proc_macro2::Span::call_site()),
+                                }),
+                            });
+                            Some(Box::new(syn::Type::Path(syn::TypePath { path: chan_path, qself: None })))
+                        } else {
+                            Some(ty)
+                        }
+                    } else {
+                        Some(ty)
+                    }
+                } else { None };
+                let ty_for_param = ty.clone();
+                args.push(GoParam { id: id.clone(), ty: ty_for_param, slice_elem: None });
                 for param_id in group_ids {
-                    args.push(GoParam { id: param_id, ty: ty_from_ident.clone(), slice_elem: None });
+                    args.push(GoParam { id: param_id, ty: ty.clone(), slice_elem: None });
                 }
             }
 
@@ -334,15 +366,15 @@ impl Parse for GoFnOutput {
                 is_slice = true;
                 let content;
                 let _bracket = syn::bracketed!(content in input);
-                // Check if next token is `{` — this means we're done with return type
+                // Check if next token is `{` - this means we're done with return type
                 if input.peek(syn::token::Brace) {
-                    // Return type is just `[]` followed by body — push marker and exit
+                    // Return type is just `[]` followed by body - push marker and exit
                     tys.push(syn::Type::Path(syn::TypePath {
                         path: syn::Path::from(syn::Ident::new("__go_slice__", proc_macro2::Span::call_site())),
                         qself: None,
                     }));
                 } else {
-                    // Has type after brackets: `[]int` — STORE the element type
+                    // Has type after brackets: `[]int` - STORE the element type
                     let elem = input.parse::<syn::Type>()?;
                     elem_type = Some(Box::new(elem));
                     tys.push(syn::Type::Path(syn::TypePath {
@@ -364,7 +396,7 @@ impl Parse for GoFnOutput {
                     is_slice = true;
                     let content;
                     let _bracket = syn::bracketed!(content in input);
-                    // Check if next token is `{` — means return type ends here
+                    // Check if next token is `{` - means return type ends here
                     if input.peek(syn::token::Brace) {
                         tys.push(syn::Type::Path(syn::TypePath {
                             path: syn::Path::from(syn::Ident::new("__go_slice__", proc_macro2::Span::call_site())),
@@ -430,13 +462,13 @@ impl Parse for GoStruct {
                 match f.parse::<proc_macro2::TokenTree>() {
                     Ok(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',' => {
                         let _comma: token::Comma = content.parse()?;
-                        break;  // Found comma — done
+                        break;  // Found comma - done
                     }
                     // If it's whitespace/newline, consume it and continue
                     Ok(proc_macro2::TokenTree::Punct(_)) => {
                         content.parse::<proc_macro2::TokenTree>()?;
                     }
-                    // Non-whitespace token (next field name) — stop skipping
+                    // Non-whitespace token (next field name) - stop skipping
                     Ok(_) => break,
                     Err(_) => break,
                 }
@@ -606,6 +638,29 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         return Ok(true);
     }
 
+    // 9. Check for channel send: `ch <- value`
+    if input.peek(syn::Ident) {
+        let fork = input.fork();
+        let valid = fork.parse::<Ident>().is_ok()
+            && fork.cursor().punct()
+                .map(|(p, _)| p.as_char() == '<' && p.spacing() == proc_macro2::Spacing::Joint)
+                .unwrap_or(false);
+        if valid {
+            let ch_ident: Ident = input.parse()?;
+            let _p1: proc_macro2::Punct = input.parse()?;
+            let _p2: proc_macro2::Punct = input.parse()?;
+            let val_expr: Expr = input.parse()?;
+            stmts.push(GoStmt::GoChannelSend(
+                Expr::Path(syn::ExprPath { attrs: vec![], qself: None, path: syn::Path::from(ch_ident) }),
+                val_expr,
+            ));
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+    }
+
     // No Go-specific statement matched
     Ok(false)
 }
@@ -698,7 +753,7 @@ fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
             }
         }
     }
-    // Parse iterable as Path (not Expr) — syn's Expr::parse on `x {` consumes
+    // Parse iterable as Path (not Expr) - syn's Expr::parse on `x {` consumes
     // the brace as verbatim, swallowing the entire for loop body!
     let iterable: syn::Path = input.parse()?;
     let body_content;
@@ -771,7 +826,7 @@ fn parse_go_map_decl(input: ParseStream, ident_str: String, stmts: &mut Vec<GoSt
 /// Manually advances past `[` and `]` punctuation, then parses elements from `{...}`.
 fn parse_go_slice_literal(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
     let fork = input.fork();
-    // Check `[` punctuation (not a bracket group — Go has separate `[` and `]` punctuation)
+    // Check `[` punctuation (not a bracket group - Go has separate `[` and `]` punctuation)
     if fork.peek(syn::token::Bracket) {
         // Manually advance past `[` and `]` punctuation, consuming any type between them
         input.advance_to(&fork); // advance to `[`
@@ -791,7 +846,7 @@ fn parse_go_slice_literal(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
             let _ = input.parse::<proc_macro2::TokenTree>()?;
         }
 
-        // Now we should be at `{` — manually parse elements, consume `}`
+        // Now we should be at `{` - manually parse elements, consume `}`
         if input.peek(syn::token::Brace) {
             let _ts: proc_macro2::TokenTree = input.parse()?; // consume `{`
             // Parse elements until we hit `}`
@@ -815,7 +870,7 @@ fn parse_go_slice_literal(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
             return Ok(());
         }
     }
-    // Not a slice literal — return error to signal "no match"
+    // Not a slice literal - return error to signal "no match"
     Err(syn::Error::new(proc_macro2::Span::call_site(), "expected slice literal"))
 }
 
@@ -849,10 +904,27 @@ fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool>
     Ok(true)
 }
 
-/// Parse `return` — handles `return val`, `return a, b` (multi-return),
+/// Parse `return` - handles `return val`, `return a, b` (multi-return),
 /// and `return []T{...}` (slice in return).
 fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     input.parse::<syn::token::Return>()?;
+
+    // Check for channel receive: `return <-ch`
+    if input.cursor().punct().is_some() {
+        if let Some((p, _)) = input.cursor().punct() {
+            if p.as_char() == '<' && p.spacing() == proc_macro2::Spacing::Joint {
+                let _p1: proc_macro2::Punct = input.parse()?;
+                let _p2: proc_macro2::Punct = input.parse()?;
+                let ch_ident: Ident = input.parse()?;
+                let ch_expr = Expr::Path(syn::ExprPath { attrs: vec![], qself: None, path: syn::Path::from(ch_ident) });
+                stmts.push(GoStmt::GoChannelRecv(ch_expr));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+        }
+    }
 
     // Check for `return []T{...}` (Go slice literal in return)
     let adv_fork = input.fork();
@@ -902,6 +974,95 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
     // Check for multi-return: `return a, b`
     let after_ret = input.fork();
     if !after_ret.is_empty() {
+        // Check for Go type assertion: `return x.(T)` or chained `x.(T).(T)`
+        // Use cursor to get token stream, then convert to string
+        let check_str = after_ret.cursor().token_stream().to_string();
+        let is_type_assertion = check_str.contains(".(");
+        
+        // For chained assertions like `x.(int).(int)`, count the number of `.(...)` groups
+        let paren_count = check_str.matches(".(").count();
+        
+        if is_type_assertion {
+            // Parse receiver and all type assertion groups
+            input.advance_to(&after_ret);
+            let receiver_ident: Ident = input.parse()?;
+            let receiver = Expr::Path(syn::ExprPath { attrs: vec![], qself: None, path: syn::Path::from(receiver_ident) });
+            
+            // Collect all type names from chained assertions
+            let mut types: Vec<syn::Type> = Vec::new();
+            loop {
+                // Check if there's another `.(T)` group
+                let next_fork = input.fork();
+                if !next_fork.peek(syn::token::Dot) { break; }
+                let _: proc_macro2::Punct = input.parse()?;
+                let _: proc_macro2::Group = input.parse()?;
+                // Extract type from the paren group
+                let tfork = after_ret.fork();
+                let mut all_groups: Vec<proc_macro2::Group> = Vec::new();
+                let mut remaining = tfork;
+                let _ = remaining.parse::<proc_macro2::TokenTree>()?; // skip receiver
+                loop {
+                    let mut gcheck = remaining.fork();
+                    // Check for `.` punct
+                    if let Ok(tt) = gcheck.parse::<proc_macro2::TokenTree>() {
+                        if let proc_macro2::TokenTree::Punct(p) = tt {
+                            if p.as_char() == '.' {
+                                // Check for `(T)` group
+                                let mut gcheck2 = gcheck.fork();
+                                if let Ok(tt2) = gcheck2.parse::<proc_macro2::TokenTree>() {
+                                    if let proc_macro2::TokenTree::Group(g) = tt2 {
+                                        all_groups.push(g);
+                                        remaining = gcheck2;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+                for g in &all_groups {
+                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                        if let Ok(tid) = syn::parse2::<syn::Ident>(g.stream()) {
+                            let tname = tid.to_string();
+                            let rt = match tname.as_str() {
+                                "int" => "i32", "int8" => "i8", "int16" => "i16",
+                                "int32" => "i32", "int64" => "i64",
+                                "uint" => "u32", "uint8" => "u8", "uint16" => "u16",
+                                "uint32" => "u32", "uint64" => "u64",
+                                "uintptr" => "usize", "byte" => "u8",
+                                "rune" => "char", "float32" => "f32",
+                                "float64" => "f64", "bool" => "bool",
+                                "string" => "String",
+                                "error" => "Box<dyn std::error::Error>",
+                                _ => "i32",
+                            };
+                            types.push(syn::parse_str(rt).unwrap());
+                        }
+                    }
+                }
+                if !all_groups.is_empty() {
+                    input.advance_to(&remaining);
+                }
+            }
+            
+            if types.is_empty() {
+                // No types found, just return the receiver
+                stmts.push(GoStmt::Expr(receiver));
+            } else {
+                // Build nested casts: ((x as T1) as T2) ...
+                // Use GoTypeAssert which handles the transpilation in go_stmt_to_rust
+                // to avoid syn::parse_quote mis-parsing &x as Expr::Return
+                for ty in types.into_iter().rev() {
+                    stmts.push(GoStmt::GoTypeAssert(receiver.clone(), ty.clone()));
+                }
+            }
+            if input.peek(token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+
         let expr_fork = after_ret.fork();
         if expr_fork.parse::<Expr>().is_ok() {
             input.advance_to(&after_ret);
@@ -1043,7 +1204,31 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             });
             quote! { if #cond #then_block #else_block }
         }
-        GoStmt::Expr(expr) => go_to_rust(expr),
+        GoStmt::Expr(expr) => {
+                eprintln!("DEBUG go_stmt_to_rust: Expr variant = {:?}", std::mem::discriminant(expr));
+                eprintln!("DEBUG go_stmt_to_rust: Expr tokens = {}", quote!{#expr}.to_string());
+                go_to_rust(expr)
+            }
+        GoStmt::GoChannelSend(ch, val) => {
+            let ch_rust = go_to_rust(ch);
+            let val_rust = go_to_rust(val);
+            quote! { #ch_rust.send(#val_rust); }
+        }
+        GoStmt::GoChannelRecv(ch) => {
+            let ch_rust = go_to_rust(ch);
+            quote! { return #ch_rust.recv().unwrap(); }
+        }
+        GoStmt::GoTypeAssert(receiver, ty) => {
+            let recv_rust = go_to_rust(receiver);
+            let ty_str = quote! { #ty }.to_string();
+            match ty_str.as_str() {
+                "String" => quote! { ::std::string::ToString::to_string(&#recv_rust) },
+                "bool" => quote! { #recv_rust != 0 },
+                "char" => quote! { (#recv_rust as u8) as char },
+                _ => quote! { #recv_rust as #ty },
+            }
+        }
+
         GoStmt::GoSlice(elems) => {
             let elems: Vec<_> = elems.iter().map(go_to_rust).collect();
             quote! { vec![ #(#elems),* ] }
@@ -1188,7 +1373,7 @@ pub(crate) fn parse_block_stmts(input: ParseStream) -> syn::Result<Vec<GoStmt>> 
     Ok(stmts)
 }
 
-/// Parse a single statement from a block — the common case shared between
+/// Parse a single statement from a block - the common case shared between
 /// `parse_block_stmts` and `parse_go_block`. Handles:
 ///   - `let` local declarations
 ///   - Go short declarations (`id := expr`)
@@ -1277,7 +1462,7 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
         return Ok(());
     }
 
-    // Nothing matched — skip one token tree to make progress
+    // Nothing matched - skip one token tree to make progress
     let _ = input.parse::<proc_macro2::TokenTree>();
     Ok(())
 }

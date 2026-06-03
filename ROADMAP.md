@@ -40,6 +40,8 @@ The following Go constructs are fully transpiled and tested:
 | **Field access** | `pt.0`, `s.field` | `pt.0`, `s.field` |
 | **Interfaces** | `interface Foo { Name() string }` | `trait foo { fn name(&self) -> String; }` |
 | **Channels** | `chan int`, `chan []int` | `GoChannel::<i32>::new()`, `GoChannel::<Vec<i32>>::new()` |
+| **Channel send** | `ch <- value` | `ch.send(value)` |
+| **Channel receive** | `return <-ch` | `return ch.recv().unwrap()` |
 | **Select** | `select { case ... }` | `GoSelect::new().run()` |
 | **Goroutines** | `go func() { body }` | `GoScheduler::new().submit(|| { body })` |
 
@@ -84,12 +86,12 @@ These Go constructs are **blocked** via `compile_error!` at compile time:
 
 | Category | What's missing | Notes |
 |----------|----------------|-------|
-| **Channel send/recv** | `ch <- value`, `<- ch` | Rust uses different channel patterns |
+
 | **Select with multiple cases** | Multiple `case` blocks in `select` | Partial — basic select works |
 | **`defer`** | `defer cleanup()` | No Rust equivalent |
 | **`panic`/`recover`** | `panic("msg")`, `recover()` | Rust has `panic!` / `catch_unwind` |
 | **`sync` primitives** | `sync.Mutex`, `sync.WaitGroup` | No sync crate mapping |
-| **Type assertions** | `x.(int)` | Rust `as` casts work; type switches not yet |
+| **Type assertions** | `x.(int)` | ✅ Implemented — all primitive types supported |
 | **Labels** | `loop: for { break loop }` | Go labels → Rust has no labels |
 | **Function declarations inside blocks** | Nested function definitions | Rust closures only |
 | **Empty bare structs** | `struct{}` | Undersized, empty structs |
