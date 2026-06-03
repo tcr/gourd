@@ -39,7 +39,8 @@ fn test_select_default_compiles() {
 
 #[test]
 fn test_select_send_compiles() {
-    let ch = GoChannel::<i32>::new();
+    // Use buffered channel so send succeeds immediately (no receiver needed)
+    let ch = GoChannel::<i32>::with_capacity(1);
     goSelectSend(ch, 42);
 }
 

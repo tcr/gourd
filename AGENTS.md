@@ -71,11 +71,18 @@ consumer's crate. See [ROADMAP.md](ROADMAP.md) for the full list of missing feat
 ## Running
 
 ```bash
-cargo test           # run all tests (86 passing)
+cargo test           # run all tests (~34s with validation, ~6s without)
 cargo test --lib     # unit tests only
 cargo expand -p gourd # see expanded Go → Rust transpilation.
 gourd transpile "func hello() int { return 42 }"  # transpile CLI tool
 gourd-check [PATHS...]  # standalone Go/Rust validation
+```
+
+Validation is **enabled by default** via the `validate` feature. Every `go!` block is checked with `go build` at compile time. This adds ~28s to compile time but ensures correctness. For fast iterations:
+
+```bash
+cargo test --no-default-features  # ~6s, no go build validation
+cargo test -p gourd-check          # pre-compilation validation only
 ```
 
 ## `verify_rust_output` — compile-time transpilation verification
@@ -170,8 +177,9 @@ When working with the concurrency primitives:
 2. **`GoSelect` requires `T: Clone`** — because send cases need to clone values for retry attempts during polling.
 3. **Scheduler runs sequentially** — goroutines are submitted and executed in order, simulating Go's scheduler.
 4. **Use buffered channels** when sending on unbuffered channels from a single thread — unbuffered channels block send until a receiver is ready.
-5. **Add `crossbeam` and `num-traits`** to your Cargo.toml dependencies.
-6. **Include `go_scheduler.rs`** in your lib.rs: `mod go_scheduler; pub use go_scheduler::*;`
+5. **`GoSelect::run()` has a 60s default timeout** when no `with_timeout()` is set — use `with_capacity(1)` (buffered) channels for tests that send without a receiver, so `try_send()` succeeds immediately.
+6. **Add `crossbeam` and `num-traits`** to your Cargo.toml dependencies.
+7. **Include `go_scheduler.rs`** in your lib.rs: `mod go_scheduler; pub use go_scheduler::*;`
 
 ### When to use
 
@@ -215,7 +223,7 @@ gourd-check -v 2 PATHS       # Verbose: show block details
 gourd-check --help           # Help
 ```
 
-> **Note**: Running `cargo test` at the workspace root automatically runs `gourd-check` — Go blocks are validated via `go build` and `#[verify_rust_output]` blocks are validated via `cargo check`.
+> **Note**: `cargo test` at the workspace root runs with validation **enabled by default** — every `go!` block is checked with `go build` at compile time. For pre-compilation validation, use `gourd-check` separately. Run `cargo test --no-default-features` to skip validation for fast iterations.
 
 ### Example output
 

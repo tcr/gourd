@@ -15,13 +15,13 @@ use proc_macro::TokenStream;
 ///   2. `struct Name { field type }` → `struct Name { pub field: Type }`
 ///   3. `func name() { ... }` → `fn name() { ... }`
 ///
-/// **Semantic validation**: the input is validated against `go build` at compile
-/// time. If the Go code doesn't compile, a `compile_error!` is emitted.
+/// **Semantic validation**: the input is validated against `go build` at
+/// compile time. If the Go code doesn't compile, a `compile_error!` is emitted.
 #[proc_macro]
 pub fn go(input: TokenStream) -> TokenStream {
     let tokens: proc_macro2::TokenStream = input.into();
 
-    // Semantics: check Go code compiles (skip if `go` is unavailable).
+    // Validate Go code compiles (skip if `go` is unavailable).
     // Validation via `gourd-check` is preferred for CI and pre-compile checks.
     let _ = gourd_codegen::validate_go(&tokens);
 

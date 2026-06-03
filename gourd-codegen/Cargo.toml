@@ -7,6 +7,10 @@ license = "MIT"
 
 [lib]
 
+[features]
+default = ["validate"]
+validate = []  # External compiler validation (enabled by default)
+
 [dependencies]
 syn = { version = "2", features = ["full", "fold"] }
 quote = "1"

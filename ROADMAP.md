@@ -124,7 +124,7 @@ Closure parsing is now supported in the transpiler:
 | `new_builtin.rs` | ✅ 4/4 |
 | `panic_builtin.rs` | ✅ 4/4 |
 | `receiver_tests.rs` | ⚠️ Compiles (0 tests) |
-| `select_builtin.rs` | ✅ 3/3 |
+| `select_builtin.rs` | ✅ 3/3 (fixed: use buffered channels for send-only tests) |
 | `shorthand_query.rs` | ✅ 2/2 |
 | `struct_literals.rs` | ✅ 3/3 |
 | `switch_minimal.rs` | ⚠️ Compiles (0 tests) |
@@ -175,7 +175,7 @@ Closure parsing is now supported in the transpiler:
 | `new_builtin.rs` | ✅ 4/4 |
 | `panic_builtin.rs` | ✅ 4/4 |
 | `receiver_tests.rs` | ⚠️ Compiles (0 tests) |
-| `select_builtin.rs` | ✅ 3/3 |
+| `select_builtin.rs` | ✅ 3/3 (fixed: use buffered channels for send-only tests) |
 | `shorthand_query.rs` | ✅ 2/2 |
 | `struct_literals.rs` | ✅ 3/3 |
 | `switch_minimal.rs` | ⚠️ Compiles (0 tests) |

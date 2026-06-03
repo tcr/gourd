@@ -154,10 +154,12 @@ gourd-check -r PATHS         # Rust-only
 ## Running
 
 ```bash
-cargo test
+cargo test                    # ~34s with validation (go build on every go! block)
 cargo expand -p gourd         # See expanded transpilation
 gourd transpile "func hello() int { return 42 }"
 ```
+
+> Validation is **enabled by default** — every `go!` block is checked with `go build` at compile time. This adds compile time (~34s vs ~6s without validation) but ensures correctness. Use `--no-default-features` to disable validation for fast iterations, or use the `gourd-check` CLI for pre-compilation validation.
 
 ## Status
 
