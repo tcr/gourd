@@ -5,6 +5,9 @@
 
 use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
+use syn::parse2;
+use super::super::ast::GoBlock;
+use super::super::stmt_to_rust::go_stmt_to_rust;
 
 /// Top-level: parse and transpile a Go anonymous function to Rust closure.
 pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
@@ -24,7 +27,7 @@ pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
     }
 
     // Parse parameters from paren group
-    let params: Vec<(proc_macro2::Ident, syn::Type)> = if trees.len() > 1 {
+    let params: Vec<(proc_macro2::Ident, TokenStream)> = if trees.len() > 1 {
         if let TokenTree::Group(g) = &trees[1] {
             if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
                 let param_trees: Vec<TokenTree> = g.stream().into_iter().collect();
@@ -61,13 +64,40 @@ pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
         None
     };
 
-    // Parse body from brace group
+    // Parse body from brace group using GoBlock parsing
     let body_idx = if ret_type.is_some() { 3 } else { 2 };
     let body = if trees.len() > body_idx {
         if let TokenTree::Group(g) = &trees[body_idx] {
             if g.delimiter() == proc_macro2::Delimiter::Brace {
                 let body_tokens: TokenStream = g.stream();
-                parse_closure_body(&body_tokens)
+                // Parse the body as a GoBlock and transpile each statement
+                // GoBlock expects brace-delimited content, so wrap body_tokens in braces
+                let wrapped_body: TokenStream = {
+                    let brace_group = proc_macro2::Group::new(
+                        proc_macro2::Delimiter::Brace,
+                        body_tokens.clone(),
+                    );
+                    quote! { #brace_group }
+                };  
+                match parse2::<GoBlock>(wrapped_body) {
+                    Ok(go_block) => {
+                        let stmts: Vec<TokenStream> = go_block.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+                        quote! { { #(#stmts);* } }
+                    } Err(_) => {
+                        // For bodies starting with `if`, handle them specially
+                        let first_token = body_tokens.clone().into_iter().next();
+                        if let Some(TokenTree::Ident(id)) = first_token {
+                            if id.to_string() == "if" {
+                                // TODO: implement if statement transpilation for closures
+                                quote! { { /* TODO: transpile if statement */ } }
+                            } else {
+                                quote! { { #body_tokens } }
+                            }
+                        } else {
+                            quote! { { compile_error!("could not parse closure body"); } }
+                        }
+                    }
+                }
             } else {
                 quote! { { compile_error!("expected body block"); } }
             }
@@ -81,18 +111,19 @@ pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
     // Build Rust closure
     let rust_params: Vec<TokenStream> = params.iter().map(|p| {
         let id = &p.0;
-        let ty = &p.1;
-        let mapped = map_go_types(ty);
-        quote! { #id: #mapped }
+        let ty: &TokenStream = &p.1;
+        // ty is already a TokenStream from map_go_type_str
+        // Just use it directly
+        quote! { #id: #ty }
     }).collect();
 
     let ret = ret_type.as_ref().map(|ty| quote! { -> #ty });
 
-    quote! { | #(#rust_params),* #ret #body }
+    quote! { | #(#rust_params),* | #ret #body }
 }
 
 /// Parse closure parameters: `a int, b int` or `a, b int`.
-fn parse_closure_params(trees: &[TokenTree]) -> Vec<(proc_macro2::Ident, syn::Type)> {
+fn parse_closure_params(trees: &[TokenTree]) -> Vec<(proc_macro2::Ident, TokenStream)> {
     let mut params = Vec::new();
     let mut i = 0;
 
@@ -116,23 +147,35 @@ fn parse_closure_params(trees: &[TokenTree]) -> Vec<(proc_macro2::Ident, syn::Ty
                     let type_name = type_id.to_string();
                     if is_go_type_name(&type_name) {
                         let ty = map_go_type_str(&type_name);
+                        let ty: TokenStream = quote! { #ty };
                         params.push((id.clone(), ty));
                         i += 1;
                         continue;
                     }
                 }
-                // Group type (e.g., `[]int`)
+                // Slice type `[]T` represented as: bracket group `[]` followed by element type
                 if let TokenTree::Group(g) = next {
                     if g.delimiter() == proc_macro2::Delimiter::Bracket {
-                        let type_tokens: TokenStream = g.stream();
-                        if let Ok(ty) = syn::parse2::<syn::Type>(type_tokens) {
-                            let mapped = map_go_types(&ty);
-                            params.push((id.clone(), mapped));
-                            i += 1;
-                            continue;
+                        // `[]` is empty bracket group, next token should be element type
+                        if i + 1 < trees.len() {
+                            if let TokenTree::Ident(elem_id) = &trees[i + 1] {
+                                let elem_name = elem_id.to_string();
+                                if is_go_type_name(&elem_name) {
+                                    let rust_ty = map_go_type_str(&elem_name);
+                                    // Convert []T to &[T] (Go slice -> Rust slice reference)
+                                    let slice_ty: TokenStream = quote! { &#rust_ty };
+                                    params.push((id.clone(), slice_ty));
+                                    i += 2; // skip bracket group and element type
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
+
+                // No type annotation - param is just an identifier, use unknown type
+                params.push((id.clone(), quote! { unknown }));
+                i += 1;
             }
         }
 

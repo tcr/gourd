@@ -75,6 +75,26 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                 }
             }
 
+            // Check for Go closure: `name := func(params) { body }`
+            let cv_fork = input.fork();
+            if let Ok(func_id) = cv_fork.parse::<syn::Ident>() {
+                if func_id.to_string() == "func" {
+                    // This is a Go closure! Parse the full assignment as `GoLocal(name, closure)`
+                    // We need to skip `name := ` and then pass the closure to go_to_rust_closure
+                    let _ = input.parse::<syn::token::Colon>();
+                    let _ = input.parse::<syn::token::Eq>();
+                    // Now `input` is at `func ...`
+                    // Pass the rest to go_to_rust_closure
+                    let closure_tokens: TokenStream = input.parse().unwrap_or_default();
+                    let closure_expr = super::free_fn::go_to_rust_closure(closure_tokens);
+                    stmts.push(GoStmt::GoLocal(ident, closure_expr));
+                    if input.peek(token::Semi) {
+                        let _semi: token::Semi = input.parse()?;
+                    }
+                    return Ok(());
+                }
+            }
+
             // Check for `make(...)` in short declarations
             let mval_fork = input.fork();
             let is_make = matches!(mval_fork.parse::<syn::Ident>(), Ok(ref id) if id.to_string() == "make")

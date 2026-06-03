@@ -196,15 +196,63 @@ impl Parse for GoStmt {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         use syn::parse::discouraged::Speculative;
 
-        // 1. Try `let` local declarations
+        // 1. Go short variable declaration with `:=` — also check for closures
+        // 2. Rust `let` local declarations
         let fork = input.fork();
-        if fork.peek(syn::token::Let) {
-            if let Ok(stmt) = fork.parse::<syn::Stmt>() {
-                if let syn::Stmt::Local(local) = stmt {
-                    input.parse::<syn::Stmt>()?;
-                    return Ok(GoStmt::Local(local));
+        if fork.peek(syn::token::Let) || fork.peek2(syn::token::Colon) {
+            // Rust `let` statements or Go `:=` short declarations
+            if fork.peek(syn::token::Let) {
+                // Rust `let` — parse normally
+                if let Ok(stmt) = fork.parse::<syn::Stmt>() {
+                    if let syn::Stmt::Local(local) = stmt {
+                        input.parse::<syn::Stmt>()?;
+                        return Ok(GoStmt::Local(local));
+                    }
                 }
             }
+
+            // Go `:=` short declaration — check if it's a closure
+            // Pattern: `name := func(params) { body }`
+            let mut check_fork = input.fork();
+            if check_fork.peek2(syn::token::Colon) {
+                // Skip past `name := `
+                let _ = check_fork.parse::<proc_macro2::TokenTree>(); // name
+                let _ = check_fork.parse::<syn::token::Colon>();
+                let _ = check_fork.parse::<syn::token::Eq>();
+                // Check if next token is `func`
+                if check_fork.peek(syn::Ident) {
+                    if let Ok(func_id) = check_fork.parse::<syn::Ident>() {
+                        if func_id.to_string() == "func" {
+                            // This is a Go closure! Parse the full assignment.
+                            let local_tokens: TokenStream = input.parse()?;
+                            // Extract the variable name
+                            let pat_ident: Ident = local_tokens
+                                .clone()
+                                .into_iter()
+                                .filter_map(|t| {
+                                    if let proc_macro2::TokenTree::Ident(i) = t {
+                                        Some(i)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .next()
+                                .unwrap_or_else(|| Ident::new("_", proc_macro2::Span::call_site()));
+                            // Parse the closure (skip the `name := ` prefix)
+                            let mut skip = input.fork();
+                            let _ = skip.parse::<proc_macro2::TokenTree>(); // name
+                            let _ = skip.parse::<syn::token::Colon>();
+                            let _ = skip.parse::<syn::token::Eq>();
+                            let closure_tokens: TokenStream = skip.parse().unwrap_or_default();
+                            if let Some(closure_expr) = try_parse_closure_from_input(&closure_tokens) {
+                                return Ok(GoStmt::GoLocal(pat_ident, closure_expr));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Not a closure — fall through to try parsing as regular expression
         }
 
         // 2. Check for if statement
@@ -291,6 +339,14 @@ impl Parse for GoStmt {
             return Ok(GoStmt::Expr(expr));
         }
 
+        // 7b. If expression parsing failed, check if the raw tokens contain
+        // a Go closure (anonymous function). This happens when syn can't
+        // parse Go syntax like `func(params) { body }` as a Rust expression.
+        let input_tokens: TokenStream = input.parse().unwrap_or_default();
+        if let Some(closure_expr) = try_parse_closure_from_input(&input_tokens) {
+            return Ok(GoStmt::RawStmt(closure_expr));
+        }
+
         // 8. Fallback: skip one token to make progress
         let _ = input.parse::<proc_macro2::TokenTree>();
         Ok(GoStmt::RawStmt(proc_macro2::TokenStream::new()))
@@ -371,4 +427,247 @@ pub(crate) struct SwitchCase {
 pub(crate) struct InterfaceImpl {
     pub(crate) ident: Ident,
     pub(crate) methods: Vec<GoInterfaceMethod>,
+}
+
+/// Check if verbatim tokens represent a Go closure.
+fn is_verbatim_closure(tokens: &proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    if trees.is_empty() {
+        return false;
+    }
+    if let TokenTree::Ident(id) = &trees[0] {
+        id.to_string() == "func"
+    } else {
+        false
+    }
+}
+
+/// Try to parse a Go closure from raw tokens.
+/// Returns a TokenStream with the Rust closure syntax if successful.
+pub(crate) fn try_parse_closure_from_input(tokens: &TokenStream) -> Option<TokenStream> {
+    let trees: Vec<proc_macro2::TokenTree> = tokens.clone().into_iter().collect();
+
+    // Must start with `func` keyword
+    if trees.is_empty() {
+        return None;
+    }
+    if let proc_macro2::TokenTree::Ident(id) = &trees[0] {
+        if id.to_string() != "func" {
+            return None;
+        }
+    } else {
+        return None;
+    }
+
+    // Pass the full closure to go_to_rust_closure which handles all parsing internally
+    let closure_expr = super::free_fn::go_to_rust_closure(tokens.clone());
+    Some(closure_expr)
+}
+
+/// Map a Go type string to Rust type string.
+fn map_go_type_str(go_type: &str) -> TokenStream {
+    use quote::quote;
+    match go_type.trim() {
+        "int" => quote! { i32 },
+        "int8" => quote! { i8 },
+        "int16" => quote! { i16 },
+        "int32" => quote! { i32 },
+        "int64" => quote! { i64 },
+        "uint" => quote! { u32 },
+        "uint8" => quote! { u8 },
+        "uint16" => quote! { u16 },
+        "uint32" => quote! { u32 },
+        "uint64" => quote! { u64 },
+        "uintptr" => quote! { usize },
+        "byte" => quote! { u8 },
+        "rune" => quote! { char },
+        "float32" => quote! { f32 },
+        "float64" => quote! { f64 },
+        "string" => quote! { ::std::string::String },
+        "bool" => quote! { bool },
+        "error" => quote! { Box<dyn std::error::Error> },
+        _ => quote! { unknown },
+    }
+}
+
+/// Parse closure body statements and convert to Rust.
+fn parse_closure_body(body_tokens: &TokenStream) -> TokenStream {
+    use proc_macro2::TokenTree;
+    use quote::quote;
+
+    let trees: Vec<TokenTree> = body_tokens.clone().into_iter().collect();
+    let mut stmts = Vec::new();
+    let mut i = 0;
+
+    while i < trees.len() {
+        let token = &trees[i];
+
+        // Skip semicolons
+        if let TokenTree::Punct(p) = token {
+            if p.as_char() == ';' {
+                i += 1;
+                continue;
+            }
+        }
+
+        // Handle `let` statements
+        if let TokenTree::Ident(id) = token {
+            if id.to_string() == "let" {
+                i += 1;
+                // Collect tokens until '='
+                let mut let_parts = vec![token.clone()];
+                while i < trees.len() {
+                    let_parts.push(trees[i].clone());
+                    if let TokenTree::Punct(p) = &trees[i] {
+                        if p.as_char() == '=' {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    i += 1;
+                }
+                // Collect expression until ';' or end
+                while i < trees.len() {
+                    if let TokenTree::Punct(p) = &trees[i] {
+                        if p.as_char() == ';' {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    let_parts.push(trees[i].clone());
+                    i += 1;
+                }
+                let let_ts: TokenStream = let_parts.iter().cloned().collect();
+                if let Ok(expr) = syn::parse2::<syn::Expr>(let_ts.clone()) {
+                    stmts.push(super::expr::dispatch::go_to_rust(&expr));
+                } else {
+                    stmts.push(let_ts);
+                }
+                continue;
+            }
+        }
+
+        // Handle `return` statements
+        if let TokenTree::Ident(id) = token {
+            if id.to_string() == "return" {
+                i += 1;
+                let mut ret_parts = Vec::new();
+                while i < trees.len() {
+                    if let TokenTree::Punct(p) = &trees[i] {
+                        if p.as_char() == ';' {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    ret_parts.push(trees[i].clone());
+                    i += 1;
+                }
+                let ret_ts: TokenStream = ret_parts.iter().cloned().collect();
+                if ret_ts.is_empty() {
+                    stmts.push(quote! { return; });
+                } else if let Ok(expr) = syn::parse2::<syn::Expr>(ret_ts.clone()) {
+                    stmts.push(super::expr::dispatch::go_to_rust(&expr));
+                } else {
+                    stmts.push(ret_ts);
+                }
+                continue;
+            }
+        }
+
+        // Handle `if` statements
+        if let TokenTree::Ident(id) = token {
+            if id.to_string() == "if" {
+                i += 1;
+                let mut if_tokens = TokenStream::new();
+                if_tokens.extend(quote! { #token });
+                // Collect tokens including the body block
+                while i < trees.len() {
+                    if let TokenTree::Group(g) = &trees[i] {
+                        if g.delimiter() == proc_macro2::Delimiter::Brace {
+                            // Found the body brace - try to parse it
+                            if let Ok(body_block) = syn::parse2::<syn::ExprBlock>(g.stream()) {
+                                let body_stmts: Vec<TokenStream> = body_block.block.stmts.iter().map(|s| {
+                                    match s {
+                                        syn::Stmt::Local(local) => {
+                                            let pat = &local.pat;
+                                            let val = local.init.as_ref().map(|v| super::expr::dispatch::go_to_rust(&v.expr));
+                                            quote! { let #pat = #val; }
+                                        }
+                                        syn::Stmt::Expr(expr, _) => super::expr::dispatch::go_to_rust(expr),
+                                        _ => quote! { /* skip */ },
+                                    }
+                                }).collect();
+                                let body: TokenStream = quote! { { #(#body_stmts);* } };
+                                if_tokens.extend(body);
+                            } else {
+                                if_tokens.extend(quote! { #token });
+                            }
+                            i += 1;
+                            break;
+                        }
+                    }
+                    if_tokens.extend(quote! { #token });
+                    i += 1;
+                }
+                if let Ok(expr) = syn::parse2::<syn::Expr>(if_tokens.clone()) {
+                    stmts.push(super::expr::dispatch::go_to_rust(&expr));
+                } else {
+                    stmts.push(if_tokens);
+                }
+                continue;
+            }
+        }
+
+        // Handle `for` loops
+        if let TokenTree::Ident(id) = token {
+            if id.to_string() == "for" {
+                i += 1;
+                let mut for_tokens = TokenStream::new();
+                for_tokens.extend(quote! { #token });
+                while i < trees.len() {
+                    if let TokenTree::Group(g) = &trees[i] {
+                        if g.delimiter() == proc_macro2::Delimiter::Brace {
+                            let body_block: TokenStream = quote! { {} };
+                            for_tokens.extend(body_block);
+                            i += 1;
+                            break;
+                        }
+                    }
+                    for_tokens.extend(quote! { #token });
+                    i += 1;
+                }
+                if let Ok(expr) = syn::parse2::<syn::Expr>(for_tokens.clone()) {
+                    stmts.push(super::expr::dispatch::go_to_rust(&expr));
+                } else {
+                    stmts.push(for_tokens);
+                }
+                continue;
+            }
+        }
+
+        // Default: collect token as verbatim expression
+        let mut expr_parts = vec![token.clone()];
+        i += 1;
+        while i < trees.len() {
+            if let TokenTree::Punct(p) = &trees[i] {
+                if p.as_char() == ';' {
+                    i += 1;
+                    break;
+                }
+            }
+            expr_parts.push(trees[i].clone());
+            i += 1;
+        }
+        let expr_ts: TokenStream = expr_parts.iter().cloned().collect();
+        if !expr_ts.is_empty() {
+            if let Ok(expr) = syn::parse2::<syn::Expr>(expr_ts.clone()) {
+                stmts.push(super::expr::dispatch::go_to_rust(&expr));
+            } else {
+                stmts.push(expr_ts);
+            }
+        }
+    }
+
+    quote! { { #(#stmts);* } }
 }

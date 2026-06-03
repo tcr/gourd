@@ -16,6 +16,6 @@ pub mod types;
 
 // Re-export the public API
 #[allow(unused_imports)]
-pub use free_fn::{go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
+pub use free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_struct, go_to_rust_switch};
 #[allow(unused_imports)]
 pub use funcs::go_to_rust_receiver_fn;
