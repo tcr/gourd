@@ -382,6 +382,171 @@ impl Parse for GoFnOutput {
                         qself: None,
                     }));
                 }
+            // Check for Go `chan T` or `map[K]V` return types
+            } else if input.peek(syn::Ident) {
+                let fork = input.fork();
+                if let Ok(first_ident) = fork.parse::<syn::Ident>() {
+                    let first_name = first_ident.to_string();
+                    if first_name == "chan" {
+                        // consume `chan` from main stream
+                        let _: syn::Ident = input.parse()?;
+                        // Parse element type
+                        let elem = if input.peek(syn::token::Bracket) {
+                            // `chan []T` — slice element type
+                            let content;
+                            let _bracket = syn::bracketed!(content in input);
+                            content.parse::<syn::Type>().unwrap_or_else(|_| {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("i32", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            })
+                        } else if input.peek(syn::Ident) {
+                            // `chan int`, `chan string`, etc.
+                            input.parse::<syn::Type>().unwrap_or_else(|_| {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("i32", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            })
+                        } else {
+                            // Bare `chan` — use i32 default
+                            syn::Type::Path(syn::TypePath {
+                                path: syn::Path::from(syn::Ident::new("i32", proc_macro2::Span::call_site())),
+                                qself: None,
+                            })
+                        };
+                        // Build `__go_chan<T>` marker (with angle brackets) for types.rs mapping
+                        let mut chan_path = syn::Path::from(syn::Ident::new("__go_chan", proc_macro2::Span::call_site()));
+                        chan_path.segments.clear();
+                        chan_path.segments.push(syn::PathSegment {
+                            ident: syn::Ident::new("__go_chan", proc_macro2::Span::call_site()),
+                            arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                colon2_token: None,
+                                lt_token: Token![<](proc_macro2::Span::call_site()),
+                                args: syn::punctuated::Punctuated::from_iter([
+                                    syn::GenericArgument::Type(elem)
+                                ]),
+                                gt_token: Token![>](proc_macro2::Span::call_site()),
+                            }),
+                        });
+                        tys.push(syn::Type::Path(syn::TypePath {
+                            path: chan_path,
+                            qself: None,
+                        }));
+                    } else if first_name == "map" {
+                        // consume `map` from main stream
+                        let _: syn::Ident = input.parse()?;
+                        // Parse `[K]` — key type
+                        if input.peek(syn::token::Bracket) {
+                            let k_content;
+                            let _bracket = syn::bracketed!(k_content in input);
+                            let key_type: syn::Type = k_content.parse().unwrap_or_else(|_| {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("string", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            });
+                            // Parse `V` — value type
+                            let val_type: syn::Type = if input.peek(syn::Ident) {
+                                input.parse().unwrap_or_else(|_| {
+                                    syn::Type::Path(syn::TypePath {
+                                        path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                                        qself: None,
+                                    })
+                                })
+                            } else {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            };
+                            // Build `__go_map<K, V>` marker (with angle brackets)
+                            let mut map_path = syn::Path::from(syn::Ident::new("__go_map", proc_macro2::Span::call_site()));
+                            map_path.segments.clear();
+                            map_path.segments.push(syn::PathSegment {
+                                ident: syn::Ident::new("__go_map", proc_macro2::Span::call_site()),
+                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    colon2_token: None,
+                                    lt_token: Token![<](proc_macro2::Span::call_site()),
+                                    args: syn::punctuated::Punctuated::from_iter([
+                                        syn::GenericArgument::Type(key_type),
+                                        syn::GenericArgument::Type(val_type),
+                                    ]),
+                                    gt_token: Token![>](proc_macro2::Span::call_site()),
+                                }),
+                            });
+                            tys.push(syn::Type::Path(syn::TypePath {
+                                path: map_path,
+                                qself: None,
+                            }));
+                        }
+                    } else {
+                        // Not `chan` or `map` — fall through to standard parsing
+                        let t = input.parse::<syn::Type>()?;
+                        tys.push(t);
+                    }
+                } else {
+                    let t = input.parse::<syn::Type>()?;
+                    tys.push(t);
+                }
+            } else {
+                let fork = input.fork();
+                if let Ok(first_ident) = fork.parse::<syn::Ident>() {
+                    if first_ident.to_string() == "map" {
+                        let _: syn::Ident = input.parse()?; // consume `map`
+                        // Parse `[K]` — key type
+                        if input.peek(syn::token::Bracket) {
+                            let k_content;
+                            let _bracket = syn::bracketed!(k_content in input);
+                            let _key_type: syn::Type = k_content.parse().unwrap_or_else(|_| {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("string", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            });
+                            // Parse `V` — value type
+                            let _value_type: syn::Type = if input.peek(syn::Ident) {
+                                input.parse().unwrap_or_else(|_| {
+                                    syn::Type::Path(syn::TypePath {
+                                        path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                                        qself: None,
+                                    })
+                                })
+                            } else {
+                                syn::Type::Path(syn::TypePath {
+                                    path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                                    qself: None,
+                                })
+                            };
+                            // Build `__go_map<K, V>` marker (with angle brackets)
+                            let mut map_path = syn::Path::from(syn::Ident::new("__go_map", proc_macro2::Span::call_site()));
+                            map_path.segments.clear();
+                            map_path.segments.push(syn::PathSegment {
+                                ident: syn::Ident::new("__go_map", proc_macro2::Span::call_site()),
+                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    colon2_token: None,
+                                    lt_token: Token![<](proc_macro2::Span::call_site()),
+                                    args: syn::punctuated::Punctuated::from_iter([
+                                        syn::GenericArgument::Type(_key_type),
+                                        syn::GenericArgument::Type(_value_type),
+                                    ]),
+                                    gt_token: Token![>](proc_macro2::Span::call_site()),
+                                }),
+                            });
+                            tys.push(syn::Type::Path(syn::TypePath {
+                                path: map_path,
+                                qself: None,
+                            }));
+                        }
+                    } else {
+                        let t = input.parse::<syn::Type>()?;
+                        tys.push(t);
+                    }
+                } else {
+                    let t = input.parse::<syn::Type>()?;
+                    tys.push(t);
+                }
             } else {
                 // Standard type parsing
                 let t = input.parse()?;

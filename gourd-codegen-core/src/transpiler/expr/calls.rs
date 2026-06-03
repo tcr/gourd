@@ -5,6 +5,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Expr, ExprField, ExprIndex, ExprMacro, ExprMethodCall};
 
+use super::dispatch::emit_todo;
+
 pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
     if let Expr::Path(path) = &*input.func
@@ -64,8 +66,59 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             _ => {}
         }
     }
-    let func = super::dispatch::go_to_rust(&input.func);
-    quote! { #func( #(#args),* ) }
+    // Go `make` builtin — special handling for chan/map/slice types.
+    // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
+    // `make(chan T)` → `GoChannel::<T>::new()`
+    // `make(map[K]V)` → `HashMap::new()`
+    // `make([]T, len)` → `vec![0; len]`
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string() == "make"
+    {
+        let make_args: Vec<_> = input.args.iter().collect();
+        if make_args.len() >= 2 {
+            let type_expr = &make_args[0];
+            let type_tokens = super::dispatch::go_to_rust(type_expr);
+            let type_str = quote! { #type_expr }.to_string();
+
+            // Determine if this is a channel, map, or slice type.
+            // Channel types use the `chan T` marker (either `chan` or `__go_chan`).
+            // Map types use `map[K]V` syntax.
+            // Slice types use `[]T` syntax.
+            if type_str.contains("chan") || type_str.contains("__go_chan") {
+                // Channel: make(chan T) or make(chan T, cap)
+                if make_args.len() == 2 {
+                    // Unbuffered: make(chan T) → GoChannel::<T>::new()
+                    quote! { GoChannel::<#type_tokens>::new() }
+                } else {
+                    // Buffered: make(chan T, cap) → GoChannel::<T>::with_capacity(cap)
+                    let cap = super::dispatch::go_to_rust(&make_args[1]);
+                    quote! { GoChannel::<#type_tokens>::with_capacity(#cap) }
+                }
+            } else if type_str.contains("map[") {
+                // Map: make(map[K]V) → HashMap::new()
+                quote! { ::std::collections::HashMap::new() }
+            } else if type_str.starts_with("[]") {
+                // Slice: make([]T, len) → vec![0; len]
+                if make_args.len() == 2 {
+                    let len = super::dispatch::go_to_rust(&make_args[1]);
+                    quote! { ::std::iter::repeat(#type_tokens).take(#len).collect::<#type_tokens>() }
+                } else {
+                    // make([]T, len, cap) — cap is ignored, same as len
+                    let len = super::dispatch::go_to_rust(&make_args[1]);
+                    quote! { ::std::iter::repeat(#type_tokens).take(#len).collect::<#type_tokens>() }
+                }
+            } else {
+                // Unknown type — emit compile_error!
+                emit_todo("unsupported type in make()")
+            }
+        } else {
+            emit_todo("make() requires at least a type argument")
+        }
+    } else {
+        let func = super::dispatch::go_to_rust(&input.func);
+        quote! { #func( #(#args),* ) }
+    }
 }
 
 /// Handle Rust macro invocations (e.g. `vec![...]`) passed through `quote!`.
