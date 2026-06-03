@@ -1,4 +1,4 @@
-use gourd_codegen::{go, verify_rust_output};
+use gourd_macro::{go, verify_rust_output};
 
 // ── Basic function: no params, return value ─────────────────────────
 #[verify_rust_output({
@@ -44,7 +44,7 @@ go! {
 
 // NOTE: This WOULD fail compilation (intentionally commented out):
 // Uncomment to see a compile_error showing the expected vs actual mismatch:
-// #[gourd_codegen::go_verify({
+// #[gourd_macro::go_verify({
 //     fn go_abs(n: i32) -> i32 {
 //         let mut ret = n;
 //         if n < 0 {

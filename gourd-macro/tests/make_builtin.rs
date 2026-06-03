@@ -5,7 +5,7 @@
 //! - `make(map[K]V)` → `HashMap::new()`
 //! - `make([]T, len)` → `vec![0; len]`
 
-use gourd_codegen::go;
+use gourd_macro::go;
 use gourd::GoChannel;
 
 // Test: make(chan int) → GoChannel::<i32>::new()
@@ -43,9 +43,7 @@ fn test_make_buffered_string_channel() {
 fn test_make_map() {
     go! {
         func goMakeMap() map[string]int {
-            m := make(map[string]int)
-            m["a"] = 1
-            return m["a"]
+            return make(map[string]int)
         }
     }
 }

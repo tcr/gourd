@@ -1,4 +1,4 @@
-use gourd_codegen::go;
+use gourd_macro::go;
 
 // ── Continue statement ────────────────────────────────────────────────
 // Continue skips to the next iteration when a condition is met.

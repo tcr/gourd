@@ -1,4 +1,4 @@
-use gourd_codegen::{go, verify_rust_output};
+use gourd_macro::{go, verify_rust_output};
 
 // Test multi-return
 #[verify_rust_output({fn go_divmod(n: i32, d: i32) -> (i32, i32) {

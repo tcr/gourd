@@ -3,7 +3,7 @@
 ## Current Status: All tests pass (31/31)
 
 ## Session Objective
-Debug `gourd-codegen` until the Go-style map literal feature (`let m = map[string]int{ };`) compiles successfully in `tests/go_fn.rs`.
+Debug `gourd-macro` until the Go-style map literal feature (`let m = map[string]int{ };`) compiles successfully in `tests/go_fn.rs`.
 
 ## Tests Fixed
 - `go_map_literal_empty` — `let m = map[string]int{ }; m.is_empty()`

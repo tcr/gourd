@@ -4,12 +4,12 @@ Transpiles inline Go declarations into valid Rust via a procedural macro at comp
 
 ```
 gourd/
-  gourd-codegen/       <-- proc-macro library (transpiler core)
+  gourd-macro/       <-- proc-macro library (transpiler core)
   gourd/               <-- runtime + CLI tool (`gourd transpile`)
 ```
 
-[`gourd-codegen/src/transpiler.rs`]  -- Go → Rust transpiler
-[`gourd-codegen/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
+[`gourd-macro/src/transpiler.rs`]  -- Go → Rust transpiler
+[`gourd-macro/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
 [`gourd/src/main.rs`]              -- CLI tool (`gourd transpile`)
 
 ## Example of how it works
@@ -40,7 +40,7 @@ gourd-check [PATHS...]  # standalone Go/Rust validation
 
 ## `verify_rust_output` — compile-time transpilation verification
 
-The `#[verify_rust_output({ expected_rust })]` attribute macro applies to any `go!` block to **assert at compile time** that the transpiled output matches the expected Rust tokens. It lives in `gourd-codegen/src/lib.rs` and delegates to `gourd_codegen_core::verify_short()`.
+The `#[verify_rust_output({ expected_rust })]` attribute macro applies to any `go!` block to **assert at compile time** that the transpiled output matches the expected Rust tokens. It lives in `gourd-macro/src/lib.rs` and delegates to `gourd_codegen::verify_short()`.
 
 ### Usage
 
@@ -179,7 +179,7 @@ gourd-check --help           # Help
 ### Example output
 
 ```
-gourd-codegen/tests/go_fn.rs:21
+gourd-macro/tests/go_fn.rs:21
     Go: main.go:14:9: a + b (value of type int) is not used
          main.go:15:5: missing return
     1 | func goSum(a int, b int) int {
@@ -208,7 +208,7 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 
 ## Name Preservation: camelCase stays camelCase
 
-Location: `gourd-codegen-core/src/transpiler/free_fn.rs`
+Location: `gourd-codegen/src/transpiler/free_fn.rs`
 
 Go function and variable names are **preserved as camelCase** in the Rust output. No conversion to snake_case.
 

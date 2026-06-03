@@ -1,6 +1,6 @@
 //! Tests for Go channel operations: `<- ch` (receive) and `ch <- value` (send).
 
-use gourd_codegen::go;
+use gourd_macro::go;
 use gourd::{GoChannel, GoScheduler};
 
 // Test channel receive: `<- ch` → `ch.recv()`

@@ -2,6 +2,8 @@
 name = "gourd-check"
 version = "0.1.0"
 edition = "2024"
+description = "Standalone Go/Rust source-level validation tool for gourd projects"
+license = "MIT"
 
 [[bin]]
 name = "gourd-check"

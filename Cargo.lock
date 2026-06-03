@@ -225,14 +225,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crossbeam",
- "gourd-check",
  "gourd-codegen",
- "gourd-codegen-core",
+ "gourd-macro",
  "num-traits",
  "prettyplease",
  "proc-macro2",
  "quote",
  "syn",
+ "tempfile",
+ "walkdir",
 ]
 
 [[package]]
@@ -253,17 +254,17 @@ dependencies = [
 name = "gourd-codegen"
 version = "0.1.0"
 dependencies = [
- "gourd",
- "gourd-codegen-core",
  "proc-macro2",
  "quote",
  "syn",
 ]
 
 [[package]]
-name = "gourd-codegen-core"
+name = "gourd-macro"
 version = "0.1.0"
 dependencies = [
+ "gourd",
+ "gourd-codegen",
  "proc-macro2",
  "quote",
  "syn",

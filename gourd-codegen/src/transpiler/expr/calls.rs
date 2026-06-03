@@ -100,13 +100,15 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 quote! { ::std::collections::HashMap::new() }
             } else if type_str.starts_with("[]") {
                 // Slice: make([]T, len) → vec![0; len]
+                // Need to use default() for the repeat value since type_tokens is a type
+                let type_default: TokenStream = quote! { #type_tokens::default() };
                 if make_args.len() == 2 {
                     let len = super::dispatch::go_to_rust(&make_args[1]);
-                    quote! { ::std::iter::repeat(#type_tokens).take(#len).collect::<#type_tokens>() }
+                    quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() }
                 } else {
                     // make([]T, len, cap) — cap is ignored, same as len
                     let len = super::dispatch::go_to_rust(&make_args[1]);
-                    quote! { ::std::iter::repeat(#type_tokens).take(#len).collect::<#type_tokens>() }
+                    quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() }
                 }
             } else {
                 // Unknown type — emit compile_error!
@@ -130,6 +132,13 @@ pub fn go_to_rust_macro(input: &ExprMacro) -> TokenStream {
 pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     let seq = super::dispatch::go_to_rust(&input.expr);
     let idx = super::dispatch::go_to_rust(&input.index);
+    // Check if the index is a string literal — for maps, use .get() instead of direct indexing
+    if let Expr::Lit(lit) = &*input.index
+        && matches!(&lit.lit, syn::Lit::Str(_))
+    {
+        // Map lookup: m["key"] → m.get(&"key").unwrap()
+        return quote! { #seq.get(& #idx).unwrap() };
+    }
     // Index expressions need usize for Rust slices; if the index is i32 (Go int),
     // cast it to usize automatically.
     let idx = quote! { #idx as usize };

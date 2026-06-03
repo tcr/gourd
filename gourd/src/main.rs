@@ -16,8 +16,8 @@
 //! ```
 
 use clap::{Parser, Subcommand};
-use gourd_check::scanner::scan_path;
-use gourd_codegen_core::transpile_go_text;
+use gourd::scanner::{find_go_blocks_from_source, scan_path};
+use gourd::transpile_go_text;
 use proc_macro2::TokenStream;
 use std::io::Read;
 use std::path::PathBuf;
@@ -50,9 +50,7 @@ fn main() {
             if !input.ends_with(".go") && !input.ends_with(".rs") && input != "-" {
                 // Inline Go code — wrap in macro invocation so scan can extract it
                 let wrapped = format!("go! {{ {} }}", source);
-                let blocks = gourd_check::scanner::find_go_blocks_from_source(
-                    &wrapped, &input,
-                );
+                let blocks = find_go_blocks_from_source(&wrapped, &input);
 
                 if blocks.is_empty() {
                     let rust = transpile_go_text(&source);

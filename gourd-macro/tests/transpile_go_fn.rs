@@ -1,10 +1,10 @@
 //! Transpile unit tests for free Go functions.
 //!
-//! These tests call `gourd_codegen_core::transpile_go()` directly with
+//! These tests call `gourd_codegen::transpile_go()` directly with
 //! Go-like TokenStreams and compare the output TokenStream against expected
 //! Rust tokens (using `quote!` to build both sides).
 
-use gourd_codegen_core::transpile_go;
+use gourd_codegen::transpile_go;
 use proc_macro2::TokenStream;
 use quote::quote;
 

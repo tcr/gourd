@@ -78,7 +78,7 @@ as supported but have many commented-out test stubs (`// NOTE: ... not yet`).
 | `x = y` | `x = y` | Assignment |
 
 > **Note on builtins**: Only `len`, `cap`, `string(bytes)`, type conversion calls
-> (`int(x)`, `bool(x)`, etc.), and `make()` for channels have been implemented.
+> (`int(x)`, `bool(x)`, etc.), and `make()` for channels, maps, and slices have been implemented.
 > Most other builtins emit `compile_error!` at compile time. See the Builtin
 > Gap table below for the full list.
 
@@ -117,7 +117,7 @@ as supported but have many commented-out test stubs (`// NOTE: ... not yet`).
 
 When `gourd-check` is invoked as part of `cargo test` at the workspace root, the following contract must be maintained:
 
-1. **Scoped verification**: `gourd-check` only scans `gourd/`, `gourd-codegen/`, and `gourd-codegen-core/` crates. No other packages (workspace members or dependencies) are included.
+1. **Scoped verification**: `gourd-check` only scans `gourd/`, `gourd-codegen/`, and `gourd-macro/` crates. No other packages (workspace members or dependencies) are included.
 2. **Full coverage required**: Every `go! { ... }` macro form inside those scanned crates must have a corresponding `#[verify_rust_output({ ... })]` attribute. If a `go!` block lacks this attribute, `gourd-check` reports a test failure.
 
 This ensures:
@@ -183,7 +183,7 @@ These Go constructs are **blocked** via `compile_error!` at compile time. They a
 | Category | Go Syntax | Rust Equivalent | Complexity |
 |----------|-----------|-----------------|------------|
 | **Closures / Anonymous Functions** | `func() { body }` | `|| { body }` or a named `fn` | Medium |
-| **Built-in: `make`** | `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`; `make(map[K]V)` → `HashMap::new()`; `make([]T, len)` → `vec![0; len]` | Low — chan unbuffered & buffered working; map type arg needs parsing fix; slice zero-init works
+| **Built-in: `make`** | `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`; `make(map[K]V)` → `HashMap::new()`; `make([]T, len)` → `vec![0; len]` | Low — all three types working (chan/map/slice); uses raw string parsing for type detection
 | **Built-in: `new`** | `new(Foo)` | `Foo::default()` | Low |
 | **Built-in: `append`** | `append(slice, 1, 2)` | `slice.extend_from_slice(&[1, 2])` | Medium |
 | **Built-in: `copy`** | `copy(dst, src)` | `dst.copy_from_slice(&src)` | Low |
@@ -196,7 +196,7 @@ These Go constructs are **blocked** via `compile_error!` at compile time. They a
 | **Built-in: `min` / `max`** | `min(a, b)`, `max(a, b)` | `a.min(b)`, `a.max(b)` | **❌ Low** |
 
 > **Note on builtins**: Only `len`, `cap`, `string(bytes)`, type conversion calls
-> (`int(x)`, `bool(x)`, etc.), and `make()` for channels have been implemented.
+> (`int(x)`, `bool(x)`, etc.), and `make()` for channels, maps, and slices have been implemented.
 > Most other builtins emit `compile_error!` at compile time. See the Builtin
 > Gap table below for the full list.
 
@@ -233,7 +233,7 @@ details those gaps.
 | `copy` | ❌ | Common | Slice copying |
 | `new` | ❌ | Common | Pointer allocation |
 | `delete` | ❌ | Common | Map removal |
-| `make` (all types) | ⚠️ Partial | Common | Channels work; maps/slices are fragile (raw string parsing for types) |
+| `make` (all types) | ✅ Complete | Common | All three types working: channels (unbuffered/buffered), maps, slices (zero-init) |
 | `panic` | ❌ | **Common** | Crash semantics |
 | `recover` | ❌ | Uncommon | Panic recovery |
 | `complex` | ❌ | Low | Complex numbers |
@@ -241,9 +241,9 @@ details those gaps.
 | `clear` | ❌ | Low | Slice/map clearing |
 | `min` / `max` | ❌ | Low | Numeric min/max (Go 1.21+) |
 
-> **Note**: The existing `make()` support for channels works via a fragile raw
-> string parsing path in `go_stmt_to_rust`. It does not handle complex type
-> arguments robustly and may silently miscompile on edge cases.
+> **Note**: The `make()` support for channels, maps, and slices now works via
+> a robust string-based extraction path. All three types (chan/map/slice) are
+> handled correctly with proper type parsing and default value initialization.
 
 ---
 
@@ -382,10 +382,10 @@ go! {
 
 ```
 gourd/
-  gourd-codegen/       <-- proc-macro library (transpiler core)
+  gourd-macro/       <-- proc-macro library (transpiler core)
   gourd/               <-- runtime + CLI tool (`gourd transpile`)
   gourd-check/         <-- standalone Go/Rust validation tool
-  gourd-codegen-core/  <-- core transpiler logic
+  gourd-codegen/  <-- core transpiler logic
 ```
 
 ### Data flow

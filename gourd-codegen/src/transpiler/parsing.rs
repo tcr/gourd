@@ -655,13 +655,11 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
     let _brace = syn::braced!(brace_content in input);
 
     let mut stmts = Vec::new();
-    eprintln!("DEBUG parse_go_block: brace_content has {} tokens", brace_content.into_iter().count());
     while !brace_content.is_empty() {
         // Check for Go-specific constructs first (maps, slices, if, switch, return)
         if parse_go_special_stmt(&brace_content, &mut stmts)? {
             continue; // Handled by the special case
         }
-        eprintln!("DEBUG parse_go_block: base stmt parsed, stmts now: {}", stmts.len());
         // Fall back to the base parser for common statements
         parse_base_stmt(&brace_content, &mut stmts)?;
     }
@@ -1037,25 +1035,46 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
     // Check for `return make(...)` — fallback for make builtin calls
     // (arguments may contain Go types like `chan T` that syn can't parse)
     let make_fork = input.fork();
+    // Save fork position BEFORE parsing `make` from it — we need to advance to `make` later
+    let saved_fork = input.fork();
     let make_ident = make_fork.parse::<syn::Ident>().ok().map(|id| id.to_string());
     let make_paren = make_fork.peek(syn::token::Paren);
-    eprintln!("DEBUG return_after_return: ident={:?}, paren={}", make_ident, make_paren);
     let is_make = make_ident.as_deref() == Some("make") && make_paren;
     if is_make {
-        input.advance_to(&make_fork);
+        // Advance to `make` position (saved_fork's position)
+        input.advance_to(&saved_fork);
         let _: syn::Ident = input.parse()?; // consume `make`
-        let paren_content;
-        let _paren = syn::parenthesized!(paren_content in input);
-        let raw_args = paren_content.cursor().token_stream().to_string();
-        let args_str = raw_args.trim();
-        let make_rust = match args_str {
+        // Collect arg tokens: skip `(`, collect until `)`, skip `)`
+        // In the go! macro, `make(...)` is tokenized as make + Group(Paren, "...")
+        // so we parse the Group token and extract its stream content
+        let mut args_ts = TokenStream::new();
+        // Skip the first token tree (the paren group)
+        let has_tt = input.cursor().token_tree();
+        if let Some((proc_macro2::TokenTree::Group(group), _)) = has_tt {
+            if group.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                args_ts.extend(group.stream());
+            }
+        }
+        // Now consume the remaining tokens (should be empty or just `;`)
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        let raw_args = args_ts.to_string();
+        let normalized = raw_args
+            .replace(" [", "[")
+            .replace(" ]", "]")
+            .replace("  ", " ");
+        let make_rust = match normalized.as_str() {
             s if s.starts_with("chan ") => {
                 let chan_args: Vec<&str> = s.splitn(2, ',').collect();
                 let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
                 let chan_type = map_go_type_str(chan_type_str);
                 if chan_args.len() == 2 {
                     let cap_str = chan_args[1].trim();
-                    let cap: TokenStream = parse_quote! { #cap_str };
+                    // Parse cap as integer literal, not string
+                    let cap: syn::LitInt = syn::parse_str(cap_str).unwrap_or_else(
+                        |_| syn::parse_quote!(0usize)
+                    );
                     quote! { return GoChannel::<#chan_type>::with_capacity(#cap) }
                 } else {
                     quote! { return GoChannel::<#chan_type>::new() }
@@ -1070,19 +1089,21 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
                 let slice_type = map_go_type_str(slice_type_str);
                 if slice_args.len() == 2 {
                     let len_str = slice_args[1].trim();
-                    let len: TokenStream = parse_quote! { #len_str };
-                    quote! { return ::std::iter::repeat(#slice_type).take(#len).collect::<Vec::<#slice_type>>() }
+                    // Parse len as integer literal, not string
+                    let len: syn::LitInt = syn::parse_str(len_str).unwrap_or_else(
+                        |_| syn::parse_quote!(0usize)
+                    );
+                    quote! { return ::std::iter::repeat(#slice_type::default()).take(#len).collect::<Vec::<#slice_type>>() }
                 } else {
-                    quote! { return ::std::iter::repeat(#slice_type).take(0).collect::<Vec::<#slice_type>>() }
+                    quote! { return ::std::iter::repeat(#slice_type::default()).take(0usize).collect::<Vec::<#slice_type>>() }
                 }
             }
             _ => {
-                let msg = format!("TODO: make with unsupported type: {}", args_str);
+                let msg = format!("TODO: make with unsupported type: {}", raw_args);
                 quote! { return { compile_error!(concat!("TODO: make with unsupported type: ", #msg)) } }
             }
         };
         // Emit the make_rust tokens directly into stmts as a statement
-        // The make_rust already contains `return expr` or `return { compile_error!(...) }`
         let rust_tokens: TokenStream = make_rust;
         stmts.push(GoStmt::RawStmt(rust_tokens));
         if input.peek(token::Semi) {
@@ -1144,9 +1165,6 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
         let check_str = after_ret.cursor().token_stream().to_string();
         let is_type_assertion = check_str.contains(".(");
         
-        // For chained assertions like `x.(int).(int)`, count the number of `.(...)` groups
-        let paren_count = check_str.matches(".(").count();
-        
         if is_type_assertion {
             // Parse receiver and all type assertion groups
             input.advance_to(&after_ret);
@@ -1167,13 +1185,13 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
                 let mut remaining = tfork;
                 let _ = remaining.parse::<proc_macro2::TokenTree>()?; // skip receiver
                 loop {
-                    let mut gcheck = remaining.fork();
+                    let gcheck = remaining.fork();
                     // Check for `.` punct
                     if let Ok(tt) = gcheck.parse::<proc_macro2::TokenTree>() {
                         if let proc_macro2::TokenTree::Punct(p) = tt {
                             if p.as_char() == '.' {
                                 // Check for `(T)` group
-                                let mut gcheck2 = gcheck.fork();
+                                let gcheck2 = gcheck.fork();
                                 if let Ok(tt2) = gcheck2.parse::<proc_macro2::TokenTree>() {
                                     if let proc_macro2::TokenTree::Group(g) = tt2 {
                                         all_groups.push(g);
@@ -1395,10 +1413,15 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         GoStmt::GoMake(raw_args) => {
             // Parse the raw make arguments to determine the type.
             // Format: "chan T", "chan T, cap", "map[K]V", "[]T", "[]T, len" etc.
-            let args_str = raw_args.trim();
+            let args_str = raw_args.trim().to_string();
+            // Normalize token spacing: "map [string] int" → "map[string] int"
+            let normalized = args_str
+                .replace(" [", "[")
+                .replace(" ]", "]")
+                .replace("  ", " ");
 
             // Check for channel type: "chan T" or "chan T, cap"
-            if args_str.starts_with("chan ") {
+            if normalized.starts_with("chan ") {
                 let chan_args: Vec<&str> = args_str.splitn(2, ',').collect();
                 let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
                 // Convert Go chan type to Rust type marker
@@ -1412,24 +1435,23 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                     // Unbuffered: make(chan T)
                     quote! { GoChannel::<#chan_type>::new() }
                 }
-            } else if args_str.starts_with("map[") {
+            } else if normalized.starts_with("map[") {
                 // Map: make(map[K]V)
                 quote! { ::std::collections::HashMap::new() }
-            } else if args_str.starts_with("[]") {
+            } else if normalized.starts_with("[]") {
                 // Slice: make([]T, len)
-                let slice_args: Vec<&str> = args_str.splitn(2, ',').collect();
+                let slice_args: Vec<&str> = normalized.splitn(2, ',').collect();
                 let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
                 let slice_type = map_go_type_str(slice_type_str);
                 if slice_args.len() == 2 {
                     let len_str = slice_args[1].trim();
                     let len: TokenStream = parse_quote! { #len_str };
-                    quote! { ::std::iter::repeat(#slice_type).take(#len).collect::<Vec::<#slice_type>>() }
+                    quote! { ::std::iter::repeat(#slice_type::default()).take(#len).collect::<Vec::<#slice_type>>() }
                 } else {
-                    quote! { ::std::iter::repeat(#slice_type).take(0).collect::<Vec::<#slice_type>>() }
+                    quote! { ::std::iter::repeat(#slice_type::default()).take(0).collect::<Vec::<#slice_type>>() }
                 }
             } else {
                 // Unknown type
-                let msg = format!("TODO: transpile this Go make() type: {}", args_str);
                 quote! { { compile_error!(concat!("TODO: make with unsupported type: ", #args_str)) } }
             }
         }
@@ -1504,7 +1526,6 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             }
         }
         GoStmt::RawStmt(tokens) => {
-            eprintln!("DEBUG RawStmt output: {:?}", tokens.to_string());
             tokens.clone()
         }
     }
@@ -1656,11 +1677,22 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
             if is_make
             {
                 let _: syn::Ident = input.parse()?; // consume `make`
-                let paren_content;
-                let _paren = syn::parenthesized!(paren_content in input);
-                let raw_args = paren_content.cursor().token_stream().to_string();
-                // Generate the make call expression inline
-                let make_expr = match raw_args.trim() {
+                // Get the full string from mval_fork: "make(chan int)" → extract args
+                let full_str = mval_fork.cursor().token_stream().to_string();
+                let raw_args = if let Some(start) = full_str.find('(') {
+                    if let Some(end) = full_str.rfind(')') {
+                        full_str[start + 1..end].to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                let normalized = raw_args
+                    .replace(" [", "[")
+                    .replace(" ]", "]")
+                    .replace("  ", " ");
+                let make_expr = match normalized {
                     s if s.starts_with("chan ") => {
                         let chan_args: Vec<&str> = s.splitn(2, ',').collect();
                         let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
@@ -1729,10 +1761,17 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
     if is_make
     {
         input.parse::<syn::Ident>()?; // consume `make`
-        let paren_content;
-        let _paren = syn::parenthesized!(paren_content in input);
-        let raw_args = paren_content.cursor().token_stream().to_string();
-        eprintln!("DEBUG base raw_args: {:?}", raw_args);
+        // Get the full string from make_fork: "make(chan int)" → extract args
+        let full_str = make_fork.cursor().token_stream().to_string();
+        let raw_args = if let Some(start) = full_str.find('(') {
+            if let Some(end) = full_str.rfind(')') {
+                full_str[start + 1..end].to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
         stmts.push(GoStmt::GoMake(raw_args));
         if input.peek(token::Semi) {
             let _semi: token::Semi = input.parse()?;

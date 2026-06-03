@@ -5,7 +5,7 @@
 //! These tests verify that struct literals are transpiled without hitting
 //! the `compile_error!` TODO fallback.
 
-use gourd_codegen::go;
+use gourd_macro::go;
 
 // Define types needed by the Go blocks below.
 #[derive(Default)]

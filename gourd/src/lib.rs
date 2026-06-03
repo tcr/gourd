@@ -12,11 +12,14 @@ mod go_scheduler;
 pub use go_scheduler::*;
 
 /// Re-export the declaration macro for Go declarations.
-pub use gourd_codegen::go;
+pub use gourd_macro::go;
 
 /// Compile-time verification attribute for Go declarations.
-pub use gourd_codegen::verify_rust_output;
+pub use gourd_macro::verify_rust_output;
 
 /// Transpile a Go declaration to Rust tokens (programmatic access).
-pub use gourd_codegen_core::transpile_go;
+pub use gourd_codegen::{transpile_go, transpile_go_text};
+
+/// Source-level scanner for `go!` blocks and `#[verify_rust_output]` attributes.
+pub mod scanner;
 

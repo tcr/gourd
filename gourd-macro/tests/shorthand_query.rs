@@ -1,4 +1,4 @@
-use gourd_codegen::{go, verify_rust_output};
+use gourd_macro::{go, verify_rust_output};
 
 // Test 3 params (2 group commas)
 

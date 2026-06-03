@@ -2,17 +2,12 @@
 name = "gourd-codegen"
 version = "0.1.0"
 edition = "2024"
+description = "Core Go to Rust transpilation library"
+license = "MIT"
 
 [lib]
-proc-macro = true
 
 [dependencies]
-gourd-codegen-core = { path = "../gourd-codegen-core" }
+syn = { version = "2", features = ["full", "fold"] }
 quote = "1"
-proc-macro2 = "1"
-
-[dev-dependencies]
-gourd-codegen-core = { path = "../gourd-codegen-core" }
-gourd = { path = "../gourd" }
-syn = { version = "2", features = ["full"] }
 proc-macro2 = "1"

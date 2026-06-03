@@ -1,0 +1,20 @@
+[package]
+name = "gourd-macro"
+version = "0.1.0"
+edition = "2024"
+description = "Procedural macro crate for Go to Rust transpilation (go! macro)"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+gourd-codegen = { path = "../gourd-codegen" }
+quote = "1"
+proc-macro2 = "1"
+
+[dev-dependencies]
+gourd-codegen = { path = "../gourd-codegen" }
+gourd = { path = "../gourd" }
+syn = { version = "2", features = ["full"] }
+proc-macro2 = "1"

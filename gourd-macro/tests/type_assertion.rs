@@ -2,7 +2,7 @@
 //!
 //! Go type assertions like `x.(int)` are transpiled to Rust `as` casts.
 
-use gourd_codegen::go;
+use gourd_macro::go;
 
 #[test]
 fn test_type_assertion_int() {

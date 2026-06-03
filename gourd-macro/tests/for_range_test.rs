@@ -1,4 +1,4 @@
-use gourd_codegen::go;
+use gourd_macro::go;
 
 // ── For range with two variables ──────────────────────────────────────
 

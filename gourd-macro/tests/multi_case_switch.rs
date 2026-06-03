@@ -1,4 +1,4 @@
-use gourd_codegen::go;
+use gourd_macro::go;
 
 // ── Multi-expression switch case: `case 1, 2, 3: "small"` ─────────────
 
