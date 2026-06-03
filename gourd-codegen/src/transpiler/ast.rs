@@ -21,6 +21,22 @@ pub(crate) enum GoStmt {
     GoTypeAssert(Expr, syn::Type), // `x.(T)` type assertion
     GoMake(String),   // `make(...)` with raw argument string
     RawStmt(TokenStream),
+    Select(GoSelect), // `select { ... }`
+}
+
+/// Select statement: `select { case ... default: ... }`.
+pub(crate) struct GoSelect {
+    pub(crate) cases: Vec<GoSelectCase>,
+}
+
+/// A single case inside a select statement.
+pub(crate) enum GoSelectCase {
+    /// Send case: `ch <- value`
+    Send { ch: Box<Expr>, value: Box<Expr> },
+    /// Recv case: `<-ch` or `x := <-ch`
+    Recv { ch: Box<Expr>, target: Option<Ident> },
+    /// Default case: `default: ...`
+    Default(GoBlock),
 }
 
 /// Loop with range/for classification.
@@ -120,4 +136,10 @@ pub(crate) struct Switch {
 pub(crate) struct SwitchCase {
     pub(crate) exprs: Vec<Expr>,
     pub(crate) stmts: Vec<GoStmt>,
+}
+
+/// Interface implementation methods list.
+pub(crate) struct InterfaceImpl {
+    pub(crate) ident: Ident,
+    pub(crate) methods: Vec<GoInterfaceMethod>,
 }
