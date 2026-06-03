@@ -239,3 +239,102 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
         _ => ty.clone(),
     }
 }
+
+/// Convert a Go slice argument string to Rust code.
+/// Handles both slice literals (`[]int{1,2,3}`) and slice types (`[]int`).
+/// Also handles plain identifier references (e.g., a variable name like `data`).
+pub(crate) fn go_to_rust_slice_arg(slice_arg: &str) -> proc_macro2::TokenStream {
+    use quote::quote;
+    let s = slice_arg.trim();
+    // Check for slice literal: `[]int{1, 2, 3}`
+    if let Some(brace_pos) = s.find('{') {
+        let type_part = s[..brace_pos].trim();
+        let inner_part = s[brace_pos + 1..].trim_end_matches('}').trim();
+        // Extract element type from `[]T` to type the vec
+        let elem_type = if type_part.starts_with("[]") {
+            let elem = type_part[2..].trim();
+            map_go_type_str(elem)
+        } else {
+            map_go_type_str(type_part)
+        };
+        if inner_part.is_empty() {
+            // Empty slice literal: []int{}
+            quote! { Vec::<#elem_type>::new() }
+        } else {
+            // Parse elements: split by comma
+            let elems: Vec<_> = inner_part.split(',').map(|e| {
+                let e = e.trim();
+                if let Ok(lit) = syn::parse_str::<syn::LitInt>(e) {
+                    quote! { #lit }
+                } else if let Ok(lit) = syn::parse_str::<syn::LitFloat>(e) {
+                    quote! { #lit }
+                } else if let Ok(ident) = syn::parse_str::<syn::Ident>(e) {
+                    quote! { #ident }
+                } else {
+                    // Fallback: emit as raw tokens
+                    quote! { #e }
+                }
+            }).collect();
+            quote! { vec![ #(#elems),* ] }
+        }
+    } else {
+        // Could be a variable reference (e.g., `data`), a slice type (`[]int`), etc.
+        // If it's a plain identifier, just return it as a variable reference.
+        if syn::parse_str::<syn::Ident>(s).is_ok() {
+            let ident: syn::Ident = syn::parse_str(s).unwrap();
+            quote! { #ident }
+        } else if s.starts_with("[]") {
+            // Slice type reference: `[]int` → Vec<i32>::new()
+            let elem = s[2..].trim();
+            let elem_type = map_go_type_str(elem);
+            quote! { Vec::<#elem_type>::new() }
+        } else {
+            // Unknown — just emit the token as-is
+            let ts: proc_macro2::TokenStream = s.parse().unwrap_or_default();
+            quote! { #ts }
+        }
+    }
+}
+
+/// Split a string on the top-level comma, ignoring commas inside braces/parens.
+/// Returns (before_first_comma, after_first_comma_or_None).
+/// Example: `"[]int{1, 2, 3}, 4"` → `("[]int{1, 2, 3}", Some("4"))`
+pub(crate) fn split_top_level_comma(s: &str) -> (&str, Option<&str>) {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => {
+                if depth > 0 { depth -= 1; }
+            }
+            ',' if depth == 0 => {
+                return (&s[..i], Some(&s[i + 1..]));
+            }
+            _ => {}
+        }
+    }
+    (s, None)
+}
+
+/// Split a string on top-level commas, ignoring commas inside braces/parens.
+/// Example: `"1, 2, 3"` → `["1", "2", "3"]`
+pub(crate) fn split_top_level_items(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => {
+                if depth > 0 { depth -= 1; }
+            }
+            ',' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}

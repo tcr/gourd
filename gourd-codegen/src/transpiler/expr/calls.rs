@@ -136,6 +136,38 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         }).collect();
         return quote! { panic!( #(#panic_args),* ) };
     }
+    // Go `append` builtin: `append(slice, items...)` → push each item.
+    // Go's append is variadic: `append(slice)` (no-op),
+    // `append(slice, x)` (push one), `append(slice, x, y, z)` (push many).
+    // Works with slice literals: `append([]int{1, 2}, 3)` → `vec![1, 2, 3]`
+    // and variable slices: `append(data, x)` → pushes x to a copy of data.
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string() == "append"
+    {
+        let append_args: Vec<_> = input.args.iter().collect();
+        if append_args.is_empty() {
+            return emit_todo("append() requires at least one argument");
+        }
+        let slice = super::dispatch::go_to_rust(&append_args[0]);
+        if append_args.len() == 1 {
+            // append(slice) — no-op, just return the slice
+            return quote! { #slice };
+        }
+        // append(slice, items...) — push each item individually
+        let items: Vec<_> = append_args[1..].iter().map(|arg| {
+            let item = super::dispatch::go_to_rust(arg);
+            quote! { __gourd_append_result.push(#item); }
+        }).collect();
+        // Convert slice to Vec, push each item, return the Vec
+        return quote! {
+            {
+                let mut __gourd_append_result = #slice.to_vec();
+                #(#items)*
+                __gourd_append_result
+            }
+        };
+    }
     // Go `make` builtin — special handling for chan/map/slice types.
     // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
     // `make(chan T)` → `GoChannel::<T>::new()`
