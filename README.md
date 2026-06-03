@@ -1,13 +1,15 @@
 # 🎃 Gourd
 
-> Write Go. Get Rust. At compile time.
+GO to Userland Rust Demo
+
+## Why Gourd?
+
+Write Go. Get Rust. At compile time.
 
 > ⚠️ **EXPERIMENTAL — NOT PRODUCTION READY**  
 > Gourd is an early, experimental project. It is **not suitable for most Go projects**. The transpiler is incomplete — many Go constructs will fail at compile time with `compile_error!`. There is no API stability guarantee, breaking changes can happen at any time, and the runtime concurrency primitives (scheduler, channels, select) are best-effort simulations of Go's runtime, not drop-in replacements. Use at your own risk. If you need a reliable Go-to-Rust tool, look elsewhere. If you want a fun toy to tinker with, read on.
 
 Gourd lets you write Go-style code and get valid Rust output.
-
-## Why Gourd?
 
 Gourd: a hard outer shell (Golang) that, once processed, becomes something useful and expressive (Rust).
 

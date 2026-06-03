@@ -109,9 +109,9 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                                 if let syn::GenericArgument::Type(val_ty) = &keys[1] {
                                     let mapped_key = map_go_types(key_ty);
                                     let mapped_val = map_go_types(val_ty);
-                                    // Build HashMap<K, V>
-                                    let mut map_path = syn::Path::from(syn::Ident::new("HashMap", proc_macro2::Span::call_site()));
-                                    map_path.segments.clear();
+                                    // Build std::collections::HashMap<K, V>
+                                    let mut map_path = syn::Path::from(syn::Ident::new("std", proc_macro2::Span::call_site()));
+                                    map_path.segments.push(syn::PathSegment::from(syn::Ident::new("collections", proc_macro2::Span::call_site())));
                                     map_path.segments.push(syn::PathSegment {
                                         ident: syn::Ident::new("HashMap", proc_macro2::Span::call_site()),
                                         arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
