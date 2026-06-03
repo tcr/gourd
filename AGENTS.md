@@ -24,42 +24,9 @@ emits exactly those tokens into the user's expanded AST.
 
 ### Unsupported forms → `compile_error!`
 
-Any Go concept missing from the transpiler (e.g. concurrency, storage, streams, etc.) expands to a `compile_error!` that
+Any Go concept missing from the transpiler expands to a `compile_error!` that
 reports "TODO: transpile this Go form: <name>" at compile time of the
-consumer's crate.
-
-### Known unimplemented Go forms
-
-The following Go constructs are NOT yet transpiled — they are commented out in test files with explanatory notes:
-
-| Form | Example | Status |
-|------|---------|--------|
-| Slice literals | `[]int{1, 2, 3}` | ✅ Implemented |
-| Map literals | `map[int]string{1: "one"}` | ✅ Implemented |
-| Multi-return | `func foo() (int, string)` | ✅ Implemented |
-| Struct definitions | `struct Foo { x int }` | ✅ Implemented |
-| Map access | `m[key]` | ✅ Implemented |
-| Continue statement | `continue` | ✅ Implemented |
-| While loops | `while cond { ... }` | ✅ Implemented |
-| For range | `for i, v := range data` | ✅ Implemented |
-| Concurrency | `go func()`, `chan`, `select`, `ch <-`, `<- ch` | ✅ Implemented |
-| Interfaces | `interface{}` | ✅ Implemented |
-
-### Recently fixed
-- ✅ Interfaces — `interface Name { Method() Type }` → `trait name { fn method(&self) -> Type; }`
-- ✅ Control flow (`if`/`else` statements)
-- ✅ Type conversions (`int()`, `uint()`, `float32()`, `float64()`, `bool()`, `byte()`, `rune()`, `string()`)
-- ✅ Semicolon insertion in Go validation harness
-- ✅ Multi-return values (`return a, b` → `return (a, b)`)
-- ✅ Map literals (`map[string]int{"a": 1}` → `HashMap::new(); m.insert(...)`)
-- ✅ Slice literals — `[]int{1, 2, 3}` produces `vec![1, 2, 3]`
-- ✅ While loops — `while cond { ... }` → `while cond { ... }`
-- ✅ Continue statements — `continue` → `continue`
-- ✅ For range loops — `for i, v := range data` → `for (i, v) in data.iter().copied().enumerate()`
-- ✅ Nested `if`/`continue`/`while` — proper block body parsing in `parse_go_if` and `parse_block_stmts`
-- ✅ Concurrency primitives — real `crossbeam`-backed schedulers, channels, and select operations
-- ✅ Channel send — `ch <- value` transpiles to `ch.send(value)`
-- ✅ Channel receive — `return <-ch` transpiles to `return ch.recv().unwrap()`
+consumer's crate. See [ROADMAP.md](ROADMAP.md) for the full list of missing features.
 
 ## Running
 
