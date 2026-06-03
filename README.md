@@ -13,6 +13,7 @@ Write Go-style code in `go! { ... }` blocks. At compile time, a procedural macro
 - **Type-safe** — Go types map directly to Rust equivalents (`int` → `i32`, `string` → `String`).
 - **Macro-powered** — no external build steps, no code generation tools.
 - **Standalone validation** — `gourd-check` validates Go syntax before compilation.
+- **Real concurrency** — crossbeam-backed channels, scheduler, and select primitives.
 
 ## Quick Start
 
@@ -54,6 +55,7 @@ gourd transpile path/to/file.rs
 | `func goSum(a, b, c int) int { ... }` | `fn goSum(a: i32, b: i32, c: i32) -> i32 { ... }` |
 | `func (f Foo) Method(z int) int { ... }` | `impl Foo { fn Method(&self, z: i32) -> i32 { ... } }` |
 | `func (f *Foo) Method(z int) int { ... }` | `impl Foo { fn Method(&mut self, z: i32) -> i32 { ... } }` |
+| `return a, b` | `return (a, b)` (multi-return) |
 
 ### Structs and interfaces
 
@@ -68,6 +70,7 @@ gourd transpile path/to/file.rs
 |----|------|
 | `int`, `int8`–`int64` | `i8`–`i64` |
 | `uint`, `uint8`–`uint64` | `u8`–`u64` |
+| `uintptr` | `usize` |
 | `string`, `bool`, `byte`, `rune` | `String`, `bool`, `u8`, `char` |
 | `float32`, `float64` | `f32`, `f64` |
 | `[]T` (slice type) | `&[T]` |
@@ -80,18 +83,24 @@ gourd transpile path/to/file.rs
 |----|------|
 | `len(s)`, `cap(s)` | `s.len() as i32`, `s.capacity() as i32` |
 | `string(bytes)` | `String::from_utf8(bytes)` |
-| `int(x)`, `bool(x)`, `byte(x)` | explicit casts |
+| `int(x)`, `bool(x)`, etc. | explicit casts |
 | `make(chan/map/slice)` | `GoChannel::new()`, `HashMap::new()`, `Vec::new()` |
 | `new(Foo)` | `Foo::default()` |
 | `panic("msg")` | `panic!("msg")` |
+| `append(slice, items)` | push to a Vec copy |
 | `[]int{1, 2, 3}` | `vec![1, 2, 3]` |
-| `map[string]int{...}` | `HashMap::new()` + inserts |
+| `map[string]int{...}` | `HashMap` + inserts |
+| `x.(T)` (type assertion) | type cast/downcast |
 
 ### Control flow
 
-- `if / else`, `switch / match`
-- `for` (range and index), `while`
-- `continue`, `break`, `return`
+- `if / else / else if`
+- `switch / match` (selector and no-selector forms)
+- `for` with `range` (index-only and index+value forms)
+- `while`
+- `continue`, `break`
+- `return` (single and multi-return)
+- Struct literals, map literals, slice literals, ranges
 
 ### Concurrency (crossbeam-backed)
 
@@ -100,7 +109,7 @@ gourd transpile path/to/file.rs
 | `go func() { ... }` | `GoScheduler::new().submit(|| { ... })` |
 | `chan int` / `chan int{10}` | `GoChannel::new()` / `GoChannel::with_capacity(10)` |
 | `ch <- 42` / `<-ch` | `ch.send(42)` / `ch.recv()` |
-| `select { case ... }` | `GoSelect::new().run()` |
+| `select { case ... }` | `GoSelect::new().send_case(...).run()` |
 
 Concurrency primitives are real `crossbeam`-backed types — not stubs. The scheduler runs goroutines sequentially (simulating Go's scheduler), channels support `send`, `recv`, `try_send`, `try_recv`, and `select` supports send cases, receive cases, default cases, and timeouts.
 
@@ -139,6 +148,14 @@ cargo expand -p gourd         # See expanded transpilation
 gourd transpile "func hello() int { return 42 }"
 ```
 
+## Status
+
+| Metric | Value |
+|--------|-------|
+| **Real-world Go coverage** | ~5% |
+| **Builtins implemented** | 9 of ~14 |
+| **Test code** | ~40% commented-out TODO stubs |
+
 ## What's next?
 
-See [ROADMAP.md](ROADMAP.md). The remaining big gaps are closures, `append`, error handling, and standard library support.
+See [ROADMAP.md](ROADMAP.md). The remaining big gaps are closures (partially implemented, tests not passing), `defer`, error handling, and standard library support.

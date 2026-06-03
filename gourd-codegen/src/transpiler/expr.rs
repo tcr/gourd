@@ -11,8 +11,10 @@
 //! - `calls.rs` — `Call`, `MethodCall`, `Field`, `Index`, `Macro`
 //! - `control_flow.rs` — `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`,
 //!   `While`, `Range`, `If`, `Block`
+//! - `closures.rs` — Go anonymous functions (`func(...) { ... }`) → Rust closures
 
 pub mod calls;
+pub mod closures;
 pub mod control_flow;
 pub mod dispatch;
 pub mod literals;

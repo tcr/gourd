@@ -54,11 +54,17 @@ pub fn transpile_array(input: &ExprArray) -> TokenStream {
 }
 
 /// Handle `Expr::Verbatim` tokens produced by syn when it can't fully
-/// parse Go slice/map literals. Looks for a brace group inside the
-/// verbatim tokens, extracts elements, and emits `vec![...]`.
+/// parse Go slice/map literals or anonymous functions.
 pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
     use proc_macro2::TokenTree;
 
+    // Check for anonymous Go function: `func(params) ret { body }`
+    // or `func(params) { body }` — no return type.
+    if let Some(closure) = super::closures::parse_closure(tokens) {
+        return super::closures::closure_to_rust(&closure);
+    }
+
+    // Check for slice/map literals
     for tt in tokens.clone() {
         if let TokenTree::Group(g) = tt
             && g.delimiter() == proc_macro2::Delimiter::Brace

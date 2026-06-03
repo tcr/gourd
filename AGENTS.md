@@ -6,11 +6,51 @@ Transpiles inline Go declarations into valid Rust via a procedural macro at comp
 gourd/
   gourd-macro/       <-- proc-macro library (transpiler core)
   gourd/               <-- runtime + CLI tool (`gourd transpile`)
+  gourd-codegen/       <-- shared transpiler library (used by both macro and CLI)
+  gourd-check/         <-- standalone Go/Rust validation CLI
 ```
 
-[`gourd-macro/src/transpiler.rs`]  -- Go → Rust transpiler
+[`gourd-codegen/src/transpiler/`] -- Go → Rust transpiler (modular)
 [`gourd-macro/src/lib.rs`]         -- `#[proc_macro]` entry (`go!`)
 [`gourd/src/main.rs`]              -- CLI tool (`gourd transpile`)
+
+## Module layout
+
+The transpiler is split across these files under `gourd-codegen/src/transpiler/`:
+
+| Module | Purpose |
+|--------|---------|
+| `ast.rs` | Go AST types (`GoFn`, `GoStruct`, `GoStmt`, `GoSelect`, `Switch`, etc.) |
+| `params.rs` | Function parameter parsing (GoFnInputs, GoFnOutput) |
+| `types.rs` | Go type name mapping to Rust equivalents |
+| `free_fn/mod.rs` | Top-level function, struct, interface, switch, select dispatch |
+| `funcs/mod.rs` | Receiver (impl block) function transpilation |
+| `expr.rs` | Expression-level transpilation entry point |
+| `expr/dispatch.rs` | `go_to_rust()` — routes `syn::Expr` variants to handlers |
+| `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim` |
+| `expr/operators.rs` | `Binary`, `Unary`, `Cast`, `Assign`, `Break` |
+| `expr/calls.rs` | `Call`, `MethodCall`, `Field`, `Index`, `Macro` |
+| `expr/closures.rs` | Go anonymous functions (partially implemented, tests not passing) |
+| `expr/control_flow.rs` | `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`, `While`, `Range`, `If`, `Block` |
+| `expr/structs.rs` | Struct literal transpilation |
+| `stmts.rs` | Block parsing (`parse_go_block`, `parse_go_special_stmt`) |
+| `stmt_to_rust.rs` | `go_stmt_to_rust()` — bridges GoStmt AST to Rust tokens |
+| `slice_map.rs` | Map/slice literal parsing (`ElemParser`, `MapEntryParser`) |
+| `switch.rs` | Switch case parsing |
+| `switch_v2.rs` | Switch statement transpilation |
+| `base_stmts.rs` | Fallback statement parser |
+| `return_stmts.rs` | Return parsing (multi-return, make, append, type assertion) |
+| `control_flow.rs` | If, while, for parsing |
+| `receiver.rs` | Receiver replacement (`replace_receiver`) |
+| `parsing.rs` | Re-exports from modular sub-modules |
+| `validate/mod.rs` | Validation helpers |
+
+### CLI (`gourd transpile`)
+
+The CLI tool (`gourd/src/main.rs`) supports:
+- Inline Go code: `gourd transpile "func hello() int { return 42 }"`
+- File paths: `gourd transpile path/to/file.rs`
+- Stdin: `echo "..." \| gourd transpile -`
 
 ## Example of how it works
 
@@ -122,6 +162,7 @@ The `gourd` runtime crate provides real concurrent primitives powered by `crossb
 | `GoSelect<T>` | Select with `send_case()`, `recv_case()`, `with_default()`, `with_timeout()` |
 | `SchedulerMap` | Multi-scheduler keyed by ID for multiple goroutines |
 | `GoFuture` | Closure-as-future (unchanged) |
+| `GoGc<T>` | Arc-based reference-counted wrapper (Go GC semantics) |
 
 When working with the concurrency primitives:
 
@@ -213,19 +254,24 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | `make(slice)` | `Vec::new()` | ✅ |
 | `new(Foo)` | `Foo::default()` | ✅ |
 | `panic("msg")` | `panic!("msg")` | ✅ |
-| `append` | — | ❌ |
+| `append(slice, items)` | push to Vec copy | ✅ |
+| `x.(T)` (type assertion) | type cast/downcast | ✅ |
 | `copy` | — | ❌ |
 | `delete` | — | ❌ |
+| `recover` | — | ❌ |
+| `defer` | — | ❌ |
+| `complex` | — | ❌ |
+| `min` / `max` | — | ❌ |
 
 ## Working with files
 
-- If a file is over 400 lines long, consider breaking it into multiple files. 
+- If a file is over 400 lines long, consider breaking it into multiple files.
 - Please lean on the `rust-analyzer` MCP for refactoring and inspecting Rust types. The Rust Analyzer MCP is much better at refactoring than copy/paste. It also is useful for navigating the codebase.
 - For other edits, consider using command line tools like `cp` and `sed` to work exactly with line numbers. Whenever trying to recover a misedited file, attempt to read its previous contents from `git`.
 
 ## Name Preservation: camelCase stays camelCase
 
-Location: `gourd-codegen/src/transpiler/free_fn.rs`
+Location: `gourd-codegen/src/transpiler/free_fn/basic.rs` (and `funcs/`)
 
 Go function and variable names are **preserved as camelCase** in the Rust output. No conversion to snake_case.
 
@@ -270,9 +316,9 @@ This is how `GoFnInputs::parse` distinguishes Go-style grouped parameters
 ```rust
 fn emit_todo(msg: &'static str) -> TokenStream {
     quote! { {
-        compile_error!(concat!("TODO: ", #msg))
-    }
-    unreachable!()  }}
+        compile_error!(concat!("TODO: ", #msg));
+        unreachable!()
+    }}
 }
 ```
 

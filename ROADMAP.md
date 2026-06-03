@@ -16,6 +16,7 @@ Gourd transpiles **basic Go syntax** into Rust at compile time via a procedural 
 | `func foo(a, b, c int) int { ... }` | `fn foo(a: i32, b: i32, c: i32) -> i32 { ... }` | Parameter grouping |
 | `func (f Foo) Method(z int) int { ... }` | `impl Foo { fn Method(&self, z: i32) -> i32 { ... } }` | Value receiver |
 | `func (f *Foo) Method(z int) int { ... }` | `impl Foo { fn Method(&mut self, z: i32) -> i32 { ... } }` | Pointer receiver |
+| `return a, b` | `return (a, b)` | Multi-return |
 
 Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppressed.
 
@@ -46,7 +47,7 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 
 | Go | Rust |
 |----|------|
-| `if / else` | `if / else` |
+| `if / else / else if` | `if / else / else if` |
 | `switch n { case 1: ... }` | `match n { 1 => ... }` |
 | `switch { case ok: ... }` | `if / else if chain` |
 | `for i, v := range data` | `for (i, v) in data.iter().copied().enumerate()` |
@@ -58,16 +59,14 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 
 | Builtin | Status |
 |---------|--------|
-| `len(s)` | ✅ Slices only |
-| `cap(s)` | ✅ Slices only |
+| `len(s)`, `cap(s)` | ✅ Slices only |
 | `string(bytes)` | ✅ `[]byte` → `String` |
 | `int(x)`, `bool(x)`, etc. | ✅ Type conversions |
 | `make(chan/map/slice)` | ✅ All three types |
 | `new(Foo)` | ✅ `Foo::default()` |
 | `panic("msg")` | ✅ `panic!("msg")` |
-| `append` | ❌ |
-| `copy` | ❌ |
-| `delete` | ❌ |
+| `append(slice, items)` | ✅ Push to Vec copy |
+| `x.(T)` (type assertion) | ✅ Cast/downcast |
 | `recover` | ❌ |
 | `defer` | ❌ |
 | `complex` | ❌ |
@@ -83,7 +82,22 @@ Numeric, string, bool, slice literals, map literals, struct literals, ranges.
 
 ### Concurrency
 
-Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`.
+Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`, `SchedulerMap`, `GoFuture`.
+
+---
+
+## Partially Implemented (tests not passing)
+
+| Go Pattern | Status | Issue |
+|------------|--------|-------|
+| **Closures** `func() { ... }` | ⚠️ | Partial implementation; `go_to_rust_closure` not properly exposed; import errors in tests |
+| **`for` range** | ⚠️ | `range` keyword sometimes parsed as identifier, not loop construct |
+| **`channel_ops`** | ⚠️ | `<` comparison on `GoChannel<i32>` — type doesn't implement `PartialOrd` |
+| **`continue`** | ⚠️ | Runtime assertion failure in test |
+| **`struct_literals`** | ⚠️ | Breaks on closure fallback path |
+| **`switch_extended`** | ⚠️ | Breaks on closure fallback path |
+| **`transpile_go_fn`** | ⚠️ | Breaks on closure fallback path |
+| **`type_assertion`** | ⚠️ | Breaks on closure fallback path |
 
 ---
 
@@ -93,8 +107,7 @@ Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`.
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **Closures** `func() { ... }` | ❌ | No higher-order functions, no sorting |
-| **append** `append(slice, items)` | ❌ | One of the most common Go idioms |
+| **Closures** `func() { ... }` | ⚠️ | Partial; not working in tests — no higher-order functions, no sorting |
 | **defer** `defer cleanup()` | ❌ | No RAII pattern |
 | **Error handling** `if err != nil` | ❌ | Dominant Go error handling pattern |
 | **recover** `recover()` | ❌ | |
@@ -110,14 +123,28 @@ Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`.
 |--------|-------|
 | **Real-world Go coverage** | ~5% |
 | **syn::Expr variants covered** | 26 of ~39 |
-| **Builtins implemented** | 7 of ~14 |
+| **Builtins implemented** | 9 of ~14 |
 | **Test code** | ~40% commented-out TODO stubs |
+
+### Working tests (passing)
+
+| Test file | Result |
+|-----------|--------|
+| `append_builtin.rs` | ✅ 4/4 |
+| `go_fn.rs` | ✅ 9/9 |
+| `interface_tests.rs` | ✅ 7/7 |
+| `make_builtin.rs` | ✅ 5/5 |
+| `multi_case_switch.rs` | ✅ 1/1 |
+| `new_builtin.rs` | ✅ 4/4 |
+| `panic_builtin.rs` | ✅ 4/4 |
+| `receiver_tests.rs` | Compiles (0 tests) |
+| `shorthand_query.rs` | Compiles |
 
 ### What would it take to be viable?
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.
-2. **append / copy / delete** — covers 30% of common builtin usage
-3. **defer** — critical for resource management
+2. **`append` / `copy` / `delete`** — `append` works, `copy`/`delete` don't
+3. **`defer`** — critical for resource management
 4. **Error handling** — `if err != nil` is the dominant Go pattern
 5. **Standard library mapping** — even `fmt → println!`, `math → std::f64` moves the needle
 6. **Generics** — needed for type-safe collections

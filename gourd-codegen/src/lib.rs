@@ -18,7 +18,7 @@ mod validate;
 
 use proc_macro2::TokenStream;
 
-pub use transpiler::free_fn::{go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
+pub use transpiler::free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
 
@@ -68,7 +68,18 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                         let mut iter2 = input.clone().into_iter().skip(1);
                         if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
                             if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
-                                go_to_rust_receiver_fn(input)
+                                // Could be a receiver function OR a closure.
+                                // Receiver: `func (recv Type) name(params) { body }`
+                                // Closure: `func(params) { body }`
+                                // Check: peek next token after the paren group.
+                                let mut iter3 = input.clone().into_iter().skip(2);
+                                if let Some(proc_macro2::TokenTree::Ident(_)) = iter3.next() {
+                                    // Has an identifier after paren → receiver function
+                                    go_to_rust_receiver_fn(input)
+                                } else {
+                                    // No identifier → closure (anonymous function)
+                                    go_to_rust_closure(input)
+                                }
                             } else {
                                 go_to_rust_fn(input)
                             }
