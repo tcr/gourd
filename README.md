@@ -2,6 +2,8 @@
 
 GO to Userland Rust Demo
 
+[MIT License](LICENSE)
+
 ## Why Gourd?
 
 Write Go. Get Rust. At compile time.
