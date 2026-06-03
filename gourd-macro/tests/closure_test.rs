@@ -3,7 +3,6 @@
 #[test]
 fn test_closure_no_params() {
     use gourd_macro::go;
-    use gourd_codegen::go;
 
     // Go: `func() { body }`
     // Rust: `|| { body }`
@@ -18,7 +17,6 @@ fn test_closure_no_params() {
 #[test]
 fn test_closure_with_params() {
     use gourd_macro::go;
-    use gourd_codegen::go;
 
     // Go: `func(x int, y int) int { return x + y }`
     // Rust: `|x: i32, y: i32| -> i32 { x + y }`
@@ -33,10 +31,9 @@ fn test_closure_with_params() {
 #[test]
 fn test_closure_no_return() {
     use gourd_macro::go;
-    use gourd_codegen::go;
 
-    // Go: `func() { fmt.Println("hello") }`
-    // Rust: `|| { fmt::println!("hello") }`
+    // Go: `func() { ... }` — no return type
+    // Rust: `|| { ... }`
     go! {
         func main() int {
             f := func() { return 0 }
@@ -49,7 +46,6 @@ fn test_closure_no_return() {
 #[test]
 fn test_closure_no_return_type() {
     use gourd_macro::go;
-    use gourd_codegen::go;
 
     go! {
         func main() int {
@@ -63,7 +59,6 @@ fn test_closure_no_return_type() {
 #[test]
 fn test_closure_with_slice_param() {
     use gourd_macro::go;
-    use gourd_codegen::go;
 
     go! {
         func main() int {
