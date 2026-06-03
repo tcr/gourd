@@ -1,16 +1,20 @@
-# 🍂 Gourd
+# 🎃 Gourd
 
 > Write Go. Get Rust. At compile time.
 
-Gourd lets you write Go-style code and get valid Rust output — zero runtime overhead, no external tools, no code generation steps.
+> ⚠️ **EXPERIMENTAL — NOT PRODUCTION READY**  
+> Gourd is an early, experimental project. It is **not suitable for most Go projects**. The transpiler is incomplete — many Go constructs will fail at compile time with `compile_error!`. There is no API stability guarantee, breaking changes can happen at any time, and the runtime concurrency primitives (scheduler, channels, select) are best-effort simulations of Go's runtime, not drop-in replacements. Use at your own risk. If you need a reliable Go-to-Rust tool, look elsewhere. If you want a fun toy to tinker with, read on.
+
+Gourd lets you write Go-style code and get valid Rust output.
 
 ## Why Gourd?
 
-- **Zero runtime overhead** — Go code becomes Rust at compile time
-- **Familiar syntax** — write Go declarations, get Rust implementations
-- **Type-safe** — Go types map directly to Rust equivalents (`int` → `i32`, `string` → `String`)
-- **Macro-powered** — no external build steps, no code generation tools
-- **Standalone validation** — `gourd-check` validates Go syntax before compilation
+Gourd: a hard outer shell (Golang) that, once processed, becomes something useful and expressive (Rust).
+
+- **Familiar syntax** — write Go declarations, get Rust implementations.
+- **Type-safe** — Go types map directly to Rust equivalents (`int` → `i32`, `string` → `String`).
+- **Macro-powered** — no external build steps, no code generation tools.
+- **Standalone validation** — `gourd-check` validates Go syntax before compilation.
 
 ## Quick Start
 

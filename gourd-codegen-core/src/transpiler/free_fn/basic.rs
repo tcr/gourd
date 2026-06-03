@@ -61,8 +61,9 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                 }
             }
 
-            let mut stmts = Vec::new();
-            for stm in &go_fn.block.stmts {
+            eprintln!("DEBUG go_fn block stmts count: {}", go_fn.block.stmts.len());
+            for (i, stm) in go_fn.block.stmts.iter().enumerate() {
+                eprintln!("DEBUG go_fn stmt {}: {:?}", i, std::mem::discriminant(stm));
                 stmts.push(super::super::parsing::go_stmt_to_rust(stm));
             }
             let body: Box<syn::ExprBlock> = syn::parse_quote!({ #(#stmts);* });

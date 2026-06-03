@@ -30,6 +30,7 @@ pub(crate) enum GoStmt {
     GoChannelRecv(Expr),       // `<- ch`
     GoTypeAssert(Expr, syn::Type), // `x.(T)` type assertion
     GoMake(String),   // `make(...)` with raw argument string
+    RawStmt(TokenStream), // Raw Rust tokens to emit directly (e.g., `return GoChannel::...`)
 }
 
 pub(crate) struct GoFor {
@@ -654,11 +655,13 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
     let _brace = syn::braced!(brace_content in input);
 
     let mut stmts = Vec::new();
+    eprintln!("DEBUG parse_go_block: brace_content has {} tokens", brace_content.into_iter().count());
     while !brace_content.is_empty() {
         // Check for Go-specific constructs first (maps, slices, if, switch, return)
         if parse_go_special_stmt(&brace_content, &mut stmts)? {
             continue; // Handled by the special case
         }
+        eprintln!("DEBUG parse_go_block: base stmt parsed, stmts now: {}", stmts.len());
         // Fall back to the base parser for common statements
         parse_base_stmt(&brace_content, &mut stmts)?;
     }
@@ -1034,8 +1037,10 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
     // Check for `return make(...)` — fallback for make builtin calls
     // (arguments may contain Go types like `chan T` that syn can't parse)
     let make_fork = input.fork();
-    let is_make = matches!(make_fork.parse::<syn::Ident>(), Ok(ref id) if id.to_string() == "make")
-        && make_fork.peek(syn::token::Paren);
+    let make_ident = make_fork.parse::<syn::Ident>().ok().map(|id| id.to_string());
+    let make_paren = make_fork.peek(syn::token::Paren);
+    eprintln!("DEBUG return_after_return: ident={:?}, paren={}", make_ident, make_paren);
+    let is_make = make_ident.as_deref() == Some("make") && make_paren;
     if is_make {
         input.advance_to(&make_fork);
         let _: syn::Ident = input.parse()?; // consume `make`
@@ -1076,7 +1081,10 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
                 quote! { return { compile_error!(concat!("TODO: make with unsupported type: ", #msg)) } }
             }
         };
-        stmts.push(GoStmt::Expr(parse_quote! { #make_rust }));
+        // Emit the make_rust tokens directly into stmts as a statement
+        // The make_rust already contains `return expr` or `return { compile_error!(...) }`
+        let rust_tokens: TokenStream = make_rust;
+        stmts.push(GoStmt::RawStmt(rust_tokens));
         if input.peek(token::Semi) {
             let _semi: token::Semi = input.parse()?;
         }
@@ -1494,6 +1502,10 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                     dispatch::emit_todo("unsupported for form")
                 }
             }
+        }
+        GoStmt::RawStmt(tokens) => {
+            eprintln!("DEBUG RawStmt output: {:?}", tokens.to_string());
+            tokens.clone()
         }
     }
 }
