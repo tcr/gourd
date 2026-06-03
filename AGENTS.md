@@ -200,6 +200,23 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | `quote!` spacing (`func hello ( ) int`) breaks Go parser | Don't use `quote!` for validation — use raw source text |
 | `compile_error!` inside macro items requires `;` | Emit `compile_error!` with proper semicolons |
 
+## Builtins
+
+| Go builtin | Rust output | Status |
+|------------|-------------|--------|
+| `len(s)` | `s.len() as i32` | ✅ Slices only |
+| `cap(s)` | `s.capacity() as i32` | ✅ Slices only |
+| `string(bytes)` | `String::from_utf8(bytes)` | ✅ |
+| `int(x)`, `bool(x)`, `byte(x)` | explicit casts | ✅ |
+| `make(chan)` | `GoChannel::<T>::new()` | ✅ |
+| `make(map)` | `HashMap::new()` | ✅ |
+| `make(slice)` | `Vec::new()` | ✅ |
+| `new(Foo)` | `Foo::default()` | ✅ |
+| `panic("msg")` | `panic!("msg")` | ✅ |
+| `append` | — | ❌ |
+| `copy` | — | ❌ |
+| `delete` | — | ❌ |
+
 ## Working with files
 
 - If a file is over 400 lines long, consider breaking it into multiple files. 

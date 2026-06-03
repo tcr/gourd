@@ -13,7 +13,7 @@ fn test_type_assertion_int() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_int(42), 42);
+    assert_eq!(goTypeAssertInt(42), 42);
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn test_type_assertion_string() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_string(42), String::from("42"));
+    assert_eq!(goTypeAssertString(42), String::from("42"));
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn test_type_assertion_float64() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_float_64(42), 42.0);
+    assert_eq!(goTypeAssertFloat64(42), 42.0);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn test_type_assertion_uint() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_uint(-1), 4294967295u32);
+    assert_eq!(goTypeAssertUint(-1), 4294967295u32);
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn test_type_assertion_bool() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_bool(1), true);
+    assert_eq!(goTypeAssertBool(1), true);
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn test_type_assertion_byte() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_byte(255), 255u8);
+    assert_eq!(goTypeAssertByte(255), 255u8);
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_type_assertion_rune() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_type_assert_rune(65), 'A');
+    assert_eq!(goTypeAssertRune(65), 'A');
 }
 
 #[test]
@@ -97,5 +97,5 @@ fn test_type_assertion_nested() {
     }
     
     // Verify the transpilation works at runtime
-    assert_eq!(go_nested_type_assert(42), 42);
+    assert_eq!(goNestedTypeAssert(42), 42);
 }

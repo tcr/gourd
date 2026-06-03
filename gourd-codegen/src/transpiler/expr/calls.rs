@@ -66,6 +66,76 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             _ => {}
         }
     }
+    // Go `new` builtin: `new(Foo)` → `Foo::default()`
+    // Maps Go primitive types to Rust equivalents (int → i32, etc.).
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string() == "new"
+    {
+        if input.args.len() == 1 {
+            let arg = &input.args[0];
+            // For type names (paths), map Go type → Rust type and emit ::default()
+            if let Expr::Path(arg_path) = arg {
+                let type_str = quote! { #arg_path }.to_string();
+                // Map Go primitive type names to Rust equivalents
+                let mapped_str = match type_str.as_str() {
+                    "int" => "i32",
+                    "int8" => "i8",
+                    "int16" => "i16",
+                    "int32" => "i32",
+                    "int64" => "i64",
+                    "uint" => "u32",
+                    "uint8" => "u8",
+                    "uint16" => "u16",
+                    "uint32" => "u32",
+                    "uint64" => "u64",
+                    "uintptr" => "usize",
+                    "byte" => "u8",
+                    "rune" => "char",
+                    "float32" => "f32",
+                    "float64" => "f64",
+                    "string" => "String",
+                    "bool" => "bool",
+                    "error" => "Box<dyn std::error::Error>",
+                    _ => &type_str, // user-defined type, keep as-is
+                };
+                if let Ok(mapped_ty) = syn::parse_str::<syn::Type>(mapped_str) {
+                    return quote! { #mapped_ty::default() };
+                }
+                // For user-defined types (structs, etc.), just emit ::default()
+                return quote! { #arg::default() };
+            } else {
+                // Could not extract a type — emit compile_error!
+                return emit_todo("new() requires a type argument");
+            }
+        } else {
+            return emit_todo("new() requires exactly one type argument");
+        }
+    }
+    // Go `panic` builtin: `panic("msg")` → `panic!("msg")`
+    // String literals must remain as raw literals (not String::from(...)).
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string() == "panic"
+    {
+        if input.args.is_empty() {
+            return quote! { panic!("panic()") };
+        }
+        // For panic!, pass string literals directly rather than String::from(...)
+        let panic_args: Vec<_> = input.args.iter().map(|arg| {
+            if let Expr::Lit(lit) = arg
+                && matches!(&lit.lit, syn::Lit::Str(_))
+            {
+                // Pass the string literal directly for panic! format string
+                quote! { #arg }
+            } else {
+                // Non-string args: use the transpiled expression
+                let transpiled = super::dispatch::go_to_rust(arg);
+                quote! { #transpiled }
+            }
+        }).collect();
+        return quote! { panic!( #(#panic_args),* ) };
+    }
     // Go `make` builtin — special handling for chan/map/slice types.
     // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
     // `make(chan T)` → `GoChannel::<T>::new()`

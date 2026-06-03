@@ -1,7 +1,6 @@
 use proc_macro2::TokenStream;
 use std::str::FromStr;
 use syn::parse2;
-use quote::ToTokens;
 use syn::token;
 
 #[test]

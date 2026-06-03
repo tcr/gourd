@@ -4,7 +4,7 @@ use gourd_macro::go;
 // Continue skips to the next iteration when a condition is met.
 
 go! {
-    func go_skip_odd(data []int) int {
+    func goSkipOdd(data []int) int {
         ret := 0
         i := 0
         while i < len(data) {
@@ -22,6 +22,6 @@ go! {
 #[test]
 fn test_continue_skips() {
     let data = vec![1, 2, 3, 4, 5, 6];
-    let result = go_skip_odd(&data);
+    let result = goSkipOdd(&data);
     assert_eq!(result, 3); // 2, 4, 6 are even (3 values)
 }

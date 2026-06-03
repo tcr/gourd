@@ -36,7 +36,7 @@ fn test_triple_return() {
 }
 
 // Test string-keyed map literal
-#[verify_rust_output({fn go_map_size(_a: String) -> i32 {
+#[verify_rust_output({fn goMapSize(_a: String) -> i32 {
     let m = {
         let mut m = std::collections::HashMap::new();
         m.insert(::std::string::String::from("a"), 1);
@@ -48,7 +48,7 @@ fn test_triple_return() {
     return m.len() as i32
 }})]
 go! {
-    func go_map_size(_a string) int {
+    func goMapSize(_a string) int {
         m := map[string]int{"a": 1, "b": 2, "c": 3}
         return len(m)
     }
@@ -56,12 +56,12 @@ go! {
 
 #[test]
 fn test_map_literal() {
-    let result = go_map_size(String::from("ignored"));
+    let result = goMapSize(String::from("ignored"));
     assert_eq!(result, 3);
 }
 
 // Test map length
-#[verify_rust_output({fn go_empty_map() -> i32 {
+#[verify_rust_output({fn goEmptyMap() -> i32 {
     let m = {
         let mut m = std::collections::HashMap::new();
         m.insert(::std::string::String::from("x"), 0);
@@ -71,7 +71,7 @@ fn test_map_literal() {
     return m.len() as i32
 }})]
 go! {
-    func go_empty_map() int {
+    func goEmptyMap() int {
         m := map[string]int{"x": 0}
         return len(m)
     }
@@ -79,6 +79,6 @@ go! {
 
 #[test]
 fn test_empty_map() {
-    let result = go_empty_map();
+    let result = goEmptyMap();
     assert_eq!(result, 1);
 }

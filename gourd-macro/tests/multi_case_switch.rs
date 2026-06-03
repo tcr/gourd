@@ -3,7 +3,7 @@ use gourd_macro::go;
 // ── Multi-expression switch case: `case 1, 2, 3: "small"` ─────────────
 
 go! {
-    func go_day_name(d int) string {
+    func goDayName(d int) string {
         switch d {
         case 1, 2, 3:
             return "weekday"
@@ -19,14 +19,14 @@ go! {
 
 #[test]
 fn test_multi_case_switch() {
-    assert_eq!(go_day_name(1), "weekday");
-    assert_eq!(go_day_name(2), "weekday");
-    assert_eq!(go_day_name(3), "weekday");
-    assert_eq!(go_day_name(4), "almost_weekend");
-    assert_eq!(go_day_name(5), "almost_weekend");
-    assert_eq!(go_day_name(6), "weekend");
-    assert_eq!(go_day_name(7), "weekend");
-    assert_eq!(go_day_name(0), "weekend");
-    assert_eq!(go_day_name(-1), "invalid");
-    assert_eq!(go_day_name(100), "invalid");
+    assert_eq!(goDayName(1), "weekday");
+    assert_eq!(goDayName(2), "weekday");
+    assert_eq!(goDayName(3), "weekday");
+    assert_eq!(goDayName(4), "almost_weekend");
+    assert_eq!(goDayName(5), "almost_weekend");
+    assert_eq!(goDayName(6), "weekend");
+    assert_eq!(goDayName(7), "weekend");
+    assert_eq!(goDayName(0), "weekend");
+    assert_eq!(goDayName(-1), "invalid");
+    assert_eq!(goDayName(100), "invalid");
 }

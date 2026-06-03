@@ -2,19 +2,19 @@ use gourd_macro::{go, verify_rust_output};
 
 // ── Basic function: no params, return value ─────────────────────────
 #[verify_rust_output({
-    fn go_add() -> i32 {
+    fn goAdd() -> i32 {
         return 42
     }
 })]
 go! {
-    func go_add() int {
+    func goAdd() int {
         return 42
     }
 }
 
 // ── Function with mapped parameter type names ───────────────────────
 #[verify_rust_output({
-    fn go_sum(a: i32, b: i32) -> i32 {
+    fn goSum(a: i32, b: i32) -> i32 {
         return a + b
     }
 })]
@@ -27,13 +27,13 @@ go! {
 // ── Verify example: compile-time check of transpilation output ───────
 // ── Control flow: if statements ──────────────────────────────────────
 
-#[verify_rust_output({fn go_abs(n: i32) -> i32 {
+#[verify_rust_output({fn goAbs(n: i32) -> i32 {
         let mut ret = n; ;
         if n < 0 { ret = -ret } ;
         return ret
     }})]
 go! {
-    func go_abs(n int) int {
+    func goAbs(n int) int {
         ret := n
         if n < 0 {
             ret = -ret
@@ -45,7 +45,7 @@ go! {
 // NOTE: This WOULD fail compilation (intentionally commented out):
 // Uncomment to see a compile_error showing the expected vs actual mismatch:
 // #[gourd_macro::go_verify({
-//     fn go_abs(n: i32) -> i32 {
+//     fn goAbs(n: i32) -> i32 {
 //         let mut ret = n;
 //         if n < 0 {
 //             ret = 0;  // Wrong: should be -n
@@ -54,7 +54,7 @@ go! {
 //     }
 // })]
 // go! {
-//     fn go_abs(n int) -> i32 {
+//     fn goAbs(n int) -> i32 {
 //         let mut ret = n;
 //         if n < 0 {
 //             ret = -n;
@@ -66,7 +66,7 @@ go! {
 
 // ── Boolean return ─────────────────────────────────────────────────
 
-#[verify_rust_output({fn is_even(n: i32) -> bool {
+#[verify_rust_output({fn isEven(n: i32) -> bool {
         return n % 2 == 0
     }})]
 go! {
@@ -112,7 +112,7 @@ go! {
 // NOTE: type conversion (int()) not yet supported in transpiler
 // // ── String param ────────────────────────────────────────────────────
 
-// #[verify_rust_output({fn go_len(s: String) -> i32 {
+// #[verify_rust_output({fn goLen(s: String) -> i32 {
 //         return int(s.len() as i32)
 //     }})]
 // go! {
@@ -123,7 +123,7 @@ go! {
 
 // ── No return ───────────────────────────────────────────────────────
 
-#[verify_rust_output({fn go_incr() -> i32 {
+#[verify_rust_output({fn goIncr() -> i32 {
         return 42
     }})]
 go! {
@@ -134,25 +134,25 @@ go! {
 
 #[test]
 fn test_fn_return() {
-    assert_eq!(go_add(), 42);
+    assert_eq!(goAdd(), 42);
 }
 
 #[test]
 fn test_fn_with_params() {
-    assert_eq!(go_sum(10, 20), 30);
+    assert_eq!(goSum(10, 20), 30);
 }
 
 #[test]
 fn test_fn_if_return() {
-    assert_eq!(go_abs(-5), 5);
-    assert_eq!(go_abs(3), 3);
-    assert_eq!(go_abs(0), 0);
+    assert_eq!(goAbs(-5), 5);
+    assert_eq!(goAbs(3), 3);
+    assert_eq!(goAbs(0), 0);
 }
 
 #[test]
 fn test_fn_bool_return() {
-    assert!(is_even(4));
-    assert!(!is_even(3));
+    assert!(isEven(4));
+    assert!(!isEven(3));
 }
 
 // NOTE: multi-return not yet implemented
@@ -180,19 +180,19 @@ fn test_fn_bool_return() {
 
 // #[test]
 // fn test_fn_string_param() {
-//     assert_eq!(go_len(String::from("hello")), 5);
+//     assert_eq!(goLen(String::from("hello")), 5);
 // }
 
 #[test]
 fn test_fn_no_return() {
-    let result = go_incr();
+    let result = goIncr();
     assert_eq!(result, 42);
 }
 
 // NOTE: type conversion (int()) not yet supported in transpiler
 // ── Slice type shorthand ─────────────────────────────────────────────
 
-// #[verify_rust_output({fn go_slice_len(a: &[i32]) -> i32 {
+// #[verify_rust_output({fn goSliceLen(a: &[i32]) -> i32 {
 //         return int(a.len() as i32)
 //     }})]
 // go! {
@@ -204,7 +204,7 @@ fn test_fn_no_return() {
 // NOTE: type conversion (int()) not yet supported
 // ── Slice type shorthand (2 params) ──────────────────────────────────
 
-// #[verify_rust_output({fn go_slice_subindex(a: &[i32], b: &[i32]) -> i32 {
+// #[verify_rust_output({fn goSliceSubindex(a: &[i32], b: &[i32]) -> i32 {
 //         return a.len() as i32 - b.len() as i32
 //     }})]
 // go! {
@@ -217,15 +217,15 @@ fn test_fn_no_return() {
 // #[test]
 // fn test_slice_type() {
 //     let data = vec![10, 20, 30];
-//     assert_eq!(go_slice_len(&data), 3);
+//     assert_eq!(goSliceLen(&data), 3);
 //     let a = vec![1, 2];
 //     let b = vec![3];
-//     assert_eq!(go_slice_subindex(&a, &b), 1);
+//     assert_eq!(goSliceSubindex(&a, &b), 1);
 // }
 
 // ── String conversion builtin ────────────────────────────────────────────
 
-#[verify_rust_output({fn go_str(bytes: &[u8]) -> String {
+#[verify_rust_output({fn goStr(bytes: &[u8]) -> String {
         return std::str::from_utf8(&bytes).unwrap_or("").to_string()
     }})]
 go! {
@@ -237,12 +237,12 @@ go! {
 #[test]
 fn test_string_builtin() {
     let bytes = vec![72, 101, 108, 108, 111];  // "Hello"
-    assert_eq!(go_str(&bytes), "Hello");
+    assert_eq!(goStr(&bytes), "Hello");
 }
 
 // ── Go-style parameter shorthand: group multiple params with shared type ────
 
-#[verify_rust_output({fn go_shorthand(a: i32, b: i32, c: i32) -> i32 {
+#[verify_rust_output({fn goShorthand(a: i32, b: i32, c: i32) -> i32 {
         return a + b + c
     }})]
 go! {
@@ -253,7 +253,7 @@ go! {
 
 #[test]
 fn test_param_grouping() {
-    assert_eq!(go_shorthand(1, 2, 3), 6);
+    assert_eq!(goShorthand(1, 2, 3), 6);
 }
 
 
@@ -276,7 +276,7 @@ fn test_error_signature_check() {
 
 // ── Slice literals inside go! function bodies ────────────────────
 
-#[verify_rust_output({fn go_slice_literal() -> Vec<i32> {
+#[verify_rust_output({fn goSliceLiteral() -> Vec<i32> {
         return vec![1, 2, 3]
     }})]
 go! {
@@ -287,13 +287,13 @@ go! {
 
 #[test]
 fn test_slice_literal_in_body() {
-    let v = go_slice_literal();
+    let v = goSliceLiteral();
     assert_eq!(v, vec![1i32, 2i32, 3i32]);
 }
 
 
 // NOTE: empty slice literals not yet implemented
-// #[verify_rust_output({fn go_slice_literal_empty() -> Vec<i32> {
+// #[verify_rust_output({fn goSliceLiteralEmpty() -> Vec<i32> {
 //         return vec![]
 //     }})]
 // go! {
@@ -304,13 +304,13 @@ fn test_slice_literal_in_body() {
 
 // #[test]
 // fn test_slice_literal_empty_in_body() {
-//     let v = go_slice_literal_empty();
+//     let v = goSliceLiteralEmpty();
 //     assert!(v.is_empty());
 // }
 
 
 // NOTE: type-inferred slice literals not yet implemented
-// #[verify_rust_output({fn go_slice_literal_type_inferred() -> Vec<i32> {
+// #[verify_rust_output({fn goSliceLiteralTypeInferred() -> Vec<i32> {
 //         return vec![2, 3, 4]
 //     }})]
 // go! {
@@ -321,14 +321,14 @@ fn test_slice_literal_in_body() {
 
 // #[test]
 // fn test_slice_literal_type_inferred_in_body() {
-//     let v = go_slice_literal_type_inferred();
+//     let v = goSliceLiteralTypeInferred();
 //     assert_eq!(v, vec![2i32, 3i32, 4i32]);
 // }
 
 // NOTE: this hangs during build when uncommented:
 //
 // go! {
-//     fn go_map_literal(a string) int {
+//     fn goMapLiteral(a string) int {
 //         let m = map[string]int{ "a": 1, "b": 2, "c": 3 };
 //         *m.get(a).unwrap()
 //     }
@@ -337,15 +337,15 @@ fn test_slice_literal_in_body() {
 // #[test]
 // fn test_map_literal_in_body() {
 //     use std::collections::HashMap;
-//     let result = go_map_literal(String::from("b"));
+//     let result = goMapLiteral(String::from("b"));
 //     assert_eq!(result, 2i32);
-//     let result = go_map_literal(String::from("a"));
+//     let result = goMapLiteral(String::from("a"));
 //     assert_eq!(result, 1i32);
 // }
 
 
 // NOTE: map literals not yet implemented
-// #[verify_rust_output({fn go_map_literal_empty() -> bool {
+// #[verify_rust_output({fn goMapLiteralEmpty() -> bool {
 //         return len(map[string]int{}) == 0
 //     }})]
 // go! {
@@ -356,12 +356,12 @@ fn test_slice_literal_in_body() {
 
 // #[test]
 // fn test_map_literal_empty_in_body() {
-//     assert!(go_map_literal_empty());
+//     assert!(goMapLiteralEmpty());
 // }
 
 
 // NOTE: int-keyed map literals not yet implemented
-// #[verify_rust_output({fn go_int_map() -> String {
+// #[verify_rust_output({fn goIntMap() -> String {
 //         return map[int]string{1: "one", 2: "two"}[2]
 //     }})]
 // go! {
@@ -372,6 +372,6 @@ fn test_slice_literal_in_body() {
 
 // #[test]
 // fn test_int_map_in_body() {
-//     let result = go_int_map();
+//     let result = goIntMap();
 //     assert_eq!(result, "two".to_string());
 // }

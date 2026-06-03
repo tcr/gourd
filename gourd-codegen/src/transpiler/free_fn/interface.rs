@@ -12,9 +12,8 @@ use quote::quote;
 pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
     match syn::parse2::<GoInterface>(input) {
         Ok(go_interface) => {
-            let trait_name_str = to_snake_case(&go_interface.ident.to_string());
-            let trait_name = syn::Ident::new(&trait_name_str, go_interface.ident.span());
-            let trait_name = &trait_name;
+            // Preserve Go interface name (camelCase stays camelCase)
+            let trait_name = &go_interface.ident;
 
             // Transpile each interface method to a trait method
             let methods: Vec<_> = go_interface.methods.iter().map(|method| {

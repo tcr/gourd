@@ -5,7 +5,6 @@
 
 use super::super::parsing::{GoFn, GoStruct};
 use super::super::types::map_go_types;
-use super::util::to_snake_case;
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -13,9 +12,8 @@ use quote::quote;
 pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
     match syn::parse2::<GoFn>(input) {
         Ok(go_fn) => {
-            let fn_name_str = to_snake_case(&go_fn.ident.to_string());
-            let fn_name = syn::Ident::new(&fn_name_str, go_fn.ident.span());
-            let fn_name = &fn_name;
+            // Preserve Go function name (camelCase stays camelCase)
+            let fn_name = &go_fn.ident;
             let generics = &go_fn.generics;
 
             let output = go_fn.output.as_ref().map(|output| {
