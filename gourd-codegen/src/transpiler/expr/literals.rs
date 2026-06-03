@@ -76,6 +76,88 @@ pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
         }
     }
 
+    // Check for Go slice slicing: `slice[1:]`, `slice[1:3]`, `slice[:3]`
+    // This is verbatim because syn can't parse Go's `[start:end]` syntax
+    if let Some(sliced) = try_parse_slice_slicing(tokens) {
+        return sliced;
+    }
+
     // No brace group — emit raw tokens (simple literals)
     quote! { #tokens }
+}
+
+/// Try to parse Go slice slicing from verbatim tokens: `slice[1:]`, `slice[1:3]`, `slice[:3]`
+fn try_parse_slice_slicing(tokens: &proc_macro2::TokenStream) -> Option<TokenStream> {
+    use proc_macro2::TokenTree;
+
+    let mut token_iter = tokens.clone().into_iter().peekable();
+
+    // Extract identifier or paren group before `[`
+    let base = match token_iter.next() {
+        Some(TokenTree::Ident(base_id)) => quote! { #base_id },
+        Some(TokenTree::Group(g)) => {
+            if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                let inner = g.stream();
+                return Some(quote! { (#inner)[1..].to_vec() });
+            }
+            return None;
+        }
+        _ => return None,
+    };
+
+    // Expect `[`
+    let open_bracket = match token_iter.next() {
+        Some(TokenTree::Punct(p)) if p.as_char() == '[' => p,
+        _ => return None,
+    };
+    drop(open_bracket);
+
+    // Check for `:` at the start (e.g., `[:3]`)
+    let start = match token_iter.peek() {
+        Some(TokenTree::Punct(p)) if p.as_char() == ':' => {
+            token_iter.next();
+            quote! { 0 }
+        }
+        Some(_) => {
+            let mut start_tokens = proc_macro2::TokenStream::new();
+            while let Some(tt) = token_iter.peek() {
+                if let TokenTree::Punct(p) = tt {
+                    if p.as_char() == ':' {
+                        token_iter.next();
+                        break;
+                    } else {
+                        start_tokens.extend([token_iter.next().unwrap()]);
+                    }
+                } else {
+                    start_tokens.extend([token_iter.next().unwrap()]);
+                }
+            }
+            start_tokens
+        }
+        None => return None,
+    };
+
+    // Parse end index (if present, otherwise end of slice)
+    let end = if token_iter.peek().is_some() {
+        let mut end_tokens = proc_macro2::TokenStream::new();
+        while let Some(tt) = token_iter.next() {
+            if let TokenTree::Punct(p) = &tt {
+                if p.as_char() == ']' {
+                    break;
+                }
+            }
+            end_tokens.extend([tt]);
+        }
+        end_tokens
+    } else {
+        quote! {}
+    };
+
+    if end.is_empty() {
+        // `it[1:]` → `it[1..].to_vec()`
+        Some(quote! { (#base)[(#start)..].to_vec() })
+    } else {
+        // `it[1:3]` → `it[1..3].to_vec()`
+        Some(quote! { (#base)[(#start)..(#end)].to_vec() })
+    }
 }

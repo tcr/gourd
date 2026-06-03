@@ -17,6 +17,8 @@ mod transpiler;
 mod validate;
 
 use proc_macro2::TokenStream;
+use quote::quote;
+use quote::ToTokens;
 
 pub use transpiler::free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
@@ -47,151 +49,254 @@ pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
 
 
 pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
-    let mut iter = input.clone().into_iter();
+    // Collect all top-level declarations from the token stream.
+    // Go blocks may contain multiple structs, interfaces, and functions.
+    let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();
+    let mut result = proc_macro2::TokenStream::new();
 
-    // Peek first token to decide dispatch path
-    match iter.next() {
-        Some(token) => match token {
+    let mut i = 0;
+    while i < trees.len() {
+        let token = &trees[i];
+        match token {
             proc_macro2::TokenTree::Ident(first_ident) => {
                 let first_name = first_ident.to_string();
                 match first_name.as_str() {
                     "interface" => {
-                        go_to_rust_interface(input)
+                        result.extend(go_to_rust_interface(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
                     }
                     "struct" => {
-                        go_to_rust_struct(input)
+                        result.extend(go_to_rust_struct(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
                     }
                     "switch" => {
-                        go_to_rust_switch(input)
+                        // switch is a statement, not a declaration — treat as function body
+                        result.extend(go_to_rust_switch(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
                     }
                     "func" | "fn" => {
-                        let mut iter2 = input.clone().into_iter().skip(1);
-                        if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
+                        // Check if it's a receiver function, closure, or free function
+                        if let Some(proc_macro2::TokenTree::Group(g)) = trees.get(i + 1) {
                             if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
                                 // Could be a receiver function OR a closure.
                                 // Receiver: `func (recv Type) name(params) { body }`
                                 // Closure: `func(params) { body }`
-                                // Check: peek next token after the paren group.
-                                let mut iter3 = input.clone().into_iter().skip(2);
-                                if let Some(proc_macro2::TokenTree::Ident(_)) = iter3.next() {
-                                    // Has an identifier after paren → receiver function
-                                    go_to_rust_receiver_fn(input)
+                                if let Some(proc_macro2::TokenTree::Ident(_)) = trees.get(i + 2) {
+                                    result.extend(go_to_rust_receiver_fn(subtree(&trees, i, true)));
                                 } else {
-                                    // No identifier → closure (anonymous function)
-                                    go_to_rust_closure(input)
+                                    result.extend(go_to_rust_closure(subtree(&trees, i, true)));
                                 }
+                                i = skip_declaration(&trees, i);
                             } else {
-                                go_to_rust_fn(input)
+                                result.extend(go_to_rust_fn(subtree(&trees, i, true)));
+                                i = skip_declaration(&trees, i);
                             }
                         } else {
-                            go_to_rust_fn(input)
+                            result.extend(go_to_rust_fn(subtree(&trees, i, true)));
+                            i = skip_declaration(&trees, i);
                         }
-                    }
-                    "go" => {
-                        // Goroutine: `go func() { body }`
-                        // Transpile to: `GoScheduler::new().submit(|| { body })`
-                        let mut iter2 = input.clone().into_iter().skip(1);
-                        // Skip the `func` keyword
-                        if let Some(proc_macro2::TokenTree::Ident(func_ident)) = iter2.next() {
-                            if func_ident.to_string() == "func" {
-                                // Skip parameters paren group
-                                loop {
-                                    if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
-                                        if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                // Skip return type if present
-                                // Skip the brace group with the body
-                                loop {
-                                    if let Some(proc_macro2::TokenTree::Group(g)) = iter2.next() {
-                                        if g.delimiter() == proc_macro2::Delimiter::Brace {
-                                            // Extract body and wrap in GoScheduler
-                                            let body: proc_macro2::TokenStream = g.stream();
-                                            return quote::quote! {
-                                                GoScheduler::new().submit(|| { #body });
-                                            };
-                                        } else if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
-                                            // Return type paren group
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        go_to_rust_fn(input) // fallback
                     }
                     "chan" => {
-                        // Channel literal: `chan T` or `chan T{n}`
-                        // Transpile to: `GoChannel::<T>::new()`
-                        let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();
-                        if trees.len() >= 2 {
-                            // Find the type after `chan`
-                            for tree in trees.iter().skip(1) {
-                                match tree {
-                                    proc_macro2::TokenTree::Ident(ty_ident) => {
-                                        let type_name = ty_ident.to_string();
-                                        let mapped_type = match type_name.as_str() {
-                                            "int" => quote::quote! { i32 },
-                                            "int8" => quote::quote! { i8 },
-                                            "int16" => quote::quote! { i16 },
-                                            "int32" => quote::quote! { i32 },
-                                            "int64" => quote::quote! { i64 },
-                                            "uint" => quote::quote! { u32 },
-                                            "uint8" => quote::quote! { u8 },
-                                            "uint16" => quote::quote! { u16 },
-                                            "uint32" => quote::quote! { u32 },
-                                            "uint64" => quote::quote! { u64 },
-                                            "uintptr" => quote::quote! { usize },
-                                            "byte" => quote::quote! { u8 },
-                                            "rune" => quote::quote! { char },
-                                            "float32" => quote::quote! { f32 },
-                                            "float64" => quote::quote! { f64 },
-                                            "bool" => quote::quote! { bool },
-                                            "string" => quote::quote! { String },
-                                            "error" => quote::quote! { Box<dyn std::error::Error> },
-                                            other => quote::quote! { #other },
-                                        };
-                                        return quote::quote! {
-                                            GoChannel::<#mapped_type>::new()
-                                        };
-                                    }
-                                    proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Bracket => {
-                                        // Slice type like `chan []int` → `GoChannel::<Vec<i32>>::new()`
-                                        let inner: TokenStream = g.stream();
-                                        let mapped_inner = match inner.to_string().as_str() {
-                                            "int" => quote::quote! { Vec<i32> },
-                                            "string" => quote::quote! { Vec<String> },
-                                            "bool" => quote::quote! { Vec<bool> },
-                                            _ => quote::quote! { Vec<#inner> },
-                                        };
-                                        return quote::quote! {
-                                            GoChannel::<#mapped_inner>::new()
-                                        };
-                                    }
-                                    _ => continue,
-                                }
-                            }
-                        }
-                        go_to_rust_fn(input) // fallback
+                        result.extend(go_to_rust_channel(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
                     }
                     "select" => {
-                        // Select statement: `select { case ... default: ... }`
-                        // Transpile to: `GoSelect::new().run()`
-                        go_to_rust_select(input)
+                        result.extend(go_to_rust_select(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
                     }
-                    _ => go_to_rust_fn(input),
+                    _ => {
+                        // Unknown top-level token — skip it
+                        i += 1;
+                    }
                 }
             }
-            _ => go_to_rust_fn(input),
-        },
-        None => proc_macro2::TokenStream::new(),
+            _ => {
+                i += 1;
+            }
+        }
     }
+    result
+}
+
+/// Extract a subtree from the token tree array starting at index `start`.
+/// Returns a new TokenStream containing all tokens from `start` until
+/// the end of that declaration.
+fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -> TokenStream {
+    let mut result = proc_macro2::TokenStream::new();
+    let mut depth: i32 = 0;
+    let mut collected = false;
+
+    for tree in &trees[start..] {
+        match tree {
+            proc_macro2::TokenTree::Ident(_) | proc_macro2::TokenTree::Literal(_) => {
+                if depth == 0 && !collected {
+                    collected = true;
+                }
+                if collected {
+                    result.extend([tree.clone()]);
+                }
+            }
+            proc_macro2::TokenTree::Group(g) => {
+                // Handle brace groups at depth 0
+                if depth == 0 && g.delimiter() == proc_macro2::Delimiter::Brace {
+                    collected = true;
+                    result.extend([proc_macro2::TokenTree::Group(g.clone())]);
+                    if !include_body {
+                        // For struct: return immediately
+                        return result;
+                    }
+                    // For func: continue collecting
+                    depth += 1;
+                    continue;
+                }
+                // For paren groups at depth 0 (func: receiver), keep as Group
+                // so syn::parenthesized! can extract its content for ReceiverFn::parse
+                if depth == 0 && g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                    collected = true;
+                    result.extend([proc_macro2::TokenTree::Group(g.clone())]);
+                    depth += 1;
+                    continue;
+                }
+                // For groups at depth > 0 for func:
+                // Keep param groups as Group so ReceiverFn::parse can use syn::parenthesized!
+                // Body: also keep as Group
+                if include_body {
+                    result.extend([proc_macro2::TokenTree::Group(g.clone())]);
+                } else {
+                    result.extend(g.stream().into_iter());
+                }
+                depth -= 1;
+                if depth == 0 && !include_body {
+                    return result;
+                }
+            }
+            proc_macro2::TokenTree::Punct(p) => {
+                if depth == 0 {
+                    match p.as_char() {
+                        '(' | '{' | '[' => depth += 1,
+                        ')' | '}' | ']' => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 && collected {
+                                return result;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if collected || depth > 0 {
+                    result.extend([proc_macro2::TokenTree::Punct(p.clone())]);
+                }
+            }
+        }
+    }
+
+    if !collected {
+        return proc_macro2::TokenStream::new();
+    }
+    result
+}
+
+/// Skip past a declaration starting at index `start`.
+/// Returns the index of the first token after the declaration.
+fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
+    let mut depth: i32 = 0;
+    for (i, tree) in trees[start..].iter().enumerate() {
+        match tree {
+            proc_macro2::TokenTree::Group(g) => match g.delimiter() {
+                proc_macro2::Delimiter::Brace => {
+                    // A Brace group at depth 0 means we've hit a new declaration.
+                    if depth == 0 {
+                        return start + i + 1;  // skip past this Group token
+                    }
+                    depth += 1;
+                }
+                proc_macro2::Delimiter::Parenthesis => {
+                    // A Parenthesis group at depth 0 is part of the current declaration
+                    // (like a receiver or param group). Don't return early.
+                    if depth == 0 {
+                        // Continue scanning — this is part of the current declaration
+                    } else {
+                        depth += 1;
+                    }
+                }
+                proc_macro2::Delimiter::Bracket => {
+                    if depth == 0 {
+                        return start + i + 1;  // new declaration (e.g., slice/map type)
+                    }
+                    depth += 1;
+                }
+                _ => {}
+            },
+            proc_macro2::TokenTree::Punct(p) => {
+                if depth == 0 {
+                    match p.as_char() {
+                        '(' | '{' | '[' => depth += 1,
+                        ')' | '}' | ']' => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                return start + 1 + i;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    start + 1
+}
+
+/// Transpile a Go channel literal: `chan T` or `chan T{n}`.
+fn go_to_rust_channel(input: TokenStream) -> TokenStream {
+    let trees: Vec<proc_macro2::TokenTree> = input.into_iter().collect();
+    if trees.len() >= 2 {
+        for tree in trees.iter().skip(1) {
+            match tree {
+                proc_macro2::TokenTree::Ident(ty_ident) => {
+                    let type_name = ty_ident.to_string();
+                    let mapped_type = match type_name.as_str() {
+                        "int" => quote::quote! { i32 },
+                        "int8" => quote::quote! { i8 },
+                        "int16" => quote::quote! { i16 },
+                        "int32" => quote::quote! { i32 },
+                        "int64" => quote::quote! { i64 },
+                        "uint" => quote::quote! { u32 },
+                        "uint8" => quote::quote! { u8 },
+                        "uint16" => quote::quote! { u16 },
+                        "uint32" => quote::quote! { u32 },
+                        "uint64" => quote::quote! { u64 },
+                        "uintptr" => quote::quote! { usize },
+                        "byte" => quote::quote! { u8 },
+                        "rune" => quote::quote! { char },
+                        "float32" => quote::quote! { f32 },
+                        "float64" => quote::quote! { f64 },
+                        "bool" => quote::quote! { bool },
+                        "string" => quote::quote! { String },
+                        "error" => quote::quote! { Box<dyn std::error::Error> },
+                        other => quote::quote! { #other },
+                    };
+                    return quote::quote! {
+                        GoChannel::<#mapped_type>::new()
+                    };
+                }
+                proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Bracket => {
+                    let inner: TokenStream = g.stream();
+                    let mapped_inner = match inner.to_string().as_str() {
+                        "int" => quote::quote! { Vec<i32> },
+                        "string" => quote::quote! { Vec<String> },
+                        "bool" => quote::quote! { Vec<bool> },
+                        _ => quote::quote! { Vec<#inner> },
+                    };
+                    return quote::quote! {
+                        GoChannel::<#mapped_inner>::new()
+                    };
+                }
+                _ => continue,
+            }
+        }
+    }
+    quote! { GoChannel::<i32>::new() }
 }
 
 /// Short-form verify: `#[go_verify({ expected_rust_tokens })]`
@@ -417,4 +522,56 @@ fn strip_literal_suffix(s: &str) -> String {
         .map(|i| i + 1)
         .unwrap_or(len);
     s[..suffix_start].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transpiler::params::GoStruct;
+    use proc_macro2::TokenStream;
+    use quote::quote;
+
+    #[test]
+    fn test_struct_transpile() {
+        let input: TokenStream = quote! {
+            struct Bar {
+                value int
+            }
+        };
+        let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();
+        for (i, t) in trees.iter().enumerate() {
+            eprintln!("{}: {:?}", i, t);
+        }
+        let result = transpile_go(input.clone());
+        eprintln!("Struct result: {}", result);
+        // Debug: parse with GoStruct directly
+        match syn::parse2::<GoStruct>(input.clone()) {
+            Ok(gs) => {
+                eprintln!("GoStruct: ident={}, fields={}", gs.ident, gs.fields.len());
+                for f in &gs.fields {
+                    eprintln!("  field: {} -> {}", f.name, quote! { #(&f.ty) }.to_string());
+                }
+                // Test go_to_rust_struct directly
+                let rust_output = crate::transpiler::free_fn::go_to_rust_struct(input.clone());
+                eprintln!("go_to_rust_struct output: {}", rust_output);
+
+            }
+            Err(e) => eprintln!("GoStruct parse error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_struct_plus_receiver() {
+        let input: TokenStream = quote! {
+            struct Bar {
+                value int
+            }
+            func (b *Bar) add(z int) int {
+                b.value = b.value + z
+                return b.value
+            }
+        };
+        let result = transpile_go(input.clone());
+        println!("Struct+receiver result: {}", result);
+    }
 }

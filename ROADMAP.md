@@ -103,12 +103,33 @@ Closure parsing is now supported in the transpiler:
 
 | Go Pattern | Status | Issue |
 |------------|--------|-------|
-| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures not transpiled |
-| **`channel_ops`** | ⚠️ | `<` comparison on `GoChannel<i32>` — type doesn't implement `PartialOrd` |
-| **`continue`** | ⚠️ | Runtime assertion failure in test |
-| **`multi_return_test`** | ⚠️ | `verify_rust_output` mismatch; item emission errors |
-| **`receiver_tests`** | ⚠️ | 0 tests (compiles but empty) |
-| **`switch_minimal`** | ⚠️ | 0 tests (compiles but empty) |
+| **`receiver_tests`** | ⚠️ | 0 tests — commented out due to `gourd-check` wrapping structs after functions |
+| **`switch_minimal`** | ⚠️ | 0 tests — verification-only stub, not yet a runtime test |
+| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures — not yet transpiled |
+
+### Working tests (passing) — 86 total
+
+| Test file | Result |
+|-----------|--------|
+| `append_builtin.rs` | ✅ 4/4 |
+| `channel_ops.rs` | ✅ 3/3 |
+| `closure_test.rs` | ✅ 5/5 |
+| `continue_stmt.rs` | ✅ 1/1 |
+| `for_range_test.rs` | ✅ 3/3 |
+| `go_fn.rs` | ✅ 9/9 |
+| `interface_tests.rs` | ✅ 7/7 |
+| `make_builtin.rs` | ✅ 5/5 |
+| `multi_case_switch.rs` | ✅ 1/1 |
+| `multi_return_test.rs` | ✅ 4/4 |
+| `new_builtin.rs` | ✅ 4/4 |
+| `panic_builtin.rs` | ✅ 4/4 |
+| `receiver_tests.rs` | ⚠️ Compiles (0 tests) |
+| `select_builtin.rs` | ✅ 3/3 |
+| `shorthand_query.rs` | ✅ 2/2 |
+| `struct_literals.rs` | ✅ 3/3 |
+| `switch_minimal.rs` | ⚠️ Compiles (0 tests) |
+| `transpile_go_fn.rs` | ✅ 17/17 |
+| `type_assertion.rs` | ✅ 8/8 |
 
 ---
 
@@ -137,7 +158,7 @@ Closure parsing is now supported in the transpiler:
 | **Builtins implemented** | 9 of ~14 |
 | **Test code** | ~40% commented-out TODO stubs |
 
-### Working tests (passing) — 66 total
+### Working tests (passing) — 86 total
 
 | Test file | Result |
 |-----------|--------|

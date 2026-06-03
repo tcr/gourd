@@ -165,6 +165,48 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                 return Ok(());
             }
 
+            // Check for slice literal `[]T{...}` in short declarations
+            if input.peek(syn::token::Bracket) {
+                // This is a Go slice literal like `[]int{1, 2, 3}`
+                // Extract elements from the brace-delimited group
+                let elem_fork = input.fork();
+                // Skip past `[]` and type
+                let _ts: proc_macro2::TokenTree = input.parse()?; // [
+                while !input.is_empty() && !input.peek(syn::token::Bracket) && !input.peek(syn::token::Brace) {
+                    let _ = input.parse::<proc_macro2::TokenTree>()?;
+                }
+                if !input.is_empty() && input.peek(syn::token::Bracket) {
+                    let _ts: proc_macro2::TokenTree = input.parse()?;
+                }
+                while !input.is_empty() && !input.peek(syn::token::Brace) {
+                    let _ = input.parse::<proc_macro2::TokenTree>()?;
+                }
+                if input.peek(syn::token::Brace) {
+                    let m_content;
+                    let _ = syn::braced!(m_content in input);
+                    let mut elems = Vec::new();
+                    while !m_content.is_empty() {
+                        if let Ok(expr) = m_content.parse::<Expr>() {
+                            elems.push(expr);
+                            if m_content.peek(syn::token::Comma) {
+                                let _ = m_content.parse::<syn::token::Comma>();
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    let rust_elems: Vec<_> = elems.iter().map(|e| go_to_rust(e)).collect();
+                    let slice_rust: TokenStream = parse_quote! { vec![ #(#rust_elems),* ] };
+                    stmts.push(GoStmt::GoLocal(ident, slice_rust));
+                    if input.peek(token::Semi) {
+                        let _semi: token::Semi = input.parse()?;
+                    }
+                    return Ok(());
+                }
+            }
+
             let val: Expr = input.parse()?;
             let val_rust = go_to_rust(&val);
             stmts.push(GoStmt::GoLocal(ident, val_rust));

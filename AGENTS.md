@@ -27,21 +27,21 @@ The transpiler is split across these files under `gourd-codegen/src/transpiler/`
 | `funcs/mod.rs` | Receiver (impl block) function transpilation |
 | `expr.rs` | Expression-level transpilation entry point |
 | `expr/dispatch.rs` | `go_to_rust()` — routes `syn::Expr` variants to handlers |
-| `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim` |
+| `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim`, slice slicing (`it[1:]`, `it[1:3]`) |
 | `expr/operators.rs` | `Binary`, `Unary`, `Cast`, `Assign`, `Break` |
 | `expr/calls.rs` | `Call`, `MethodCall`, `Field`, `Index`, `Macro` |
 | `expr/closures.rs` | Go anonymous functions (partial; closure body if statements transpiled, builtins not yet) |
 | `expr/control_flow.rs` | `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`, `While`, `Range`, `If`, `Block` |
 | `expr/structs.rs` | Struct literal transpilation |
-| `stmts.rs` | Block parsing (`parse_go_block`, `parse_go_special_stmt`) |
+| `stmts.rs` | Block parsing (`parse_go_block`, `parse_go_special_stmt`, `parse_body_from_group`) |
 | `stmt_to_rust.rs` | `go_stmt_to_rust()` — bridges GoStmt AST to Rust tokens |
 | `slice_map.rs` | Map/slice literal parsing (`ElemParser`, `MapEntryParser`) |
 | `switch.rs` | Switch case parsing |
 | `switch_v2.rs` | Switch statement transpilation |
-| `base_stmts.rs` | Fallback statement parser |
+| `base_stmts.rs` | Fallback statement parser (slice literals in short vars) |
 | `return_stmts.rs` | Return parsing (multi-return, make, append, type assertion) |
 | `control_flow.rs` | If, while, for parsing |
-| `receiver.rs` | Receiver replacement (`replace_receiver`) |
+| `receiver.rs` | Receiver parsing (pointer/value receiver detection) |
 | `parsing.rs` | Re-exports from modular sub-modules |
 | `validate/mod.rs` | Validation helpers |
 
@@ -54,7 +54,7 @@ The CLI tool (`gourd/src/main.rs`) supports:
 
 ## Example of how it works
 
-1. User writes: `go! { fn hello() string { String::from("hello") } }`
+1. User writes: `go! { func hello() string { String::from("hello") } }`
 2. The proc-macro `go!` inspects tokens (struct, func, fn) to dispatch to the correct handler
 3. The transpiler converts Go type names, parameters, bounds, and bodies to Rust
 4. Emits pure `quote! { fn hello() -> String { String::from("hello") } }`.
@@ -71,7 +71,7 @@ consumer's crate. See [ROADMAP.md](ROADMAP.md) for the full list of missing feat
 ## Running
 
 ```bash
-cargo test           # run all tests
+cargo test           # run all tests (86 passing)
 cargo test --lib     # unit tests only
 cargo expand -p gourd # see expanded Go → Rust transpilation.
 gourd transpile "func hello() int { return 42 }"  # transpile CLI tool

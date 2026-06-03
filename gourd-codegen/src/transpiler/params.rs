@@ -2,11 +2,13 @@
 
 pub(crate) use super::ast::{GoFn, GoFnInputs, GoFnOutput, GoInterface, GoInterfaceMethod, GoParam, GoStruct, GoStructField};
 use proc_macro2::TokenTree;
+use quote::quote;
 use syn::ext::IdentExt;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token;
 use syn::{Ident, Token};
+use super::types::map_go_type_str;
 
 impl Parse for GoFnInputs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -295,28 +297,60 @@ impl Parse for GoStruct {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let _struct: Ident = input.call(Ident::parse_any)?;
         let ident: Ident = input.parse()?;
-        let content;
-        let _brace = syn::braced!(content in input);
+
+        // The struct body may be a brace-group (from Go source tokenization)
+        // or an actual brace punctuation (from Rust tokenization).
+        // Handle both cases.
         let mut fields = Vec::new();
-        while !content.is_empty() {
-            let name: Ident = content.parse()?;
-            let ty: syn::Type = content.parse()?;
-            fields.push(GoStructField { name, ty });
-            loop {
-                let f = content.fork();
-                match f.parse::<proc_macro2::TokenTree>() {
-                    Ok(TokenTree::Punct(p)) if p.as_char() == ',' => {
-                        let _comma: token::Comma = content.parse()?;
-                        break;
+        if input.peek(syn::token::Brace) {
+            // Actual brace punctuation
+            let content;
+            syn::braced!(content in input);
+            while !content.is_empty() {
+                let name: Ident = content.parse()?;
+                let ty: syn::Type = content.parse()?;
+                fields.push(GoStructField { name, ty });
+                loop {
+                    let f = content.fork();
+                    match f.parse::<proc_macro2::TokenTree>() {
+                        Ok(TokenTree::Punct(p)) if p.as_char() == ',' => {
+                            let _comma: token::Comma = content.parse()?;
+                            break;
+                        }
+                        Ok(TokenTree::Punct(_)) => {
+                            content.parse::<proc_macro2::TokenTree>()?;
+                        }
+                        Ok(_) => break,
+                        Err(_) => break,
                     }
-                    Ok(TokenTree::Punct(_)) => {
-                        content.parse::<proc_macro2::TokenTree>()?;
+                }
+            }
+        } else {
+            // The cursor is already inside the brace group content.
+            // Use `step` to get the TokenStream from inside.
+            let step_result: Result<proc_macro2::TokenStream, _> =
+                input.step(|cursor| {
+                    Ok((cursor.token_stream(), *cursor))
+                });
+            if let Ok(fork_ts) = step_result {
+                let trees: Vec<proc_macro2::TokenTree> = fork_ts.into_iter().collect();
+                let mut i = 0;
+                while i < trees.len() - 1 {
+                    if let proc_macro2::TokenTree::Ident(name_id) = &trees[i] {
+                        let name = Ident::new(&name_id.to_string(), name_id.span());
+                        if let proc_macro2::TokenTree::Ident(ty_id) = &trees[i + 1] {
+                            let type_name = ty_id.to_string();
+                            let ty = map_go_type_str(&type_name);
+                            fields.push(GoStructField { name, ty });
+                            i += 2;
+                            continue;
+                        }
                     }
-                    Ok(_) => break,
-                    Err(_) => break,
+                    i += 1;
                 }
             }
         }
+
         Ok(GoStruct { ident, fields })
     }
 }

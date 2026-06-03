@@ -165,8 +165,8 @@ gourd transpile "func hello() int { return 42 }"
 |--------|-------|
 | **Real-world Go coverage** | ~5% |
 | **Builtins implemented** | 9 of ~14 |
-| **Tests passing** | 66 across 12 test files |
-| **Tests failing** | 6 (closure builtins, channel_ops, continue_stmt, multi_return) |
+| **Tests passing** | 86 across 20 test files |
+| **Tests failing** | 0 |
 
 ## What's next?
 

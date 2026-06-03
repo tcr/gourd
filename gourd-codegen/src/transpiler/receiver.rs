@@ -7,60 +7,53 @@ use syn::ext::IdentExt;
 use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
 use syn::token;
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::{Expr, Ident};
 
 /// Receiver parsing: `(name Type)` or `(name *Type)` where * means pointer receiver.
-///
-/// Implemented as a proper `syn::parse` impl so it works with nested parsing.
 pub(crate) struct Receiver {
     pub(crate) name: Ident,
     pub(crate) _ty: syn::Type,
-    pub(crate) pointer: bool,  // true for `*Foo` → `&mut self`
+    pub(crate) pointer: bool,
 }
 
 impl Parse for Receiver {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // First token: optional `*` followed by identifier (name) or just identifier.
+        // Peek at the first token by forking
         let fork = input.fork();
-        let (is_ptr, name) = if fork.peek(syn::token::Star) {
-            let _star: syn::token::Star = fork.parse()?;
-            let name: Ident = fork.parse()?;
-            (true, name)
-        } else {
-            let name: Ident = fork.parse()?;
-            (false, name)
-        };
-
-        // Check if the token after name is a type (not `)` or end of input)
-        // If it's a type, consume it and the name as a separate identifier.
-        // If not, the name IS the type.
-        if input.peek(syn::token::Star) {
-            // `*Type` pattern (single token with deref prefix)
-            let _: syn::token::Star = input.parse()?;
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: true })
-        } else if input.peek(syn::Ident) {
-            // `name Type` pattern — the first ident was the name, second is type
-            // Already consumed name from input via fork;
-            // Consume the type from the real input
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver { name, _ty: ty, pointer: is_ptr })
-        } else if is_ptr {
-            // Just `*Type` — use a default name
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver {
-                name: Ident::new("recv", proc_macro2::Span::call_site()),
-                _ty: ty,
-                pointer: true,
-            })
-        } else {
-            // Single identifier — that's the type (receiver name default)
-            let ty = input.parse::<syn::Type>()?;
-            Ok(Receiver {
-                name: Ident::new("recv", proc_macro2::Span::call_site()),
-                _ty: ty,
-                pointer: is_ptr,
-            })
+        
+        // First, try to parse a name (identifier)
+        let name: Ident = fork.parse()?;
+        
+        // After the name, check if the next token is * (pointer) or a type
+        let fork = input.fork();
+        // Skip the name (which we already parsed)
+        let _ = fork.parse::<Ident>();
+        // Now fork is at the next token
+        // Try to parse a TokenTree
+        let next_tt: proc_macro2::TokenTree = fork.parse()?;
+        
+        match next_tt {
+            proc_macro2::TokenTree::Punct(p) if p.as_char() == '*' => {
+                // `name *Type` pattern — pointer receiver
+                // Re-parse from real input: the name was already consumed by the fork check
+                // but not by the real input, so we need to re-parse
+                // Actually, the name was parsed from fork, not from real input.
+                // Real input is still at name.
+                // So we need: consume name, then *, then type
+                let _: Ident = input.parse()?; // consume name from real input
+                let _: proc_macro2::Punct = input.parse()?; // consume *
+                let ty = input.parse::<syn::Type>()?;
+                Ok(Receiver { name, _ty: ty, pointer: true })
+            }
+            _ => {
+                // `name Type` pattern — value receiver
+                // Fork already parsed name, so real input is at name
+                let _: Ident = input.parse()?; // consume name from real input
+                let ty = input.parse::<syn::Type>()?;
+                Ok(Receiver { name, _ty: ty, pointer: false })
+            }
         }
     }
 }
@@ -71,7 +64,6 @@ pub(crate) struct ReceiverFn {
     pub(crate) ident: Ident,
     pub(crate) inputs: GoFnInputs,
     pub(crate) output: Option<GoFnOutput>,
-    /// Parsed body expressions (converted to Rust via `go_to_rust`).
     pub(crate) stmts: Vec<Expr>,
 }
 
@@ -79,20 +71,34 @@ impl Parse for ReceiverFn {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let _fn_kw: Ident = input.call(Ident::parse_any)?;
 
-        // Parse `(receiver)` — this is a Parenthesis Group
-        let recv_paren;
-        let _paren = syn::parenthesized!(recv_paren in input);
-
-        // Parse receiver from the parenthesized tokens
-        let recv = syn::parse2(recv_paren.parse::<proc_macro2::TokenStream>()?)?;
+        // Parse receiver group — a Group token with Parenthesis delimiter
+        let recv_tt: proc_macro2::TokenTree = input.parse()?;
+        let recv: Receiver = match recv_tt {
+            proc_macro2::TokenTree::Group(g) => {
+                if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                    syn::parse2(g.stream())?
+                } else {
+                    return Err(input.error("expected receiver group `(recv Type)`"));
+                }
+            }
+            _ => return Err(input.error("expected receiver group `(recv Type)`")),
+        };
 
         // Parse function name
         let ident: Ident = input.parse()?;
 
-        // Parse parameters (still in parenthesized group)
-        let param_paren;
-        let _paren2 = syn::parenthesized!(param_paren in input);
-        let inputs: GoFnInputs = param_paren.parse()?;
+        // Parse parameter group — a Group token with Parenthesis delimiter
+        let param_tt: proc_macro2::TokenTree = input.parse()?;
+        let inputs: GoFnInputs = match param_tt {
+            proc_macro2::TokenTree::Group(g) => {
+                if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                    syn::parse2(g.stream())?
+                } else {
+                    return Err(input.error("expected parameter group `(params)`"));
+                }
+            }
+            _ => return Err(input.error("expected parameter group `(params)`")),
+        };
 
         // Parse optional return type
         let output = if !input.is_empty() && !input.peek(syn::token::Brace) {
@@ -104,29 +110,47 @@ impl Parse for ReceiverFn {
             None
         };
 
-        // Parse body: parse expressions one at a time from the brace content,
-        // optionally consuming trailing semicolons.
-        let brace_content;
-        let _brace = syn::braced!(brace_content in input);
+        // Parse body — a Group token with Brace delimiter
+        let body_tt: proc_macro2::TokenTree = input.parse()?;
+        let body: proc_macro2::TokenStream = match body_tt {
+            proc_macro2::TokenTree::Group(g) => {
+                if g.delimiter() == proc_macro2::Delimiter::Brace {
+                    g.stream()
+                } else {
+                    return Err(input.error("expected body `{`"));
+                }
+            }
+            _ => return Err(input.error("expected body `{`")),
+        };
 
+        // Parse body expressions from the Group content
         let mut stmts = Vec::new();
-        while !brace_content.is_empty() {
-            // Speculatively try to parse a syn::Expr (covers field, binary,
-            // unary, call, paren, let ":=", assign, return, etc.)
-            let fork = brace_content.fork();
-            match fork.parse::<Expr>() {
-                Ok(expr) => {
-                    brace_content.advance_to(&fork);
-                    // Consume optional semicolon
-                    if brace_content.peek(token::Semi) {
-                        let _semi: token::Semi = brace_content.parse()?;
-                    }
-                    stmts.push(expr);
-                }
-                Err(_) => {
-                    // Can't parse anything — error
-                    return Err(brace_content.error("expected Go statement (expression or local declaration)"));
-                }
+        let body_str = body.to_string();
+        
+        // The body tokens are: `b.value = b.value + z return b.value`
+        // No semicolons between statements. We need to split by detecting
+        // statement boundaries: after assignments (= without chaining) and before 'return'
+        let parts: Vec<&str> = if body_str.contains("return") {
+            // Split into two parts: before 'return' and from 'return' onwards
+            if let Some(pos) = body_str.find("return") {
+                let before_return = body_str[..pos].trim();
+                let from_return = body_str[pos..].trim();
+                let mut p = Vec::new();
+                if !before_return.is_empty() { p.push(before_return); }
+                p.push(from_return);
+                p
+            } else {
+                vec![body_str.trim()]
+            }
+        } else {
+            vec![body_str.trim()]
+        };
+        
+        for part in &parts {
+            let trimmed = part.trim();
+            if trimmed.is_empty() { continue; }
+            if let Ok(expr) = syn::parse_str::<Expr>(trimmed) {
+                stmts.push(expr);
             }
         }
 

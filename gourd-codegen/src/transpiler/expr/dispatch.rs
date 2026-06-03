@@ -39,6 +39,12 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Cast(e)           => super::operators::transpile_cast(e),
         Expr::Assign(e)         => super::operators::transpile_assign(e),
         Expr::Break(e)          => super::operators::transpile_break(e),
+        Expr::Reference(e)      => {
+            // Rust `&expr` — Go `&x` is address-of, but in the transpiled
+            // output `&x` becomes a reference in Rust, which is fine.
+            let inner = go_to_rust(&e.expr);
+            quote! { &#inner }
+        }
         Expr::Return(e)         => super::control_flow::transpile_return(e),
         Expr::Macro(e)          => super::calls::go_to_rust_macro(e),
         Expr::Verbatim(tokens)  => super::literals::transpile_verbatim(tokens),

@@ -2,12 +2,23 @@
 
 use super::ast::{GoBlock, GoFor, GoForInit, GoIf, GoStmt, GoWhile};
 use super::base_stmts::parse_base_stmt;
+use syn::ext::IdentExt;
 use syn::parse::ParseStream;
 use syn::{Expr};
 
 /// Parse `while cond { body }`.
 pub(crate) fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
-    let _: syn::token::While = input.parse()?;
+    // Accept both Rust `while` token and Go `while` identifier
+    if input.peek(syn::token::While) {
+        input.parse::<syn::token::While>()?;
+    } else if input.peek(syn::Ident) {
+        let kw = input.call(syn::Ident::parse_any)?;
+        if kw.to_string() == "while" {
+            // matched
+        } else {
+            return Err(syn::Error::new(kw.span(), "expected 'while'"));
+        }
+    }
     let cond = input.parse::<Expr>()?;
 
     let body_content;
@@ -94,7 +105,18 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
 
 /// Parse `if cond { body } else { ... }`.
 pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
-    input.parse::<syn::token::If>()?;
+    // Accept both `if` keyword (Rust) and `if` identifier (Go)
+    use syn::ext::IdentExt;
+    if input.peek(syn::token::If) {
+        input.parse::<syn::token::If>()?;
+    } else if input.peek(syn::Ident) {
+        let fork = input.fork();
+        if let Ok(kw) = fork.parse::<syn::Ident>() {
+            if kw.to_string() == "if" {
+                input.parse::<syn::Ident>()?;
+            }
+        }
+    }
 
     // Parse the condition expression. Expr::parse stops at `{` automatically
     // since a brace group is not a valid continuation of most expressions.

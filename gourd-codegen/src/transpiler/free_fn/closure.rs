@@ -185,7 +185,7 @@ fn parse_closure_params(trees: &[TokenTree]) -> Vec<(proc_macro2::Ident, TokenSt
                                 if is_go_type_name(&elem_name) {
                                     let rust_ty = map_go_type_str(&elem_name);
                                     // Convert []T to &[T] (Go slice -> Rust slice reference)
-                                    let slice_ty: TokenStream = quote! { &#rust_ty };
+                                    let slice_ty: TokenStream = quote! { &[ #rust_ty ] };
                                     params.push((id.clone(), slice_ty));
                                     i += 2; // skip bracket group and element type
                                     continue;

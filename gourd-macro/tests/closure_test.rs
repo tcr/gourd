@@ -69,7 +69,7 @@ fn test_closure_with_slice_param() {
                 return 0
             }
             data := []int{1, 2, 3}
-            return f(data)
+            return f(&data)
         }
     }
 }

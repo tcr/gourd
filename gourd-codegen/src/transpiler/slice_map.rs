@@ -133,10 +133,14 @@ impl Parse for MapEntryParser {
         while !input.is_empty() {
             // Parse key
             let key: Expr = input.parse()?;
-            // Skip comma
+            // Skip comma separator between keys (Go allows `key: val,` or `key: val`)
             if input.peek(syn::token::Comma) {
                 let _ = input.parse::<syn::token::Comma>();
+                // After comma, the next entry starts
+                continue;
             }
+            // Parse the `:` separator between key and value
+            let _colon: syn::token::Colon = input.parse()?;
             // Parse value
             let value: Expr = input.parse()?;
             // Skip comma after value

@@ -255,10 +255,22 @@ impl Parse for GoStmt {
             // Not a closure — fall through to try parsing as regular expression
         }
 
-        // 2. Check for if statement
+        // 2. Check for if statement (accept both Rust keyword and Go identifier)
         if input.peek(syn::token::If) {
+            let _if: syn::token::If = input.parse()?;
             let result: GoIf = input.parse()?;
             return Ok(GoStmt::If(result));
+        }
+        if input.peek(syn::Ident) {
+            let fork = input.fork();
+            if let Ok(kw) = fork.parse::<syn::Ident>() {
+                if kw.to_string() == "if" {
+                    // Consume the `if` identifier first (Go identifier)
+                    let _if: syn::Ident = input.parse()?;
+                    let result: GoIf = input.parse()?;
+                    return Ok(GoStmt::If(result));
+                }
+            }
         }
 
         // 3. Check for while/for/switch/select/continue
