@@ -37,9 +37,13 @@ pub fn go(input: TokenStream) -> TokenStream {
 ///
 /// `#[verify_rust_output({ fn foo() -> i32 { 42 } })]` — brace group is the expected output.
 ///
-/// ## Longer form
+/// ## Longer form (⚠️ unused — to be removed)
 ///
 /// `#[verify_rust_output(verify = { fn foo() -> i32 { 42 } })]` — explicit `verify =` key.
+///
+/// This form is **basically unused** in the codebase. It exists for symmetry
+/// but serves no practical purpose over the short form. Plan to remove it
+/// once it is no longer referenced anywhere.
 ///
 /// **Semantic validation**: the Go input is validated against `go build`
 /// and the transpiled Rust against `cargo check` before comparison.
@@ -68,21 +72,21 @@ pub fn go(input: TokenStream) -> TokenStream {
 ///     }
 /// }
 ///
-/// // Longer form (same effect)
-/// #[verify_rust_output(verify = {
-///     fn go_abs(n: i32) -> i32 {
-///         let mut ret = n;
-///         if n < 0 { ret = -n; }
-///         ret
-///     }
-/// })]
-/// go! {
-///     func goAbs(n int) int {
-///         ret := n
-///         if n < 0 { ret = -n }
-///         return ret
-///     }
-/// }
+/// // Longer form — unused, to be removed
+/// // #[verify_rust_output(verify = {
+/// //     fn go_abs(n: i32) -> i32 {
+/// //         let mut ret = n;
+/// //         if n < 0 { ret = -n; }
+/// //         ret
+/// //     }
+/// // })]
+/// // go! {
+/// //     func goAbs(n int) int {
+/// //         ret := n
+/// //         if n < 0 { ret = -n }
+/// //         return ret
+/// //     }
+/// // }
 /// ```
 #[proc_macro_attribute]
 pub fn verify_rust_output(attr: TokenStream, input: TokenStream) -> TokenStream {

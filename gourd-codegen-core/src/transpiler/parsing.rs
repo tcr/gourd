@@ -559,11 +559,6 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
 /// Try to parse a Go-specific statement from the input.
 /// Returns `true` if a statement was parsed (consuming input), `false` to fall back.
 pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
-    // Debug: show first token tree in input via fork
-    if !input.is_empty() {
-        let fork = input.fork();
-        let _first = fork.parse::<proc_macro2::TokenTree>().ok();
-    }
     // 1. Check for Go slice literal: []...{...}
     if input.peek(syn::token::Bracket) {
         if let Ok(()) = parse_go_slice_literal(input, stmts) {
@@ -1205,10 +1200,8 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             quote! { if #cond #then_block #else_block }
         }
         GoStmt::Expr(expr) => {
-                eprintln!("DEBUG go_stmt_to_rust: Expr variant = {:?}", std::mem::discriminant(expr));
-                eprintln!("DEBUG go_stmt_to_rust: Expr tokens = {}", quote!{#expr}.to_string());
-                go_to_rust(expr)
-            }
+            go_to_rust(expr)
+        }
         GoStmt::GoChannelSend(ch, val) => {
             let ch_rust = go_to_rust(ch);
             let val_rust = go_to_rust(val);

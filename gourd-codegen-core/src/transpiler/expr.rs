@@ -17,6 +17,7 @@ pub mod control_flow;
 pub mod dispatch;
 pub mod literals;
 pub mod operators;
+pub mod structs;
 
 // Re-export the public entry points
 pub use dispatch::{go_to_rust, go_to_rust_pattern};

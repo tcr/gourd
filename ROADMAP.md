@@ -66,7 +66,7 @@ The following Go constructs are fully transpiled and tested:
 |----|------|-------|
 | `len(s)` | `s.len() as i32` | |
 | `cap(s)` | `s.len() as i32` | |
-| `string(bytes)` | `std::str::from_utf8(&bytes).unwrap_or("").to_string()` | `[]byte` → `String` |
+| `string(bytes)` | `string(bytes)` (imported from prelude) | `[]byte` → `String`; resolves via prelude import, not inline expansion |
 | `x.(T)` | `x as T` (with type-specific coercion) | Type assertion |
 | `return a, b` | `return (a, b)` | Multi-return |
 | `x := y` | `let x = y` | Short declaration |
@@ -88,6 +88,7 @@ The following Go constructs are fully transpiled and tested:
 | `[]int{1, 2, 3}` | `vec![1, 2, 3]` | |
 | `map[string]int{"a": 1}` | `HashMap::new(); m.insert("a", 1)` | |
 | `m[key]`, `m.get(key)` | `m[&key]`, `m.get(&key)` | Reference for map access |
+| `Point{x: 1, y: 2}` | `Point { x: 1, y: 2 }` | Struct literals (named fields only) |
 
 ### Concurrency (crossbeam-backed)
 
@@ -99,6 +100,26 @@ The following Go constructs are fully transpiled and tested:
 | `ch <- value` | `ch.send(value)` | Send to channel |
 | `return <-ch` | `return ch.recv().unwrap()` | Receive from channel |
 | `select { case ... }` | `GoSelect::<T>::new().run()` | Channel select with default/timeout |
+
+---
+
+## `cargo test` — Verification Contract
+
+When `gourd-check` is invoked as part of `cargo test` at the workspace root, the following contract must be maintained:
+
+1. **Scoped verification**: `gourd-check` only scans `gourd/`, `gourd-codegen/`, and `gourd-codegen-core/` crates. No other packages (workspace members or dependencies) are included.
+2. **Full coverage required**: Every `go! { ... }` macro form inside those scanned crates must have a corresponding `#[verify_rust_output({ ... })]` attribute. If a `go!` block lacks this attribute, `gourd-check` reports a test failure.
+
+This ensures:
+- Every Go construct transpiled through `go!` has a compile-time assertion verifying the output.
+- No regression is possible — removing or changing `#[verify_rust_output]` coverage will cause `cargo test` to fail.
+- New `go!` blocks cannot be committed without verification.
+
+### Implementation approach
+
+- `gourd-check` restricts file discovery to the three crates above (by path or workspace membership).
+- After scanning for `go! { ... }` blocks, the validator checks each one for a `#[verify_rust_output]` attribute preceding it.
+- Missing attributes are reported as test failures with file:line locations.
 
 ---
 
@@ -139,7 +160,6 @@ These Go constructs are **blocked** via `compile_error!` at compile time. They a
 | Category | Go Syntax | Rust Equivalent | Complexity |
 |----------|-----------|-----------------|------------|
 | **Closures / Anonymous Functions** | `func() { body }` | `|| { body }` or a named `fn` | Medium |
-| **Struct Literals** | `Point{x: 1, y: 2}` | `Point { x: 1, y: 2 }` | Medium |
 | **Built-in: `make`** | `make(chan int, 10)` | `GoChannel::<i32>::with_capacity(10)` | Low |
 | **Built-in: `new`** | `new(Foo)` | `Foo::default()` | Low |
 | **Built-in: `append`** | `append(slice, 1, 2)` | `slice.extend_from_slice(&[1, 2])` | Medium |
