@@ -2,6 +2,38 @@
 
 use syn::Token;
 
+/// Map a Go type string (e.g., "int", "string", "rune") to a Rust type string.
+/// Used for parsing `make()` call arguments where syn can't parse Go types.
+pub(crate) fn map_go_type_str(go_type: &str) -> syn::Type {
+    let rust_type = match go_type.trim() {
+        "int" => "i32",
+        "int8" => "i8",
+        "int16" => "i16",
+        "int32" => "i32",
+        "int64" => "i64",
+        "uint" => "u32",
+        "uint8" => "u8",
+        "uint16" => "u16",
+        "uint32" => "u32",
+        "uint64" => "u64",
+        "uintptr" => "usize",
+        "byte" => "u8",
+        "rune" => "char",
+        "float32" => "f32",
+        "float64" => "f64",
+        "string" => "String",
+        "bool" => "bool",
+        "error" => "Box<dyn std::error::Error>",
+        _ => "unknown",
+    };
+    syn::parse_str::<syn::Type>(rust_type).unwrap_or_else(|_| {
+        syn::Type::Path(syn::TypePath {
+            path: syn::Path::from(syn::Ident::new(rust_type, proc_macro2::Span::call_site())),
+            qself: None,
+        })
+    })
+}
+
 /// Map a single Go type identifier to its Rust equivalent.
 /// Returns a `syn::Type` so that generic parameters can be recursed into.
 pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
@@ -64,6 +96,40 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                                 path: chan_path,
                                 qself: None,
                             });
+                        }
+                    }
+                }
+                if first_name == "__go_map" {
+                    // Extract key and value types from `__go_map<K, V>`
+                    let seg = &type_path.path.segments[0];
+                    if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                        let keys: Vec<_> = args.args.iter().collect();
+                        if keys.len() >= 2 {
+                            if let syn::GenericArgument::Type(key_ty) = &keys[0] {
+                                if let syn::GenericArgument::Type(val_ty) = &keys[1] {
+                                    let mapped_key = map_go_types(key_ty);
+                                    let mapped_val = map_go_types(val_ty);
+                                    // Build HashMap<K, V>
+                                    let mut map_path = syn::Path::from(syn::Ident::new("HashMap", proc_macro2::Span::call_site()));
+                                    map_path.segments.clear();
+                                    map_path.segments.push(syn::PathSegment {
+                                        ident: syn::Ident::new("HashMap", proc_macro2::Span::call_site()),
+                                        arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                            colon2_token: None,
+                                            lt_token: Token![<](proc_macro2::Span::call_site()),
+                                            args: syn::punctuated::Punctuated::from_iter([
+                                                syn::GenericArgument::Type(mapped_key),
+                                                syn::GenericArgument::Type(mapped_val),
+                                            ]),
+                                            gt_token: Token![>](proc_macro2::Span::call_site()),
+                                        }),
+                                    });
+                                    return syn::Type::Path(syn::TypePath {
+                                        path: map_path,
+                                        qself: None,
+                                    });
+                                }
+                            }
                         }
                     }
                 }

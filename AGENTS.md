@@ -101,7 +101,7 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 
 ### Writing correct `#[verify_rust_output]` attributes
 
-- **Function names**: The transpiler converts Go names to Rust snake_case via `to_snake_case`. Handle trailing digits: `goShorthand2` → `go_shorthand_2`, `goAdd` → `go_add`, `isEven` → `is_even`.
+- **Function names**: Go names are **preserved as camelCase** — no conversion to snake_case. The transpiler emits the Go identifier directly (e.g., `goShorthand2`, `goAdd`, `isEven`). Rust's `clippy` snake_convention warnings are suppressed with `#[allow(non_snake_case)]` so camelCase names compile without warnings.
 - **Return statements**: The transpiler always adds explicit `return` before expressions. Expected: `{ return a + b }`, not `{ a + b }`.
 - **Method calls on string/slice**: `len(s)` in Go becomes `s.len() as i32` in Rust (type conversion is wrapped in `int(...)` in (now fully handled — see "Type conversions" section above).
 - **String literals**: `"hello"` in Go becomes `::std::string::String::from("hello")` in Rust.
@@ -206,25 +206,23 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 - Please lean on the `rust-analyzer` MCP for refactoring and inspecting Rust types. The Rust Analyzer MCP is much better at refactoring than copy/paste. It also is useful for navigating the codebase.
 - For other edits, consider using command line tools like `cp` and `sed` to work exactly with line numbers. Whenever trying to recover a misedited file, attempt to read its previous contents from `git`.
 
-## Name Mapping: `to_snake_case`
+## Name Preservation: camelCase stays camelCase
 
 Location: `gourd-codegen-core/src/transpiler/free_fn.rs`
 
-Converts Go function/variable names to Rust snake_case. Key behaviors:
+Go function and variable names are **preserved as camelCase** in the Rust output. No conversion to snake_case.
 
 | Go name | Rust name | Notes |
 |---------|-----------|-------|
-| `goAdd` | `go_add` | Standard camelCase → snake_case |
-| `goShorthand2` | `go_shorthand_2` | Trailing digits after lowercase get `_` prefix |
-| `isEven` | `is_even` | No `go_` prefix in Go name → no prefix in Rust |
-| `go_is_even` | `go_is_even` | Already snake_case, no transformation |
-| `hello` | `hello` | All lowercase, no change |
+| `goAdd` | `goAdd` | Preserved as-is |
+| `goShorthand2` | `goShorthand2` | Trailing digits preserved |
+| `isEven` | `isEven` | Preserved as-is |
+| `go_is_even` | `go_is_even` | Already snake_case, preserved |
+| `hello` | `hello` | All lowercase, preserved |
 
-The function adds underscores before:
-- Uppercase letters (if not preceded by `_`)
-- ASCII digits if preceded by a lowercase letter (e.g., `Shorthand2` → `shorthand_2`)
+Rust's `clippy` `non_snake_case` convention warnings are suppressed via `#[allow(non_snake_case)]` on generated functions and impl blocks. This allows the Go naming style to shine through in the transpiled Rust code.
 
-When writing `#[verify_rust_output]` attributes, the expected function name must match this conversion.
+When writing `#[verify_rust_output]` attributes, use the Go name directly — it appears unchanged in the Rust output.
 
 ## Useful Patterns
 

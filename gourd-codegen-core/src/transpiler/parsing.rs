@@ -10,6 +10,7 @@ use syn::token;
 use syn::{parse_quote, Expr, Ident, Stmt, Token};
 
 use super::expr::{dispatch, go_to_rust};
+use super::types::map_go_type_str;
 
 // ─── Go source AST types ───────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ pub(crate) enum GoStmt {
     GoChannelSend(Expr, Expr), // `ch <- value`
     GoChannelRecv(Expr),       // `<- ch`
     GoTypeAssert(Expr, syn::Type), // `x.(T)` type assertion
+    GoMake(String),   // `make(...)` with raw argument string
 }
 
 pub(crate) struct GoFor {
@@ -483,63 +485,6 @@ impl Parse for GoFnOutput {
                         }
                     } else {
                         // Not `chan` or `map` — fall through to standard parsing
-                        let t = input.parse::<syn::Type>()?;
-                        tys.push(t);
-                    }
-                } else {
-                    let t = input.parse::<syn::Type>()?;
-                    tys.push(t);
-                }
-            } else {
-                let fork = input.fork();
-                if let Ok(first_ident) = fork.parse::<syn::Ident>() {
-                    if first_ident.to_string() == "map" {
-                        let _: syn::Ident = input.parse()?; // consume `map`
-                        // Parse `[K]` — key type
-                        if input.peek(syn::token::Bracket) {
-                            let k_content;
-                            let _bracket = syn::bracketed!(k_content in input);
-                            let _key_type: syn::Type = k_content.parse().unwrap_or_else(|_| {
-                                syn::Type::Path(syn::TypePath {
-                                    path: syn::Path::from(syn::Ident::new("string", proc_macro2::Span::call_site())),
-                                    qself: None,
-                                })
-                            });
-                            // Parse `V` — value type
-                            let _value_type: syn::Type = if input.peek(syn::Ident) {
-                                input.parse().unwrap_or_else(|_| {
-                                    syn::Type::Path(syn::TypePath {
-                                        path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
-                                        qself: None,
-                                    })
-                                })
-                            } else {
-                                syn::Type::Path(syn::TypePath {
-                                    path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
-                                    qself: None,
-                                })
-                            };
-                            // Build `__go_map<K, V>` marker (with angle brackets)
-                            let mut map_path = syn::Path::from(syn::Ident::new("__go_map", proc_macro2::Span::call_site()));
-                            map_path.segments.clear();
-                            map_path.segments.push(syn::PathSegment {
-                                ident: syn::Ident::new("__go_map", proc_macro2::Span::call_site()),
-                                arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-                                    colon2_token: None,
-                                    lt_token: Token![<](proc_macro2::Span::call_site()),
-                                    args: syn::punctuated::Punctuated::from_iter([
-                                        syn::GenericArgument::Type(_key_type),
-                                        syn::GenericArgument::Type(_value_type),
-                                    ]),
-                                    gt_token: Token![>](proc_macro2::Span::call_site()),
-                                }),
-                            });
-                            tys.push(syn::Type::Path(syn::TypePath {
-                                path: map_path,
-                                qself: None,
-                            }));
-                        }
-                    } else {
                         let t = input.parse::<syn::Type>()?;
                         tys.push(t);
                     }
@@ -1086,6 +1031,58 @@ fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<b
         }
     }
 
+    // Check for `return make(...)` — fallback for make builtin calls
+    // (arguments may contain Go types like `chan T` that syn can't parse)
+    let make_fork = input.fork();
+    let is_make = matches!(make_fork.parse::<syn::Ident>(), Ok(ref id) if id.to_string() == "make")
+        && make_fork.peek(syn::token::Paren);
+    if is_make {
+        input.advance_to(&make_fork);
+        let _: syn::Ident = input.parse()?; // consume `make`
+        let paren_content;
+        let _paren = syn::parenthesized!(paren_content in input);
+        let raw_args = paren_content.cursor().token_stream().to_string();
+        let args_str = raw_args.trim();
+        let make_rust = match args_str {
+            s if s.starts_with("chan ") => {
+                let chan_args: Vec<&str> = s.splitn(2, ',').collect();
+                let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
+                let chan_type = map_go_type_str(chan_type_str);
+                if chan_args.len() == 2 {
+                    let cap_str = chan_args[1].trim();
+                    let cap: TokenStream = parse_quote! { #cap_str };
+                    quote! { return GoChannel::<#chan_type>::with_capacity(#cap) }
+                } else {
+                    quote! { return GoChannel::<#chan_type>::new() }
+                }
+            }
+            s if s.starts_with("map[") => {
+                quote! { return ::std::collections::HashMap::new() }
+            }
+            s if s.starts_with("[]") => {
+                let slice_args: Vec<&str> = s.splitn(2, ',').collect();
+                let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
+                let slice_type = map_go_type_str(slice_type_str);
+                if slice_args.len() == 2 {
+                    let len_str = slice_args[1].trim();
+                    let len: TokenStream = parse_quote! { #len_str };
+                    quote! { return ::std::iter::repeat(#slice_type).take(#len).collect::<Vec::<#slice_type>>() }
+                } else {
+                    quote! { return ::std::iter::repeat(#slice_type).take(0).collect::<Vec::<#slice_type>>() }
+                }
+            }
+            _ => {
+                let msg = format!("TODO: make with unsupported type: {}", args_str);
+                quote! { return { compile_error!(concat!("TODO: make with unsupported type: ", #msg)) } }
+            }
+        };
+        stmts.push(GoStmt::Expr(parse_quote! { #make_rust }));
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(true);
+    }
+
     // Check for `return []T{...}` (Go slice literal in return)
     let adv_fork = input.fork();
     if adv_fork.peek(syn::token::Bracket) {
@@ -1387,6 +1384,48 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             }
         }
 
+        GoStmt::GoMake(raw_args) => {
+            // Parse the raw make arguments to determine the type.
+            // Format: "chan T", "chan T, cap", "map[K]V", "[]T", "[]T, len" etc.
+            let args_str = raw_args.trim();
+
+            // Check for channel type: "chan T" or "chan T, cap"
+            if args_str.starts_with("chan ") {
+                let chan_args: Vec<&str> = args_str.splitn(2, ',').collect();
+                let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
+                // Convert Go chan type to Rust type marker
+                let chan_type = map_go_type_str(chan_type_str);
+                if chan_args.len() == 2 {
+                    // Buffered channel: make(chan T, cap)
+                    let cap_str = chan_args[1].trim();
+                    let cap: TokenStream = parse_quote! { #cap_str };
+                    quote! { GoChannel::<#chan_type>::with_capacity(#cap) }
+                } else {
+                    // Unbuffered: make(chan T)
+                    quote! { GoChannel::<#chan_type>::new() }
+                }
+            } else if args_str.starts_with("map[") {
+                // Map: make(map[K]V)
+                quote! { ::std::collections::HashMap::new() }
+            } else if args_str.starts_with("[]") {
+                // Slice: make([]T, len)
+                let slice_args: Vec<&str> = args_str.splitn(2, ',').collect();
+                let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
+                let slice_type = map_go_type_str(slice_type_str);
+                if slice_args.len() == 2 {
+                    let len_str = slice_args[1].trim();
+                    let len: TokenStream = parse_quote! { #len_str };
+                    quote! { ::std::iter::repeat(#slice_type).take(#len).collect::<Vec::<#slice_type>>() }
+                } else {
+                    quote! { ::std::iter::repeat(#slice_type).take(0).collect::<Vec::<#slice_type>>() }
+                }
+            } else {
+                // Unknown type
+                let msg = format!("TODO: transpile this Go make() type: {}", args_str);
+                quote! { { compile_error!(concat!("TODO: make with unsupported type: ", #args_str)) } }
+            }
+        }
+
         GoStmt::GoSlice(elems) => {
             let elems: Vec<_> = elems.iter().map(go_to_rust).collect();
             quote! { vec![ #(#elems),* ] }
@@ -1598,6 +1637,56 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
                     }
                 }
             }
+            // Check for `make(...)` in short declarations
+            let mval_fork = input.fork();
+            let is_make = matches!(mval_fork.parse::<syn::Ident>(), Ok(ref id) if id.to_string() == "make")
+                && mval_fork.peek(syn::token::Paren);
+            if is_make
+            {
+                let _: syn::Ident = input.parse()?; // consume `make`
+                let paren_content;
+                let _paren = syn::parenthesized!(paren_content in input);
+                let raw_args = paren_content.cursor().token_stream().to_string();
+                // Generate the make call expression inline
+                let make_expr = match raw_args.trim() {
+                    s if s.starts_with("chan ") => {
+                        let chan_args: Vec<&str> = s.splitn(2, ',').collect();
+                        let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
+                        let chan_type = map_go_type_str(chan_type_str);
+                        if chan_args.len() == 2 {
+                            let cap_str = chan_args[1].trim();
+                            let cap: TokenStream = parse_quote! { #cap_str };
+                            quote! { GoChannel::<#chan_type>::with_capacity(#cap) }
+                        } else {
+                            quote! { GoChannel::<#chan_type>::new() }
+                        }
+                    }
+                    s if s.starts_with("map[") => {
+                        quote! { ::std::collections::HashMap::new() }
+                    }
+                    s if s.starts_with("[]") => {
+                        let slice_args: Vec<&str> = s.splitn(2, ',').collect();
+                        let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
+                        let slice_type = map_go_type_str(slice_type_str);
+                        if slice_args.len() == 2 {
+                            let len_str = slice_args[1].trim();
+                            let len: TokenStream = parse_quote! { #len_str };
+                            quote! { ::std::iter::repeat(#slice_type).take(#len).collect::<Vec::<#slice_type>>() }
+                        } else {
+                            quote! { ::std::iter::repeat(#slice_type).take(0).collect::<Vec::<#slice_type>>() }
+                        }
+                    }
+                    _ => {
+                        let msg = format!("TODO: make with unsupported type: {}", raw_args.trim());
+                        quote! { { compile_error!(concat!("TODO: make with unsupported type: ", #msg)) } }
+                    }
+                };
+                stmts.push(GoStmt::GoLocal(ident, make_expr));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(());
+            }
             // Standard value expression
             let val: Expr = input.parse()?;
             let val_rust = go_to_rust(&val);
@@ -1614,6 +1703,25 @@ fn parse_base_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<(
     if let Ok(expr) = fork.parse::<Expr>() {
         input.advance_to(&fork);
         stmts.push(GoStmt::Expr(expr));
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(());
+    }
+
+    // Fallback: handle `make(...)` calls that syn can't parse
+    // (arguments may contain Go types like `chan T` that syn can't parse)
+    let make_fork = input.fork();
+    let is_make = matches!(make_fork.parse::<syn::Ident>(), Ok(ref id) if id.to_string() == "make")
+        && make_fork.peek(syn::token::Paren);
+    if is_make
+    {
+        input.parse::<syn::Ident>()?; // consume `make`
+        let paren_content;
+        let _paren = syn::parenthesized!(paren_content in input);
+        let raw_args = paren_content.cursor().token_stream().to_string();
+        eprintln!("DEBUG base raw_args: {:?}", raw_args);
+        stmts.push(GoStmt::GoMake(raw_args));
         if input.peek(token::Semi) {
             let _semi: token::Semi = input.parse()?;
         }
