@@ -47,6 +47,17 @@ gourd transpile path/to/file.rs
 
 ## Supported constructs
 
+### Closures
+
+| Go | Rust |
+|----|------|
+| `f := func() { body }` | `let f = || { body };` |
+| `f := func(x int) int { body }` | `let f = |x: i32| -> i32 { body };` |
+| `f := func(arr []int) int { body }` | `let f = |arr: &[i32]| -> i32 { body };` |
+| `f := func() (a, b int) { body }` | `let f = || -> (i32, i32) { body };` |
+
+*Note: Go builtins (`len`, `[]` indexing) inside closure bodies are not yet transpiled.*
+
 ### Function declarations
 
 | Go | Rust |
@@ -154,8 +165,9 @@ gourd transpile "func hello() int { return 42 }"
 |--------|-------|
 | **Real-world Go coverage** | ~5% |
 | **Builtins implemented** | 9 of ~14 |
-| **Test code** | ~40% commented-out TODO stubs |
+| **Tests passing** | 66 across 12 test files |
+| **Tests failing** | 6 (closure builtins, channel_ops, continue_stmt, multi_return) |
 
 ## What's next?
 
-See [ROADMAP.md](ROADMAP.md). The remaining big gaps are closures (partially implemented, tests not passing), `defer`, error handling, and standard library support.
+See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer`, error handling (`if err != nil`), and standard library support.

@@ -76,16 +76,69 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
             }
 
             // Check for Go closure: `name := func(params) { body }`
+            // At this point, input is at `func ...` (after `:=` was consumed above)
             let cv_fork = input.fork();
             if let Ok(func_id) = cv_fork.parse::<syn::Ident>() {
                 if func_id.to_string() == "func" {
-                    // This is a Go closure! Parse the full assignment as `GoLocal(name, closure)`
-                    // We need to skip `name := ` and then pass the closure to go_to_rust_closure
-                    let _ = input.parse::<syn::token::Colon>();
-                    let _ = input.parse::<syn::token::Eq>();
-                    // Now `input` is at `func ...`
-                    // Pass the rest to go_to_rust_closure
-                    let closure_tokens: TokenStream = input.parse().unwrap_or_default();
+                    // This is a Go closure! Parse it.
+                    // Parse closure: func(params) { body } or func(params) ret { body }
+                    // Consume func keyword
+                    let _func: Option<syn::Ident> = input.parse().ok();
+                    // Parse params group
+                    let params_group: Option<proc_macro2::Group> = if input.peek(syn::token::Paren) {
+                        input.parse::<proc_macro2::TokenTree>().ok().and_then(|tt| {
+                            if let proc_macro2::TokenTree::Group(g) = tt {
+                                Some(g)
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    // Parse optional return type
+                    let ret_type: Option<syn::Ident> = if input.peek(syn::Ident) {
+                        let ret_fork = input.fork();
+                        if let Ok(ret_id) = ret_fork.parse::<syn::Ident>() {
+                            let name = ret_id.to_string();
+                            if matches!(name.as_str(), "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" | "byte" | "rune" | "float32" | "float64" | "string" | "bool" | "error") {
+                                input.parse::<syn::Ident>().ok()
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    // Parse body brace group
+                    let body_group: Option<proc_macro2::Group> = if input.peek(syn::token::Brace) {
+                        input.parse::<proc_macro2::TokenTree>().ok().and_then(|tt| {
+                            if let proc_macro2::TokenTree::Group(g) = tt {
+                                Some(g)
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    // Reconstruct closure tokens
+                    let closure_tokens: TokenStream = {
+                        let mut ts = proc_macro2::TokenStream::new();
+                        ts.extend([proc_macro2::TokenTree::Ident(syn::Ident::new("func", proc_macro2::Span::call_site()))]);
+                        if let Some(g) = params_group {
+                            ts.extend([proc_macro2::TokenTree::Group(g)]);
+                        }
+                        if let Some(ret_id) = ret_type {
+                            ts.extend([proc_macro2::TokenTree::Ident(ret_id)]);
+                        }
+                        if let Some(g) = body_group {
+                            ts.extend([proc_macro2::TokenTree::Group(g)]);
+                        }
+                        ts
+                    };
                     let closure_expr = super::free_fn::go_to_rust_closure(closure_tokens);
                     stmts.push(GoStmt::GoLocal(ident, closure_expr));
                     if input.peek(token::Semi) {

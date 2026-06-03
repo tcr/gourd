@@ -86,6 +86,16 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         }
     }
 
+    // 6. Check for `for` keyword directly (it's a Token::For, not an Ident)
+    if input.peek(syn::token::For) {
+        let result = parse_go_for(input)?;
+        stmts.push(GoStmt::GoFor(result));
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(true);
+    }
+
     // 6. Check for switch
     if input.peek(syn::Ident) {
         let fork = input.fork();

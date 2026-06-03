@@ -30,7 +30,7 @@ The transpiler is split across these files under `gourd-codegen/src/transpiler/`
 | `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim` |
 | `expr/operators.rs` | `Binary`, `Unary`, `Cast`, `Assign`, `Break` |
 | `expr/calls.rs` | `Call`, `MethodCall`, `Field`, `Index`, `Macro` |
-| `expr/closures.rs` | Go anonymous functions (partially implemented, tests not passing) |
+| `expr/closures.rs` | Go anonymous functions (partial; closure body if statements transpiled, builtins not yet) |
 | `expr/control_flow.rs` | `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`, `While`, `Range`, `If`, `Block` |
 | `expr/structs.rs` | Struct literal transpilation |
 | `stmts.rs` | Block parsing (`parse_go_block`, `parse_go_special_stmt`) |

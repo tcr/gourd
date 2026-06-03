@@ -12,6 +12,7 @@ use super::super::stmt_to_rust::go_stmt_to_rust;
 /// Top-level: parse and transpile a Go anonymous function to Rust closure.
 pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
     let trees: Vec<TokenTree> = input.clone().into_iter().collect();
+    eprintln!("DEBUG go_to_rust_closure: {}", input);
 
     // Validate: must start with `func`
     if trees.is_empty() {
@@ -71,25 +72,45 @@ pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
             if g.delimiter() == proc_macro2::Delimiter::Brace {
                 let body_tokens: TokenStream = g.stream();
                 // Parse the body as a GoBlock and transpile each statement
-                // GoBlock expects brace-delimited content, so wrap body_tokens in braces
+                // body_tokens is the content INSIDE braces (e.g., `return 0`)
+                // GoBlock::parse expects brace-delimited content, so wrap in a brace group
                 let wrapped_body: TokenStream = {
                     let brace_group = proc_macro2::Group::new(
                         proc_macro2::Delimiter::Brace,
                         body_tokens.clone(),
                     );
                     quote! { #brace_group }
-                };  
+                };
+                eprintln!("DEBUG closure body: {}", wrapped_body);
                 match parse2::<GoBlock>(wrapped_body) {
                     Ok(go_block) => {
                         let stmts: Vec<TokenStream> = go_block.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
+                        eprintln!("DEBUG closure body parsed: {}", quote! { #(#stmts);* });
                         quote! { { #(#stmts);* } }
                     } Err(_) => {
                         // For bodies starting with `if`, handle them specially
                         let first_token = body_tokens.clone().into_iter().next();
                         if let Some(TokenTree::Ident(id)) = first_token {
                             if id.to_string() == "if" {
-                                // TODO: implement if statement transpilation for closures
-                                quote! { { /* TODO: transpile if statement */ } }
+                                // Attempt to parse as Rust `if` expression
+                                // The Go body is: `if cond { body } else { ... } body_continuation`
+                                // We need to parse the if block and the remaining body
+                                let if_result = syn::parse2::<syn::ExprIf>(body_tokens.clone());
+                                if let Ok(if_expr) = if_result {
+                                    let cond = if_expr.cond;
+                                    let then_block: syn::Block = if_expr.then_branch;
+                                    let else_block = if_expr.else_branch.as_ref().map(|(_, else_expr)| {
+                                        let block: Box<syn::Block> = match else_expr.as_ref() {
+                                            syn::Expr::Block(b) => Box::new(b.block.clone()),
+                                            _ => syn::parse_quote!({}),
+                                        };
+                                        quote! { else #block }
+                                    });
+                                    quote! { { if #cond #then_block #else_block } }
+                                } else {
+                                    // Fallback: just pass through the tokens
+                                    quote! { { #body_tokens } }
+                                }
                             } else {
                                 quote! { { #body_tokens } }
                             }
@@ -153,7 +174,8 @@ fn parse_closure_params(trees: &[TokenTree]) -> Vec<(proc_macro2::Ident, TokenSt
                         continue;
                     }
                 }
-                // Slice type `[]T` represented as: bracket group `[]` followed by element type
+                // Slice type `[]T` - the `[]` is a bracket group (empty brackets)
+                // followed by element type
                 if let TokenTree::Group(g) = next {
                     if g.delimiter() == proc_macro2::Delimiter::Bracket {
                         // `[]` is empty bracket group, next token should be element type

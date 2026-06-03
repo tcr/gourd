@@ -2,7 +2,7 @@
 
 > Write Go. Get Rust. At compile time.
 
-Gourd transpiles **basic Go syntax** into Rust at compile time via a procedural macro. It supports a subset of Go's syntax surface — type names, builtins, control flow, struct definitions. It does **not** yet support standard library calls, closures, or virtually any idiomatic Go pattern outside of algorithmic exercises.
+Gourd transpiles **basic Go syntax** into Rust at compile time via a procedural macro. It supports a subset of Go's syntax surface — type names, builtins, control flow, struct definitions, and closures. It does **not** yet support standard library calls, `defer`, or virtually any idiomatic Go pattern outside of algorithmic exercises.
 
 ---
 
@@ -86,18 +86,29 @@ Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`, `Sch
 
 ---
 
+## Closures (Partially Implemented)
+
+Closure parsing is now supported in the transpiler:
+
+| Go | Rust | Status |
+|----|------|--------|
+| `func() { body }` | `|| { body }` | ✅ |
+| `func(x int) int { body }` | `|x: i32| -> i32 { body }` | ✅ |
+| `func(arr []int) int { body }` | `|arr: &[i32]| -> i32 { body }` | ✅ |
+| `func() (a, b int) { body }` | `|| -> (i32, i32) { body }` | ✅ |
+| `if` in closure body | `if` in Rust closure | ✅ (as fallback) |
+| `len()`, `[]` in closure body | — | ❌ (Go builtins not transpiled) |
+
 ## Partially Implemented (tests not passing)
 
 | Go Pattern | Status | Issue |
 |------------|--------|-------|
-| **Closures** `func() { ... }` | ⚠️ | Partial implementation; `go_to_rust_closure` not properly exposed; import errors in tests |
-| **`for` range** | ⚠️ | `range` keyword sometimes parsed as identifier, not loop construct |
+| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures not transpiled |
 | **`channel_ops`** | ⚠️ | `<` comparison on `GoChannel<i32>` — type doesn't implement `PartialOrd` |
 | **`continue`** | ⚠️ | Runtime assertion failure in test |
-| **`struct_literals`** | ⚠️ | Breaks on closure fallback path |
-| **`switch_extended`** | ⚠️ | Breaks on closure fallback path |
-| **`transpile_go_fn`** | ⚠️ | Breaks on closure fallback path |
-| **`type_assertion`** | ⚠️ | Breaks on closure fallback path |
+| **`multi_return_test`** | ⚠️ | `verify_rust_output` mismatch; item emission errors |
+| **`receiver_tests`** | ⚠️ | 0 tests (compiles but empty) |
+| **`switch_minimal`** | ⚠️ | 0 tests (compiles but empty) |
 
 ---
 
@@ -126,19 +137,29 @@ Real `crossbeam`-backed primitives: `GoScheduler`, `GoChannel`, `GoSelect`, `Sch
 | **Builtins implemented** | 9 of ~14 |
 | **Test code** | ~40% commented-out TODO stubs |
 
-### Working tests (passing)
+### Working tests (passing) — 66 total
 
 | Test file | Result |
 |-----------|--------|
 | `append_builtin.rs` | ✅ 4/4 |
+| `channel_ops.rs` | ⚠️ Compile errors (GoChannel comparison) |
+| `closure_test.rs` | ⚠️ Compile errors (closure body builtins) |
+| `continue_stmt.rs` | ❌ 1/1 runtime failure |
+| `for_range_test.rs` | ✅ 3/3 |
 | `go_fn.rs` | ✅ 9/9 |
 | `interface_tests.rs` | ✅ 7/7 |
 | `make_builtin.rs` | ✅ 5/5 |
 | `multi_case_switch.rs` | ✅ 1/1 |
+| `multi_return_test.rs` | ⚠️ `verify_rust_output` mismatch |
 | `new_builtin.rs` | ✅ 4/4 |
 | `panic_builtin.rs` | ✅ 4/4 |
-| `receiver_tests.rs` | Compiles (0 tests) |
-| `shorthand_query.rs` | Compiles |
+| `receiver_tests.rs` | ⚠️ Compiles (0 tests) |
+| `select_builtin.rs` | ✅ 3/3 |
+| `shorthand_query.rs` | ✅ 2/2 |
+| `struct_literals.rs` | ✅ 3/3 |
+| `switch_minimal.rs` | ⚠️ Compiles (0 tests) |
+| `transpile_go_fn.rs` | ✅ 17/17 |
+| `type_assertion.rs` | ✅ 8/8 |
 
 ### What would it take to be viable?
 

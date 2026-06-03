@@ -95,7 +95,11 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
 /// Parse `if cond { body } else { ... }`.
 pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     input.parse::<syn::token::If>()?;
+
+    // Parse the condition expression. Expr::parse stops at `{` automatically
+    // since a brace group is not a valid continuation of most expressions.
     let cond: Expr = input.parse()?;
+
     let then_block_content;
     let _brace = syn::braced!(then_block_content in input);
     let then_block = super::stmts::parse_block_stmts(&then_block_content)?;
