@@ -76,6 +76,9 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         GoStmt::Switch(switch) => {
             super::free_fn::transpile_switch(switch)
         }
+        GoStmt::Select(select) => {
+            super::free_fn::go_to_rust_select_ast(select)
+        }
         GoStmt::Continue => {
             quote! { continue }
         }

@@ -63,3 +63,27 @@ pub fn go_to_rust_pattern(input: &Expr) -> TokenStream {
         _                       => emit_todo("unsupported match pattern"),
     }
 }
+
+#[cfg(test)]
+mod test_expr_parse {
+    use super::*;
+    use syn::Expr;
+
+    #[test]
+    fn test_parse_ch() {
+        let input = "ch";
+        match syn::parse_str::<Expr>(input) {
+            Ok(expr) => println!("'ch' -> {}", quote::quote!(#expr)),
+            Err(e) => println!("'ch' -> Error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_ch_lt_value() {
+        let input = "ch <- value";
+        match syn::parse_str::<Expr>(input) {
+            Ok(expr) => println!("'ch <- value' -> {}", quote::quote!(#expr)),
+            Err(e) => println!("'ch <- value' -> Error: {}", e),
+        }
+    }
+}

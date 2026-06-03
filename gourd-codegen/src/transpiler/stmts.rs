@@ -1,8 +1,9 @@
 //! Statement block parsing: `parse_go_block`, special statements, block parsing.
 
-pub(crate) use super::ast::{GoBlock, GoStmt};
+pub(crate) use super::ast::{GoBlock, GoSelect, GoSelectCase, GoStmt};
 use super::base_stmts::parse_base_stmt;
 use super::control_flow::{parse_go_for, parse_go_if, parse_go_while};
+use super::free_fn::select::parse_select_body;
 use super::return_stmts::parse_go_return;
 use super::slice_map::parse_go_slice_literal;
 use super::switch::Switch;
@@ -93,6 +94,15 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
             if kw_str == "switch" {
                 let sw: Switch = input.parse()?;
                 stmts.push(GoStmt::Switch(sw));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+            // 7. Check for select
+            if kw_str == "select" {
+                let select_result = parse_select_body(input)?;
+                stmts.push(GoStmt::Select(select_result));
                 if input.peek(token::Semi) {
                     let _semi: token::Semi = input.parse()?;
                 }
