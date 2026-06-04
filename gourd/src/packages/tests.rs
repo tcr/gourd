@@ -43,92 +43,92 @@ mod tests {
 
     #[test]
     fn test_join() {
-        assert_eq!(join(&["a", "b", "c"], ","), "a,b,c");
+        assert_eq!(join(vec!["a", "b", "c"].iter().map(|s| s.to_string()).collect(), ",".to_string()), "a,b,c");
     }
 
     #[test]
     fn test_split() {
-        assert_eq!(split("a,b,c", ","), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
-        assert_eq!(split("a", ","), vec!["a".to_string()]);
+        assert_eq!(split("a,b,c".to_string(), ",".to_string()), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(split("a".to_string(), ",".to_string()), vec!["a".to_string()]);
     }
 
     #[test]
     fn test_contains_str() {
-        assert!(contains_str("hello world", "world"));
-        assert!(!contains_str("hello world", "xyz"));
+        assert!(contains_str("hello world".to_string(), "world".to_string()));
+        assert!(!contains_str("hello world".to_string(), "xyz".to_string()));
     }
 
     #[test]
     fn test_index_str() {
-        assert_eq!(index_str("hello world", "world"), 6);
-        assert_eq!(index_str("hello", "xyz"), -1);
+        assert_eq!(index_str("hello world".to_string(), "world".to_string()), 6);
+        assert_eq!(index_str("hello".to_string(), "xyz".to_string()), -1);
     }
 
     #[test]
     fn test_trim() {
-        assert_eq!(trim("  hello  "), "hello");
-        assert_eq!(trim("hello"), "hello");
+        assert_eq!(trim("  hello  ".to_string(), " ".to_string()), "hello");
+        assert_eq!(trim("hello".to_string(), " ".to_string()), "hello");
     }
 
     #[test]
     fn test_trim_left() {
-        assert_eq!(trim_left("  hello"), "hello");
+        assert_eq!(trim_left("  hello".to_string(), " ".to_string()), "hello");
     }
 
     #[test]
     fn test_trim_right() {
-        assert_eq!(trim_right("hello  "), "hello");
+        assert_eq!(trim_right("hello  ".to_string(), " ".to_string()), "hello");
     }
 
     #[test]
     fn test_to_upper() {
-        assert_eq!(to_upper("hello"), "HELLO");
+        assert_eq!(to_upper("hello".to_string()), "HELLO");
     }
 
     #[test]
     fn test_to_lower() {
-        assert_eq!(to_lower("HELLO"), "hello");
+        assert_eq!(to_lower("HELLO".to_string()), "hello");
     }
 
     #[test]
     fn test_repeat() {
-        assert_eq!(repeat("ab", 3), "ababab");
+        assert_eq!(repeat("ab".to_string(), 3), "ababab");
     }
 
     // ─── strings tests ──────────────────────────────────────────────────────
 
     #[test]
     fn test_strings_replace() {
-        assert_eq!(strings_replace("hello world", "world", "rust", 1), "hello rust");
-        assert_eq!(strings_replace("aaa", "a", "b", 2), "bba");
+        assert_eq!(strings_replace("hello world".to_string(), "world".to_string(), "rust".to_string(), 1), "hello rust");
+        assert_eq!(strings_replace("aaa".to_string(), "a".to_string(), "b".to_string(), 2), "bba");
     }
 
     #[test]
     fn test_strings_replace_all() {
-        assert_eq!(strings_replace_all("aaa", "a", "b"), "bbb");
+        assert_eq!(strings_replace_all("aaa".to_string(), "a".to_string(), "b".to_string()), "bbb");
     }
 
     #[test]
     fn test_has_prefix() {
-        assert!(has_prefix("hello world", "hello"));
-        assert!(!has_prefix("hello world", "xyz"));
+        assert!(has_prefix("hello world".to_string(), "hello".to_string()));
+        assert!(!has_prefix("hello world".to_string(), "xyz".to_string()));
     }
 
     #[test]
     fn test_has_suffix() {
-        assert!(has_suffix("hello world", "world"));
-        assert!(!has_suffix("hello world", "xyz"));
+        assert!(has_suffix("hello world".to_string(), "world".to_string()));
+        assert!(!has_suffix("hello world".to_string(), "xyz".to_string()));
     }
 
     #[test]
     fn test_last_index_str() {
-        assert_eq!(last_index_str("hello world hello", "hello"), 12);
-        assert_eq!(last_index_str("hello", "xyz"), -1);
+        assert_eq!(last_index_str("hello world hello".to_string(), "hello".to_string()), 12);
+        assert_eq!(last_index_str("hello".to_string(), "xyz".to_string()), -1);
     }
 
     #[test]
     fn test_fields() {
-        let result = fields("  a b  c   ");
+        let result = fields("  a b  c   ".to_string());
         assert_eq!(result, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
     }
 

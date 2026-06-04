@@ -337,6 +337,90 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
             return quote! { #receiver.#method_name( &#first #(#rest),* ) };
         }
     }
+    // Check if this is a package function call: `strings.Replace(...)`, etc.
+    if let Expr::Path(path) = &*input.receiver {
+        let pkg = path.path.get_ident().map(|i| i.to_string());
+        if let Some(pkg) = pkg {
+            match pkg.as_str() {
+                "strings" => {
+                    return match method_name.to_string().as_str() {
+                        "Replace" => quote! { ::gourd::prelude::strings_replace( #(#args),* ) },
+                        "ReplaceAll" => quote! { ::gourd::prelude::strings_replace_all( #(#args),* ) },
+                        "HasPrefix" => quote! { ::gourd::prelude::has_prefix( #(#args),* ) },
+                        "HasSuffix" => quote! { ::gourd::prelude::has_suffix( #(#args),* ) },
+                        "Contains" => quote! { ::gourd::prelude::contains_str( #(#args),* ) },
+                        "Split" => quote! { ::gourd::prelude::split( #(#args),* ) },
+                        "Join" => {
+                            let elems = &args[0];
+                            let rest = &args[1..];
+                            // elems is already a vec![...] from transpile_array
+                            quote! { ::gourd::prelude::join( #elems, #(#rest),* ) }
+                        },
+                        "Index" => quote! { ::gourd::prelude::index_str( #(#args),* ) },
+                        "LastIndex" => quote! { ::gourd::prelude::last_index_str( #(#args),* ) },
+                        "Trim" => quote! { ::gourd::prelude::trim( #(#args),* ) },
+                        "TrimLeft" => quote! { ::gourd::prelude::trim_left( #(#args),* ) },
+                        "TrimRight" => quote! { ::gourd::prelude::trim_right( #(#args),* ) },
+                        "ToUpper" => quote! { ::gourd::prelude::to_upper( #(#args),* ) },
+                        "ToLower" => quote! { ::gourd::prelude::to_lower( #(#args),* ) },
+                        "Repeat" => quote! { ::gourd::prelude::repeat( #(#args),* ) },
+                        "Fields" => quote! { ::gourd::prelude::fields( #(#args),* ) },
+                        _ => emit_todo(&format!("strings.{method_name}()")),
+                    };
+                }
+                "os" => {
+                    return match method_name.to_string().as_str() {
+                        "Open" => quote! { ::gourd::prelude::os_open( #(#args),* ) },
+                        "ReadFile" => quote! { ::gourd::prelude::os_read_file( #(#args),* ) },
+                        "WriteFile" => quote! { ::gourd::prelude::os_write_file( #(#args),* ) },
+                        "Mkdir" => quote! { ::gourd::prelude::os_mkdir( #(#args),* ) },
+                        "MkdirAll" => quote! { ::gourd::prelude::os_mkdir_all( #(#args),* ) },
+                        "Remove" => quote! { ::gourd::prelude::os_remove( #(#args),* ) },
+                        "Chdir" => quote! { ::gourd::prelude::os_chdir( #(#args),* ) },
+                        "Getenv" => quote! { ::gourd::prelude::os_getenv( #(#args),* ) },
+                        "Setenv" => quote! { ::gourd::prelude::os_setenv( #(#args),* ) },
+                        _ => emit_todo(&format!("os.{method_name}()")),
+                    };
+                }
+                "io" => {
+                    return match method_name.to_string().as_str() {
+                        "Copy" => quote! { ::gourd::prelude::io_copy( #(#args),* ) },
+                        "ReadAll" => quote! { ::gourd::prelude::io_read_all( #(#args),* ) },
+                        _ => emit_todo(&format!("io.{method_name}()")),
+                    };
+                }
+                "bytes" => {
+                    return match method_name.to_string().as_str() {
+                        "Contains" => quote! { ::gourd::prelude::bytes_contains( #(#args),* ) },
+                        "HasPrefix" => quote! { ::gourd::prelude::bytes_has_prefix( #(#args),* ) },
+                        "HasSuffix" => quote! { ::gourd::prelude::bytes_has_suffix( #(#args),* ) },
+                        "Index" => quote! { ::gourd::prelude::bytes_index( #(#args),* ) },
+                        "Split" => quote! { ::gourd::prelude::bytes_split( #(#args),* ) },
+                        "Join" => quote! { ::gourd::prelude::bytes_join( #(#args),* ) },
+                        "Replace" => quote! { bytes_replace( #(#args),* ) },
+                        _ => emit_todo(&format!("bytes.{method_name}()")),
+                    };
+                }
+                "json" => {
+                    return match method_name.to_string().as_str() {
+                        "Marshal" => quote! { ::gourd::prelude::json_marshal( #(#args),* ) },
+                        "Unmarshal" => quote! { ::gourd::prelude::json_unmarshal( #(#args),* ) },
+                        _ => emit_todo(&format!("json.{method_name}()")),
+                    };
+                }
+                "time" => {
+                    return match method_name.to_string().as_str() {
+                        "Now" => quote! { ::gourd::prelude::time_now() },
+                        "Since" => quote! { ::gourd::prelude::time_since( #(#args),* ) },
+                        "Until" => quote! { ::gourd::prelude::time_until( #(#args),* ) },
+                        "Sleep" => quote! { ::gourd::prelude::time_sleep( #(#args),* ) },
+                        _ => emit_todo(&format!("time.{method_name}()")),
+                    };
+                }
+                _ => {}
+            }
+        }
+    }
     quote! { #receiver.#method_name( #(#args),* ) }
 }
 

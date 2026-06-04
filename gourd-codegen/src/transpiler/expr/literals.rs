@@ -74,7 +74,8 @@ pub fn transpile_array(input: &ExprArray) -> TokenStream {
         // from the `Expr::Verbatim` handling below.
         quote! { vec![] }
     } else {
-        quote! { [#(#elems),*] }
+        // Generate a vec![] instead of a fixed-size array for function compatibility
+        quote! { vec![ #(#elems),* ] }
     }
 }
 

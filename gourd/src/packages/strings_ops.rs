@@ -34,53 +34,53 @@ pub fn contains<T: PartialEq>(slice: &[T], val: &T) -> bool {
     slice.contains(val)
 }
 
-/// Joins a slice of strings with a separator (Go `strings.Join`).
-pub fn join<T: AsRef<str>>(elems: &[T], sep: &str) -> String {
-    elems.iter().map(|e| e.as_ref()).collect::<Vec<&str>>().join(sep)
+/// Joins a vector of strings with a separator (Go `strings.Join`).
+pub fn join(elems: Vec<String>, sep: String) -> String {
+    elems.join(&sep)
 }
 
 /// Splits a string by a separator (Go `strings.Split`).
-pub fn split(s: &str, sep: &str) -> Vec<String> {
-    s.split(sep).map(|s| s.to_string()).collect()
+pub fn split(s: String, sep: String) -> Vec<String> {
+    s.split(&sep).map(|s| s.to_string()).collect()
 }
 
 /// Returns true if the string contains the substring (Go `strings.Contains`).
-pub fn contains_str(s: &str, sub: &str) -> bool {
-    s.contains(sub)
+pub fn contains_str(s: String, sub: String) -> bool {
+    s.contains(&sub)
 }
 
 /// Returns the first index of the substring, or -1 (Go `strings.Index`).
-pub fn index_str(s: &str, sub: &str) -> i32 {
-    s.find(sub).map(|i| i as i32).unwrap_or(-1)
+pub fn index_str(s: String, sub: String) -> i32 {
+    s.find(&sub).map(|i| i as i32).unwrap_or(-1)
 }
 
-/// Trims leading and trailing whitespace (Go `strings.TrimSpace`).
-pub fn trim(s: &str) -> &str {
-    s.trim()
+/// Trims leading and trailing characters (Go `strings.Trim`).
+pub fn trim(s: String, cutset: String) -> String {
+    s.chars().filter(|c| !cutset.contains(*c)).collect()
 }
 
-/// Trims leading whitespace (Go `strings.TrimLeft`).
-pub fn trim_left(s: &str) -> &str {
-    s.trim_start()
+/// Trims leading characters (Go `strings.TrimLeft`).
+pub fn trim_left(s: String, cutset: String) -> String {
+    s.trim_start_matches(|c: char| cutset.contains(c)).to_string()
 }
 
-/// Trims trailing whitespace (Go `strings.TrimRight`).
-pub fn trim_right(s: &str) -> &str {
-    s.trim_end()
+/// Trims trailing characters (Go `strings.TrimRight`).
+pub fn trim_right(s: String, cutset: String) -> String {
+    s.trim_end_matches(|c: char| cutset.contains(c)).to_string()
 }
 
 /// Converts a string to uppercase (Go `strings.ToUpper`).
-pub fn to_upper(s: &str) -> String {
+pub fn to_upper(s: String) -> String {
     s.to_uppercase()
 }
 
 /// Converts a string to lowercase (Go `strings.ToLower`).
-pub fn to_lower(s: &str) -> String {
+pub fn to_lower(s: String) -> String {
     s.to_lowercase()
 }
 
 /// Repeats a string n times (Go `strings.Repeat`).
-pub fn repeat(s: &str, n: i32) -> String {
+pub fn repeat(s: String, n: i32) -> String {
     if n <= 0 { return String::new(); }
     s.repeat(n as usize)
 }
