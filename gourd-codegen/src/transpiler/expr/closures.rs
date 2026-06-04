@@ -27,11 +27,11 @@ pub(crate) struct GoBlock {
 pub(crate) enum GoStmt {
     Local(syn::Local),
     Expr(syn::Expr),
-    Return(Vec<Expr>),
-    Break,
-    Continue,
-    RawStmt(TokenStream),
-    GoBlock(GoBlock), // nested block
+    #[allow(dead_code)] Return(Vec<Expr>),
+    #[allow(dead_code)] Break,
+    #[allow(dead_code)] Continue,
+    #[allow(dead_code)] RawStmt(TokenStream),
+    #[allow(dead_code)] GoBlock(GoBlock), // nested block
 }
 
 /// Parse an anonymous Go function: `func(params) ret { body }`.

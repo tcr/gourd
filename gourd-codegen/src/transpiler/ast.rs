@@ -38,7 +38,7 @@ pub(crate) enum GoSelectCase {
     /// Send case: `ch <- value`
     Send { ch: Box<TokenStream>, value: Box<TokenStream> },
     /// Recv case: `<-ch` or `x := <-ch`
-    Recv { ch: Box<TokenStream>, target: Option<Ident> },
+    Recv { ch: Box<TokenStream>, #[allow(dead_code)] target: Option<Ident> },
     /// Default case: `default: ...`
     Default(GoBlock),
 }

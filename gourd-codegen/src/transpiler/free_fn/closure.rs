@@ -248,6 +248,7 @@ fn map_go_type_str(go_type: &str) -> syn::Type {
 }
 
 /// Map a single Go type identifier to its Rust equivalent.
+#[allow(dead_code)]
 fn map_go_types(ty: &syn::Type) -> syn::Type {
     match ty {
         syn::Type::Path(type_path) => {
@@ -300,6 +301,7 @@ fn map_go_types(ty: &syn::Type) -> syn::Type {
 }
 
 /// Parse closure body statements.
+#[allow(dead_code)]
 fn parse_closure_body(body_tokens: &TokenStream) -> TokenStream {
     let trees: Vec<TokenTree> = body_tokens.clone().into_iter().collect();
 

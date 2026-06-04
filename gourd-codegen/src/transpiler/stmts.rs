@@ -51,13 +51,14 @@ fn parse_body_from_group(ts: &proc_macro2::TokenStream) -> syn::Result<GoBlock> 
     let body_str = ts.to_string();
     
 /// Parse body from a Group's TokenStream (debug version).
+#[allow(dead_code)]
 fn parse_body_from_group_debug(ts: &proc_macro2::TokenStream) -> syn::Result<GoBlock> {
     let body_str = ts.to_string();
     eprintln!("DEBUG parse_body_from_group_debug: body_str={}", body_str);
     parse_body_from_group(ts)
 }
 
-/// Parse body from a Group's TokenStream.
+// Parse body from a Group's TokenStream.
     let parts: Vec<&str> = if body_str.contains("return") {
         if let Some(pos) = body_str.find("return") {
             let before = body_str[..pos].trim();
