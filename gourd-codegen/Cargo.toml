@@ -12,6 +12,7 @@ default = ["validate"]
 validate = []  # External compiler validation (enabled by default)
 
 [dependencies]
+walkdir = "2"
 syn = { version = "2", features = ["full", "fold"] }
 quote = "1"
 proc-macro2 = "1"

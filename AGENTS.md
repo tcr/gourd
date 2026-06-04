@@ -6,9 +6,8 @@ Transpiles inline Go declarations into valid Rust via a procedural macro at comp
 gourd/
   gourd-macro/       <-- proc-macro library (transpiler core)
   gourd/               <-- runtime + CLI tool (`gourd transpile`)
-  gourd-codegen/       <-- shared transpiler library (used by both macro and CLI)
+  gourd-codegen/       <-- shared transpiler library (scanner + transpiler)
   gourd-check/         <-- standalone Go/Rust validation CLI
-  gourd-scanner/       <-- shared source scanner crate
 ```
 
 [`gourd-codegen/src/transpiler/`] -- Go → Rust transpiler (modular)

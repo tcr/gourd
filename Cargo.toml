@@ -1,5 +1,5 @@
 [workspace]
-members = ["gourd", "gourd-codegen", "gourd-macro", "gourd-check", "gourd-scanner"]
+members = ["gourd", "gourd-codegen", "gourd-macro", "gourd-check"]
 resolver = "2"
 
 [workspace.package]

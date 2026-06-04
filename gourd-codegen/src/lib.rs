@@ -13,6 +13,7 @@
 //! - `verify_short(attr, input)` — verify Go→Rust transpilation output
 //! - `normalize_tokens(tokens)` — normalize token streams for comparison
 
+pub mod scanner;
 mod transpiler;
 mod validate;
 

@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-gourd-scanner = { path = "../gourd-scanner" }
+gourd-codegen = { path = "../gourd-codegen" }
 clap = { version = "4", features = ["derive"] }
 proc-macro2 = "1"
 quote = "1"

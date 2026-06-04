@@ -1,4 +1,4 @@
-//! Extract `go!` blocks and `#[verify_rust_output]` attributes from Rust source files.
+//! Scanner module — extracts `go!` blocks and `#[verify_rust_output]` attributes from source.
 //!
 //! Uses source text scanning for exact content extraction with proper
 //! brace-depth tracking, combined with `proc_macro2` validation for
