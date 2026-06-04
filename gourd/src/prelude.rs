@@ -1946,3 +1946,37 @@ pub fn time_until(t: std::time::SystemTime) -> std::time::Duration {
 pub fn time_sleep(d: std::time::Duration) {
     std::thread::sleep(d);
 }
+
+// ─── Go stdlib: copy, delete, append ────────────────────────────────────────
+
+/// Go's `copy(dst, src)` — copies elements from src to dst, returns number copied.
+pub fn std_copy<T: Clone>(dst: &mut [T], src: &[T]) -> i32 {
+    let n = src.len().min(dst.len());
+    dst[..n].clone_from_slice(&src[..n]);
+    n as i32
+}
+
+/// Go's `delete(m, key)` — removes a key from a HashMap, returns the removed value if any.
+/// Takes the map by value to avoid mutability issues in Go-style code.
+pub fn std_delete<T: std::hash::Hash + std::cmp::Eq + Clone, V: Clone>(
+    map: std::collections::HashMap<T, V>,
+    key: T,
+) -> Option<V> {
+    // Create a new map without the deleted key
+    let mut new_map = std::collections::HashMap::new();
+    let mut deleted = None;
+    for (k, v) in map {
+        if k == key {
+            deleted = Some(v);
+        } else {
+            new_map.insert(k, v);
+        }
+    }
+    deleted
+}
+
+/// Go's `append(slice, items...)` — appends items to a slice and returns the new slice.
+pub fn std_append<T: Clone>(mut slice: Vec<T>, items: &[T]) -> Vec<T> {
+    slice.extend_from_slice(items);
+    slice
+}

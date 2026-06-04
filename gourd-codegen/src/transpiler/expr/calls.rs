@@ -10,30 +10,16 @@ use super::dispatch::emit_todo;
 pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
 
-    // Handle Go builtins that don't have direct Rust equivalents
+    // Handle Go builtin functions that are now stdlib: copy, delete
     if let Expr::Path(path) = &*input.func {
-        if let Some(name) = path.path.get_ident() {
-            let name_str = name.to_string();
-            
-            // `copy(dst, src)` → dst.copy_from_slice(&src) returning len
-            if name_str == "copy" {
-                if input.args.len() != 2 {
-                    return emit_todo("copy() requires exactly two arguments");
-                }
-                let dst = super::dispatch::go_to_rust(&input.args[0]);
-                let src = super::dispatch::go_to_rust(&input.args[1]);
-                return quote! { { #dst.copy_from_slice(&#src); #dst.len() } };
-            }
-            
-            // `delete(m, key)` → m.remove(&key)
-            if name_str == "delete" {
-                if input.args.len() != 2 {
-                    return emit_todo("delete() requires exactly two arguments");
-                }
-                let map = super::dispatch::go_to_rust(&input.args[0]);
-                let key = super::dispatch::go_to_rust(&input.args[1]);
-                return quote! { #map.remove(& #key) };
-            }
+        if let Some(_func_name) = try_parse_std_copy(path) {
+            let func = args.iter().enumerate().map(|(i, arg)| {
+                if i == 0 { quote! { &mut #arg } } else { quote! { & #arg } }
+            }).collect::<Vec<_>>();
+            return quote! { ::gourd::prelude::std_copy( #(#func),* ) };
+        }
+        if let Some(_func_name) = try_parse_std_delete(path) {
+            return quote! { ::gourd::prelude::std_delete( #(#args),* ) };
         }
     }
 
@@ -164,14 +150,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         }).collect();
         return quote! { panic!( #(#panic_args),* ) };
     }
-    // Go `append` builtin: `append(slice, items...)` → push each item.
-    // Go's append is variadic: `append(slice)` (no-op),
-    // `append(slice, x)` (push one), `append(slice, x, y, z)` (push many).
-    // Works with slice literals: `append([]int{1, 2}, 3)` → `vec![1, 2, 3]`
-    // and variable slices: `append(data, x)` → pushes x to a copy of data.
+    // Go `append(slice, items...)` → stdlib std_append
+    // Stdlib version: converts slice to Vec, extends with items, returns new Vec.
     if let Expr::Path(path) = &*input.func
-        && let Some(name) = path.path.get_ident()
-        && name.to_string() == "append"
+        && let Some(_func_name) = try_parse_std_append(path)
     {
         let append_args: Vec<_> = input.args.iter().collect();
         if append_args.is_empty() {
@@ -182,19 +164,11 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             // append(slice) — no-op, just return the slice
             return quote! { #slice };
         }
-        // append(slice, items...) — push each item individually
-        let items: Vec<_> = append_args[1..].iter().map(|arg| {
-            let item = super::dispatch::go_to_rust(arg);
-            quote! { __gourd_append_result.push(#item); }
-        }).collect();
-        // Convert slice to Vec, push each item, return the Vec
-        return quote! {
-            {
-                let mut __gourd_append_result = #slice.to_vec();
-                #(#items)*
-                __gourd_append_result
-            }
-        };
+        // append(slice, items...) — pass items as a slice
+        let items: Vec<_> = append_args[1..].iter()
+            .map(|arg| super::dispatch::go_to_rust(arg))
+            .collect();
+        return quote! { ::gourd::prelude::std_append( #slice, &[ #(#items),* ] ) };
     }
     // Go `make` builtin — special handling for chan/map/slice types.
     // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
@@ -243,22 +217,22 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_strings_call(path)
     {
         match func_name.as_str() {
-            "Replace" => return quote! { strings_replace( #(#args),* ) },
-            "ReplaceAll" => return quote! { strings_replace_all( #(#args),* ) },
-            "HasPrefix" => return quote! { has_prefix( #(#args),* ) },
-            "HasSuffix" => return quote! { has_suffix( #(#args),* ) },
-            "Contains" => return quote! { contains_str( #(#args),* ) },
-            "Split" => return quote! { split( #(#args),* ) },
-            "Join" => return quote! { join( #(#args),* ) },
-            "Index" => return quote! { index_str( #(#args),* ) },
-            "LastIndex" => return quote! { last_index_str( #(#args),* ) },
-            "Trim" => return quote! { trim( #(#args),* ) },
-            "TrimLeft" => return quote! { trim_left( #(#args),* ) },
-            "TrimRight" => return quote! { trim_right( #(#args),* ) },
-            "ToUpper" => return quote! { to_upper( #(#args),* ) },
-            "ToLower" => return quote! { to_lower( #(#args),* ) },
-            "Repeat" => return quote! { repeat( #(#args),* ) },
-            "Fields" => return quote! { fields( #(#args),* ) },
+            "Replace" => return quote! { ::gourd::prelude::strings_replace( #(#args),* ) },
+            "ReplaceAll" => return quote! { ::gourd::prelude::strings_replace_all( #(#args),* ) },
+            "HasPrefix" => return quote! { ::gourd::prelude::has_prefix( #(#args),* ) },
+            "HasSuffix" => return quote! { ::gourd::prelude::has_suffix( #(#args),* ) },
+            "Contains" => return quote! { ::gourd::prelude::contains_str( #(#args),* ) },
+            "Split" => return quote! { ::gourd::prelude::split( #(#args),* ) },
+            "Join" => return quote! { ::gourd::prelude::join( #(#args),* ) },
+            "Index" => return quote! { ::gourd::prelude::index_str( #(#args),* ) },
+            "LastIndex" => return quote! { ::gourd::prelude::last_index_str( #(#args),* ) },
+            "Trim" => return quote! { ::gourd::prelude::trim( #(#args),* ) },
+            "TrimLeft" => return quote! { ::gourd::prelude::trim_left( #(#args),* ) },
+            "TrimRight" => return quote! { ::gourd::prelude::trim_right( #(#args),* ) },
+            "ToUpper" => return quote! { ::gourd::prelude::to_upper( #(#args),* ) },
+            "ToLower" => return quote! { ::gourd::prelude::to_lower( #(#args),* ) },
+            "Repeat" => return quote! { ::gourd::prelude::repeat( #(#args),* ) },
+            "Fields" => return quote! { ::gourd::prelude::fields( #(#args),* ) },
             _ => return emit_todo(&format!("strings.{}()", func_name)),
         }
     }
@@ -267,15 +241,15 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_os_call(path)
     {
         match func_name.as_str() {
-            "Open" => return quote! { os_open( #(#args),* ) },
-            "ReadFile" => return quote! { os_read_file( #(#args),* ) },
-            "WriteFile" => return quote! { os_write_file( #(#args),* ) },
-            "Mkdir" => return quote! { os_mkdir( #(#args),* ) },
-            "MkdirAll" => return quote! { os_mkdir_all( #(#args),* ) },
-            "Remove" => return quote! { os_remove( #(#args),* ) },
-            "Chdir" => return quote! { os_chdir( #(#args),* ) },
-            "Getenv" => return quote! { os_getenv( #(#args),* ) },
-            "Setenv" => return quote! { os_setenv( #(#args),* ) },
+            "Open" => return quote! { ::gourd::prelude::os_open( #(#args),* ) },
+            "ReadFile" => return quote! { ::gourd::prelude::os_read_file( #(#args),* ) },
+            "WriteFile" => return quote! { ::gourd::prelude::os_write_file( #(#args),* ) },
+            "Mkdir" => return quote! { ::gourd::prelude::os_mkdir( #(#args),* ) },
+            "MkdirAll" => return quote! { ::gourd::prelude::os_mkdir_all( #(#args),* ) },
+            "Remove" => return quote! { ::gourd::prelude::os_remove( #(#args),* ) },
+            "Chdir" => return quote! { ::gourd::prelude::os_chdir( #(#args),* ) },
+            "Getenv" => return quote! { ::gourd::prelude::os_getenv( #(#args),* ) },
+            "Setenv" => return quote! { ::gourd::prelude::os_setenv( #(#args),* ) },
             _ => return emit_todo(&format!("os.{func_name}()")),
         }
     }
@@ -284,8 +258,8 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_io_call(path)
     {
         match func_name.as_str() {
-            "Copy" => return quote! { io_copy( #(#args),* ) },
-            "ReadAll" => return quote! { io_read_all( #(#args),* ) },
+            "Copy" => return quote! { ::gourd::prelude::io_copy( #(#args),* ) },
+            "ReadAll" => return quote! { ::gourd::prelude::io_read_all( #(#args),* ) },
             _ => return emit_todo(&format!("io.{func_name}()")),
         }
     }
@@ -294,12 +268,12 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_bytes_call(path)
     {
         match func_name.as_str() {
-            "Contains" => return quote! { bytes_contains( #(#args),* ) },
-            "HasPrefix" => return quote! { bytes_has_prefix( #(#args),* ) },
-            "HasSuffix" => return quote! { bytes_has_suffix( #(#args),* ) },
-            "Index" => return quote! { bytes_index( #(#args),* ) },
-            "Split" => return quote! { bytes_split( #(#args),* ) },
-            "Join" => return quote! { bytes_join( #(#args),* ) },
+            "Contains" => return quote! { ::gourd::prelude::bytes_contains( #(#args),* ) },
+            "HasPrefix" => return quote! { ::gourd::prelude::bytes_has_prefix( #(#args),* ) },
+            "HasSuffix" => return quote! { ::gourd::prelude::bytes_has_suffix( #(#args),* ) },
+            "Index" => return quote! { ::gourd::prelude::bytes_index( #(#args),* ) },
+            "Split" => return quote! { ::gourd::prelude::bytes_split( #(#args),* ) },
+            "Join" => return quote! { ::gourd::prelude::bytes_join( #(#args),* ) },
             "Replace" => return quote! { bytes_replace( #(#args),* ) },
             _ => return emit_todo(&format!("bytes.{func_name}()")),
         }
@@ -309,8 +283,8 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_json_call(path)
     {
         match func_name.as_str() {
-            "Marshal" => return quote! { json_marshal( #(#args),* ) },
-            "Unmarshal" => return quote! { json_unmarshal( #(#args),* ) },
+            "Marshal" => return quote! { ::gourd::prelude::json_marshal( #(#args),* ) },
+            "Unmarshal" => return quote! { ::gourd::prelude::json_unmarshal( #(#args),* ) },
             _ => return emit_todo(&format!("json.{func_name}()")),
         }
     }
@@ -319,10 +293,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         && let Some(func_name) = try_parse_time_call(path)
     {
         match func_name.as_str() {
-            "Now" => return quote! { time_now( #(#args),* ) },
-            "Since" => return quote! { time_since( #(#args),* ) },
-            "Until" => return quote! { time_until( #(#args),* ) },
-            "Sleep" => return quote! { time_sleep( #(#args),* ) },
+            "Now" => return quote! { ::gourd::prelude::time_now( #(#args),* ) },
+            "Since" => return quote! { ::gourd::prelude::time_since( #(#args),* ) },
+            "Until" => return quote! { ::gourd::prelude::time_until( #(#args),* ) },
+            "Sleep" => return quote! { ::gourd::prelude::time_sleep( #(#args),* ) },
             _ => return emit_todo(&format!("time.{func_name}()")),
         }
     }
@@ -471,11 +445,62 @@ fn try_parse_fmt_field(base: &syn::Expr, field: &syn::Member) -> Option<TokenStr
         }
     };
     match field_name.as_str() {
-        "Sprintf" => Some(quote! { fmt_sprintf }),
-        "Print" => Some(quote! { fmt_print }),
-        "Println" => Some(quote! { fmt_println }),
-        "Printf" => Some(quote! { fmt_printf }),
+        "Sprintf" => Some(quote! { ::gourd::prelude::fmt_sprintf }),
+        "Print" => Some(quote! { ::gourd::prelude::fmt_print }),
+        "Println" => Some(quote! { ::gourd::prelude::fmt_println }),
+        "Printf" => Some(quote! { ::gourd::prelude::fmt_printf }),
         _ => None,
+    }
+}
+
+/// Try to parse `std.copy(...)` function calls.
+fn try_parse_std_copy(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "std" {
+        return None;
+    }
+    let func = path.path.segments[1].ident.to_string();
+    if func == "copy" {
+        Some(func)
+    } else {
+        None
+    }
+}
+
+/// Try to parse `std.delete(...)` function calls.
+fn try_parse_std_delete(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "std" {
+        return None;
+    }
+    let func = path.path.segments[1].ident.to_string();
+    if func == "delete" {
+        Some(func)
+    } else {
+        None
+    }
+}
+
+/// Try to parse `std.append(...)` function calls.
+fn try_parse_std_append(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "std" {
+        return None;
+    }
+    let func = path.path.segments[1].ident.to_string();
+    if func == "append" {
+        Some(func)
+    } else {
+        None
     }
 }
 

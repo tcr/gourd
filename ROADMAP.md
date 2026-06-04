@@ -2,7 +2,7 @@
 
 > Write Go. Get Rust. At compile time.
 
-Gourd transpiles **basic Go syntax** into Rust at compile time via a procedural macro. It supports a subset of Go's syntax surface — type names, builtins, control flow, struct definitions, and closures. It does **not** yet support standard library calls, `defer`, or virtually any idiomatic Go pattern outside of algorithmic exercises.
+Gourd transpiles **basic Go syntax** into Rust at compile time via a procedural macro. It supports a subset of Go's syntax surface — type names, builtins, control flow, struct definitions, closures, and `defer`. It does **not** yet support virtually any idiomatic Go pattern outside of algorithmic exercises.
 
 ---
 
@@ -119,6 +119,18 @@ Closure parsing is now supported in the transpiler:
 | `encoding/json` (`json`) | Marshal, Unmarshal | ✅ 2 functions |
 | `time` | Now, Since, Until, Sleep | ✅ 4 functions |
 
+### New stdlib: copy, delete, append
+
+These three Go builtin functions are now implemented as standard library functions:
+
+| Go | Rust (transpiled) | Runtime |
+|----|-------------------|--------|
+| `copy(dst, src)` | `::gourd::prelude::std_copy(&mut dst, &src)` | `std_copy<T: Clone>(dst: &mut [T], src: &[T]) -> i32` |
+| `delete(m, key)` | `::gourd::prelude::std_delete(m, key)` | `std_delete<T, V>(map: HashMap<T, V>, key: T) -> Option<V>` |
+| `append(slice, items...)` | `::gourd::prelude::std_append(slice, &[items...])` | `std_append<T: Clone>(slice: Vec<T>, items: &[T]) -> Vec<T>` |
+
+All stdlib functions are now emitted with the `::gourd::prelude::` prefix for full self-containment.
+
 ## Partially Implemented (tests not passing)
 
 | Go Pattern | Status | Issue |
@@ -160,7 +172,7 @@ Closure parsing is now supported in the transpiler:
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
 | **Closures** `func() { ... }` | ⚠️ | Partial; not working in tests — no higher-order functions, no sorting |
-| **defer** `defer cleanup()` | ❌ | No RAII pattern |
+| **defer** `defer cleanup()` | ✅ | Parsed → Drop guard; no dedicated tests yet |
 | **Error handling** `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr` |
 | **Pointers** | ✅ | `&` (address-of) and `*` (dereference) |
 | **fmt builtins** | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
@@ -168,7 +180,7 @@ Closure parsing is now supported in the transpiler:
 | **recover** `recover()` | ❌ | |
 | **Variadic params** `func f(...int)` | ✅ | Mapped to `&[T]` slice references |
 | **Pointers in expressions** `&x`, `*p` | ✅ | `&` (address-of) and `*` (dereference) |
-| **Standard library calls** | ✅ | `strings`, `os`, `io`, `bytes`, `json`, `time`, `fmt` |
+| **Standard library calls** | ✅ | `strings`, `os`, `io`, `bytes`, `json`, `time`, `fmt`, `std::copy`, `std::delete`, `std::append` |
 
 ---
 
@@ -218,9 +230,8 @@ The transpiler prints parsing details, type mappings, and transpilation steps to
 ### What would it take to be viable?
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.
-2. **`append` / `copy` / `delete`** — `append` works, `copy`/`delete` don't
-3. **Standard library mapping** — `net/http`, `database/sql`, `sync`, `reflect`, `rand` → Rust std
-4. **Full closure support** — argument forwarding, captures, nested closures
-5. **Generics** — needed for type-safe collections
+2. **Standard library mapping** — `net/http`, `database/sql`, `sync`, `reflect`, `rand` → Rust std
+3. **Full closure support** — argument forwarding, captures, nested closures
+4. **Generics** — needed for type-safe collections
 
-Without all five: probably a toy. With all five: maybe 40–50% coverage — useful for algorithmic and CLI code.
+Without all four: probably a toy. With all four: maybe 40–50% coverage — useful for algorithmic and CLI code.
