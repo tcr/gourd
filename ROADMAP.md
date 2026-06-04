@@ -199,6 +199,7 @@ All tests pass. 127 in `gourd-macro/tests/` + 4 in `gourd/tests/` + 11 in `gourd
 | **Variadic params** `func f(...int)` | ✅ | Mapped to `&[T]` slice references |
 | **Pointers in expressions** `&x`, `*p` | ✅ | `&` (address-of) and `*` (dereference) |
 | **Standard library calls** | ✅ | `strings`, `os`, `io`, `bytes`, `json`, `time`, `fmt`, `std::copy`, `std::delete`, `std::append` |
+| **min / max** | ✅ | `min(a, b)`, `max(a, b)` with `<T: PartialOrd>` |
 
 ---
 
