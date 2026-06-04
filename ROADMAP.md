@@ -222,6 +222,49 @@ GOURD_DEBUG=1 gourd transpile "func hello() int { return 42 }"
 
 The transpiler prints parsing details, type mappings, and transpilation steps to stderr. Useful for investigating failed transpilation or unexpected output. Zero overhead when unset.
 
+### CLI Investigation (2026-06-04)
+
+Last tested: 2026-06-04 via `gourd transpile`
+
+180-line demo (`/tmp/gourd_final.go`) with 17 functions: **16/17 transpile successfully** (94% coverage).
+
+**What works via `gourd transpile`:**
+- Simple types (`int`, `string`, `bool`, `[]T`)
+- Short variable declarations (`x := y`)
+- `for i := range slice` (indexed range loops)
+- `for k, v := range map` (key-value iteration)
+- `if/else`, `switch/case/default`
+- Builtin functions: `len`, `append`, `panic`, `fmt_sprintf`
+- Multi-return functions
+- String and slice indexing
+
+**What does NOT work (and what I tried):**
+- `map[string] string` as a **parameter type** — parser expects an identifier token, not a bracket-delimited type annotation. This is the most common failure mode in parameter positions.
+- `string([]byte{text[i]})` — byte-slice-to-string conversion fails inside transpiled expressions.
+- `for _, v := range map` (underscore-only range) — parser fails on underscore as identifier.
+- `m == nil` on maps — nil comparison against map types doesn't transpile.
+- `text[start:end]` (slice range expressions) — slicing syntax not supported in parameter context.
+- `for k, v := range` with multiple map types — nested map types like `map[string]map[string]string` fail.
+- `for` without `range` keyword — Go-style `for i := 0; i < n; i++` not supported.
+
+**Most trouble-causing patterns:**
+
+1. **`map[string] T` in parameter positions** — the type parser (`GoFnOutput::parse`) expects bare identifiers for parameters, not bracket-delimited type annotations like `[]` or `[]T`. This turned out to be a surprisingly common requirement. Workaround: avoid map types in function signatures; use map literals in function bodies instead.
+
+2. **`string([]byte{...})` conversion** — the transpiler doesn't handle byte slice literals used as string conversion arguments. Replaced with `map[int]int` frequency maps (integer key approach).
+
+3. **`for _, v := range map`** — underscore identifiers aren't parsed as valid identifiers in the range clause. The fix: use explicit variable names like `for _, v := range map` → `for v, _ := range map` or similar explicit naming.
+
+4. **`return expr * 100 / div`** — return statements with arithmetic expressions fail silently (thread panic, not compile_error). Avoiding arithmetic in return expressions by introducing intermediate variables fixed this.
+
+5. **`text[start:end]` slice ranges** — range expressions in slice indexing are not supported. Workaround: use a range loop with index arithmetic instead.
+
+6. **`var x T` bare declarations** — bare `var` declarations in Go produce `var; vec![...]` artifacts in the output. Use `x := zero_value` instead.
+
+**Key pattern discovered:** When a Go expression isn't directly transpilable, introducing intermediate variables and stepping the computation into separate expressions is the most reliable workaround. The transpiler handles single-expression returns better than compound expressions.
+
+---
+
 ### What would it take to be viable?
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.
