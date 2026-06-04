@@ -77,6 +77,16 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             "rune" => {
                 return quote! { (#(#args),* as char) };
             }
+            "min" => {
+                if args.len() == 2 {
+                    return quote! { ::gourd::prelude::min( #(#args),* ) };
+                }
+            }
+            "max" => {
+                if args.len() == 2 {
+                    return quote! { ::gourd::prelude::max( #(#args),* ) };
+                }
+            }
             _ => {}
         }
     }
