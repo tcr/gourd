@@ -2,7 +2,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{BinOp, ExprAssign, ExprBreak, ExprCast, ExprUnary, UnOp};
+use syn::{BinOp, ExprAssign, ExprBreak, ExprCast, ExprContinue, ExprUnary, UnOp};
 
 use super::dispatch::emit_todo;
 
@@ -61,4 +61,9 @@ pub fn transpile_break(input: &ExprBreak) -> TokenStream {
         Some(e) => quote! { break #label #e },
         None => quote! { break #label },
     }
+}
+
+pub fn transpile_continue(input: &ExprContinue) -> TokenStream {
+    let label = input.label.as_ref().map(|l| quote! { #l });
+    quote! { continue #label }
 }

@@ -17,6 +17,23 @@ impl Parse for GoFnInputs {
             let mut group_ids: Vec<Ident> = Vec::new();
 
             // Look ahead for grouped parameters: `a, b, c int`
+            let fork = input.fork();
+            // Adjust fork for variadic: skip `...` if present
+            if fork.peek(syn::token::DotDotDot) {
+                let _ = fork.parse::<syn::token::DotDotDot>();
+            }
+            let mut ty_from_ident: Option<Box<syn::Type>> = None;
+
+            // Detect variadic parameter: `name ...T`
+            // Note: `...` is a single token (Ellipsis/DotDotDot) in Rust's token stream
+            let is_variadic = input.peek(syn::token::DotDotDot);
+            if is_variadic {
+                let _: syn::token::DotDotDot = input.parse()?;
+            }
+
+            // Detect grouped params: after parsing the first param (`a`), peek ahead
+            // for `a, b, c int` pattern (multiple names sharing one type).
+            // Use input (not fork) as the loop driver to avoid mismatches.
             while input.peek(token::Comma) {
                 let peek_fork = input.fork();
                 let _ = peek_fork.parse::<token::Comma>();
@@ -29,7 +46,10 @@ impl Parse for GoFnInputs {
                         | "byte" | "rune" | "float32" | "float64" | "error" | "chan"
                     );
                     if known_go_type {
+                        // The type is peek_fork — advance input to consume it
                         input.advance_to(&peek_fork);
+                        // Parse the type from the fork's current position
+                        ty_from_ident = Some(Box::new(input.parse()?));
                         break;
                     }
                     input.parse::<token::Comma>()?;
@@ -43,12 +63,14 @@ impl Parse for GoFnInputs {
             let fork = input.fork();
             let is_slice_like = fork.peek(syn::token::Bracket);
 
-            let mut ty_from_ident: Option<Box<syn::Type>> = None;
-            if !is_slice_like && fork.peek(syn::Ident) {
-                ty_from_ident = Some(input.parse()?);
-            } else if !is_slice_like && fork.peek(syn::token::Colon) {
-                let _colon: syn::token::Colon = input.parse()?;
-                ty_from_ident = Some(input.parse()?);
+            // Parse type in normal path if not already set by group loop
+            if ty_from_ident.is_none() {
+                if !is_slice_like && fork.peek(syn::Ident) {
+                    ty_from_ident = Some(input.parse()?);
+                } else if !is_slice_like && fork.peek(syn::token::Colon) {
+                    let _colon: syn::token::Colon = input.parse()?;
+                    ty_from_ident = Some(input.parse()?);
+                }
             }
 
             if is_slice_like {
@@ -63,9 +85,9 @@ impl Parse for GoFnInputs {
                     path: elem_path,
                     qself: None,
                 });
-                args.push(GoParam { id: id.clone(), ty: None, slice_elem: Some(elem_type.clone()) });
+                args.push(GoParam { id: id.clone(), ty: None, slice_elem: Some(elem_type.clone()), variadic: is_variadic });
                 for param_id in group_ids {
-                    args.push(GoParam { id: param_id, ty: None, slice_elem: Some(elem_type.clone()) });
+                    args.push(GoParam { id: param_id, ty: None, slice_elem: Some(elem_type.clone()), variadic: is_variadic });
                 }
             } else {
                 let ty = if let Some(ty) = ty_from_ident.clone() {
@@ -96,9 +118,9 @@ impl Parse for GoFnInputs {
                     }
                 } else { None };
                 let ty_for_param = ty.clone();
-                args.push(GoParam { id: id.clone(), ty: ty_for_param, slice_elem: None });
+                args.push(GoParam { id: id.clone(), ty: ty_for_param, slice_elem: None, variadic: is_variadic });
                 for param_id in group_ids {
-                    args.push(GoParam { id: param_id, ty: ty.clone(), slice_elem: None });
+                    args.push(GoParam { id: param_id, ty: ty.clone(), slice_elem: None, variadic: is_variadic });
                 }
             }
 
@@ -112,7 +134,7 @@ impl Parse for GoFnInputs {
 
 impl Parse for GoFnOutput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut tys = Vec::new();
+        let mut tys: Vec<syn::Type> = Vec::new();
         let mut is_slice = false;
         let mut elem_type: Option<Box<syn::Type>> = None;
         if input.peek(syn::token::RArrow) {

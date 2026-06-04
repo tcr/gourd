@@ -13,7 +13,6 @@ use syn::token;
 
 /// Transpile a receiver function to Rust: `impl Struct { fn method(...) { ... } }`
 pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
-    if crate::debug::enabled() { eprintln!("DEBUG receiver_fn input: {}", input.to_string()); }
     match syn::parse2::<ReceiverFn>(input) {
         Ok(parsed) => {
             let Receiver { name: recv_name, _ty: struct_ty, pointer } = parsed.recv;
@@ -90,7 +89,6 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
             }
         }
         Err(e) => {
-            if crate::debug::enabled() { eprintln!("DEBUG receiver_fn parse error: {}", e); }
             e.to_compile_error()
         }
     }

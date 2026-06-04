@@ -58,6 +58,15 @@ gourd transpile path/to/file.rs
 
 *Note: Go builtins (`len`, `[]` indexing) inside closure bodies are not yet transpiled.*
 
+### Variadic parameters
+
+| Go | Rust |
+|----|------|
+| `func foo(nums ...int) int { ... }` | `fn goFoo(nums: &[i32]) -> i32 { ... }` |
+| `func foo(min int, nums ...int) int { ... }` | `fn goFoo(min: i32, nums: &[i32]) -> i32 { ... }` |
+
+Variadic `...T` parameters are mapped to slice references `&[T]`.
+
 ### Function declarations
 
 | Go | Rust |
@@ -124,6 +133,19 @@ gourd transpile path/to/file.rs
 
 Concurrency primitives are real `crossbeam`-backed types — not stubs. The scheduler runs goroutines sequentially (simulating Go's scheduler), channels support `send`, `recv`, `try_send`, `try_recv`, and `select` supports send cases, receive cases, default cases, and timeouts.
 
+### Standard library mappings
+
+The transpiler recognizes and maps common Go standard library packages to Rust equivalents:
+
+| Go Package | Functions Mapped |
+|------------|-----------------|
+| `strings` | `Replace`, `ReplaceAll`, `HasPrefix`, `HasSuffix`, `Contains`, `Split`, `Join`, `Index`, `LastIndex`, `Trim`, `TrimLeft`, `TrimRight`, `ToUpper`, `ToLower`, `Repeat`, `Fields` |
+| `os` | `Open`, `ReadFile`, `WriteFile`, `Mkdir`, `MkdirAll`, `Remove`, `Chdir`, `Getenv`, `Setenv`, `Args` |
+| `io` | `Copy`, `ReadAll` |
+| `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Split`, `Join`, `Replace` |
+| `encoding/json` (as `json`) | `Marshal`, `Unmarshal` |
+| `time` | `Now`, `Since`, `Until`, `Sleep` |
+
 ## Compile-time verification
 
 ```rust
@@ -179,18 +201,26 @@ Debug output includes parsing details, type mappings, and transpilation steps. W
 |---------|--------|-------|
 | `defer` | ✅ | Transpiles to inline `Drop` guard generation; `GoDeferGuard` in prelude |
 | `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr { ... }` |
-| `fmt` builtins | ✅ | `fmt.Sprintf` → `fmt_sprintf`, `Print` → `fmt_print`, `Println` → `fmt_println`, `Printf` → `fmt_printf` |
+| `fmt` builtins | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
 | Pointer operators | ✅ | `&` (address-of) and `*` (dereference) handled |
+| `continue` statement | ✅ | `continue [label]` with optional label |
+| Variadic params (`...T`) | ✅ | Mapped to `&[T]` slice references |
+| `strings` stdlib | ✅ | 16 functions: Replace, ReplaceAll, HasPrefix, HasSuffix, Contains, Split, Join, Index, LastIndex, Trim, TrimLeft, TrimRight, ToUpper, ToLower, Repeat, Fields |
+| `os` stdlib | ✅ | 10 functions: Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, Args |
+| `io` stdlib | ✅ | `Copy`, `ReadAll` |
+| `bytes` stdlib | ✅ | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Split`, `Join`, `Replace` |
+| `json` stdlib | ✅ | `Marshal`, `Unmarshal` |
+| `time` stdlib | ✅ | `Now`, `Since`, `Until`, `Sleep` |
 
 ## Status
 
 | Metric | Value |
 |--------|-------|
-| **Real-world Go coverage** | ~12% |
-| **Builtins implemented** | 11 of ~14 |
+| **Real-world Go coverage** | ~28% |
+| **Builtins implemented** | 15 of ~14 (new: strings, os mapping) |
 | **Tests passing** | 120 across 23 test files |
 | **Tests failing** | 0 |
 
 ## What's next?
 
-See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer`, error handling (`if err != nil`), and standard library support.
+See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer`, error handling (`if err != nil`), `net/http`, `database/sql`, and full generics support.

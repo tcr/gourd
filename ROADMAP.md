@@ -77,6 +77,14 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 
 All arithmetic, unary, and comparison operators transpiled.
 
+### `continue` statement
+
+`continue` and `continue [label]` statements are now supported.
+
+### Variadic parameters
+
+Go variadic parameters (`func f(args ...int)`) are mapped to Rust slice references (`&[i32]`).
+
 ### Literals
 
 Numeric, string, bool, slice literals, map literals, struct literals, ranges.
@@ -99,6 +107,17 @@ Closure parsing is now supported in the transpiler:
 | `func() (a, b int) { body }` | `|| -> (i32, i32) { body }` | ✅ |
 | `if` in closure body | `if` in Rust closure | ✅ (as fallback) |
 | `len()`, `[]` in closure body | — | ❌ (Go builtins not transpiled) |
+
+## Standard Library Mappings
+
+| Go Package | Functions | Status |
+|------------|-----------|--------|
+| `strings` | Replace, ReplaceAll, HasPrefix, HasSuffix, Contains, Split, Join, Index, LastIndex, Trim, TrimLeft, TrimRight, ToUpper, ToLower, Repeat, Fields | ✅ 16 functions |
+| `os` | Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, Args | ✅ 10 functions |
+| `io` | Copy, ReadAll | ✅ 2 functions |
+| `bytes` | Contains, HasPrefix, HasSuffix, Index, Split, Join, Replace | ✅ 7 functions |
+| `encoding/json` (`json`) | Marshal, Unmarshal | ✅ 2 functions |
+| `time` | Now, Since, Until, Sleep | ✅ 4 functions |
 
 ## Partially Implemented (tests not passing)
 
@@ -147,9 +166,9 @@ Closure parsing is now supported in the transpiler:
 | **fmt builtins** | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
 
 | **recover** `recover()` | ❌ | |
-| **Variadic params** `func f(...int)` | ❌ | Most stdlib functions are variadic |
-| **Pointers in expressions** `&x`, `*p` | ❌ | Can't dereference or take addresses |
-| **Standard library calls** | ❌ | No `fmt`, `os`, `io`, `sort`, `strings` |
+| **Variadic params** `func f(...int)` | ✅ | Mapped to `&[T]` slice references |
+| **Pointers in expressions** `&x`, `*p` | ✅ | `&` (address-of) and `*` (dereference) |
+| **Standard library calls** | ✅ | `strings`, `os`, `io`, `bytes`, `json`, `time`, `fmt` |
 
 ---
 
@@ -200,8 +219,8 @@ The transpiler prints parsing details, type mappings, and transpilation steps to
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.
 2. **`append` / `copy` / `delete`** — `append` works, `copy`/`delete` don't
-3. **Standard library mapping** — `fmt`, `os`, `io`, `sort`, `strings` → Rust std
+3. **Standard library mapping** — `net/http`, `database/sql`, `sync`, `reflect`, `rand` → Rust std
 4. **Full closure support** — argument forwarding, captures, nested closures
-6. **Generics** — needed for type-safe collections
+5. **Generics** — needed for type-safe collections
 
-Without all six: probably a toy. With all six: maybe 30–40% coverage — useful for algorithmic code.
+Without all five: probably a toy. With all five: maybe 40–50% coverage — useful for algorithmic and CLI code.

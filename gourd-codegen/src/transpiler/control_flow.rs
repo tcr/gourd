@@ -3,7 +3,7 @@
 use super::ast::{GoBlock, GoFor, GoForInit, GoIf, GoStmt, GoWhile};
 use super::base_stmts::parse_base_stmt;
 use syn::ext::IdentExt;
-use syn::parse::ParseStream;
+use syn::parse::{ParseStream, discouraged::Speculative};
 use syn::{Expr};
 
 /// Parse `while cond { body }`.
@@ -117,9 +117,31 @@ pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
         }
     }
 
-    // Parse the condition expression. Expr::parse stops at `{` automatically
-    // since a brace group is not a valid continuation of most expressions.
-    let cond: Expr = input.parse()?;
+    // Parse the condition expression — stop at `{` because syn's Expr::parse
+    // treats `a > b { ... }` as a field access on the binary expression.
+    // We use a fork-to-brace approach instead.
+    let cond_fork = input.fork();
+    // Collect tokens into a separate stream (stop at `{`)
+    let mut cond_tokens: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+    while !cond_fork.is_empty() && !cond_fork.peek(syn::token::Brace) {
+        if let Ok(tt) = cond_fork.parse::<proc_macro2::TokenTree>() {
+            cond_tokens.extend(std::iter::once(tt));
+        } else {
+            break;
+        }
+    }
+    // Try parsing as Expr first
+    let cond_tokens2 = cond_tokens.clone();
+    let cond_tokens3 = cond_tokens.clone();
+    let cond: Expr = if let Ok(e) = syn::parse2::<Expr>(cond_tokens) {
+        e
+    } else if let Ok(e) = syn::parse2::<Expr>(cond_tokens2) {
+        e
+    } else {
+        // Fall back to Verbatim
+        syn::Expr::Verbatim(cond_tokens3)
+    };
+    input.advance_to(&cond_fork);
 
     let then_block_content;
     let _brace = syn::braced!(then_block_content in input);

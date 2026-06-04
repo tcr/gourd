@@ -1706,3 +1706,243 @@ impl GoRand {
         self.seed
     }
 }
+
+// ─── Go strings package ────────────────────────────────────────────────────
+
+/// Go's `strings.Replace(s, old, new, n)` — replaces occurrences of old with new.
+/// n < 0 means replace all occurrences.
+pub fn strings_replace(s: &str, old: &str, new: &str, n: i32) -> String {
+    if n < 0 {
+        s.replace(old, new)
+    } else {
+        let mut result = s.to_string();
+        for _ in 0..n.max(0) {
+            match result.find(old) {
+                Some(pos) => {
+                    result.replace_range(pos..pos + old.len(), new);
+                }
+                None => break,
+            }
+        }
+        result
+    }
+}
+
+/// Go's `strings.ReplaceAll(s, old, new)` — replaces all occurrences of old with new.
+pub fn strings_replace_all(s: &str, old: &str, new: &str) -> String {
+    s.replace(old, new)
+}
+
+/// Go's `strings.HasPrefix(s, prefix)` — checks if string starts with prefix.
+pub fn has_prefix(s: &str, prefix: &str) -> bool {
+    s.starts_with(prefix)
+}
+
+/// Go's `strings.HasSuffix(s, suffix)` — checks if string ends with suffix.
+pub fn has_suffix(s: &str, suffix: &str) -> bool {
+    s.ends_with(suffix)
+}
+
+/// Go's `strings.LastIndex(s, substr)` — returns last index of substring (-1 if not found).
+pub fn last_index_str(s: &str, substr: &str) -> i32 {
+    match s.rfind(substr) {
+        Some(pos) => pos as i32,
+        None => -1,
+    }
+}
+
+/// Go's `strings.Fields(s)` — splits string by whitespace, returning non-empty tokens.
+pub fn fields(s: &str) -> Vec<String> {
+    s.split_whitespace().map(|s| s.to_string()).collect()
+}
+
+// ─── Go os package ─────────────────────────────────────────────────────────
+
+/// Go's `os.Open(path)` — opens a file for reading.
+pub fn os_open(path: &str) -> std::io::Result<Vec<u8>> {
+    std::fs::read(path)
+}
+
+/// Go's `os.ReadFile(path)` — reads entire file contents.
+pub fn os_read_file(path: &str) -> std::io::Result<Vec<u8>> {
+    std::fs::read(path)
+}
+
+/// Go's `os.WriteFile(path, data, perm)` — writes data to a file.
+pub fn os_write_file(path: &str, data: &[u8], _perm: i32) -> std::io::Result<()> {
+    std::fs::write(path, data)
+}
+
+/// Go's `os.Mkdir(path, perm)` — creates a directory.
+pub fn os_mkdir(path: &str, _perm: i32) -> std::io::Result<()> {
+    std::fs::create_dir(path)
+}
+
+/// Go's `os.MkdirAll(path, perm)` — creates a directory and all parent directories.
+pub fn os_mkdir_all(path: &str, _perm: i32) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+
+/// Go's `os.Remove(path)` — removes a file or directory.
+pub fn os_remove(path: &str) -> std::io::Result<()> {
+    std::fs::remove_file(path)
+}
+
+/// Go's `os.Chdir(path)` — changes current directory.
+pub fn os_chdir(path: &str) -> std::io::Result<()> {
+    std::env::set_current_dir(path)
+}
+
+/// Go's `os.Getenv(key)` — reads an environment variable.
+/// Returns (value, ok) where ok=false means the variable was not set.
+pub fn os_getenv(key: &str) -> Result<String, ()> {
+    match std::env::var(key) {
+        Ok(val) => Ok(val),
+        Err(_) => Err(()),
+    }
+}
+
+/// Go's `os.Setenv(key, value)` — sets an environment variable.
+pub fn os_setenv(key: &str, value: &str) {
+    unsafe { std::env::set_var(key, value); }
+}
+
+/// Returns all environment variable keys (Go `os.Environ()`).
+pub fn os_env_keys() -> Vec<String> {
+    std::env::vars().map(|(k, _)| k).collect()
+}
+
+// ─── Go os.Args ────────────────────────────────────────────────────────────
+
+/// Go's `os.Args` — command-line arguments as []string.
+pub fn os_args() -> Vec<String> {
+    std::env::args().collect()
+}
+
+// ─── Go io package ─────────────────────────────────────────────────────────
+
+/// Go's `io.Copy(dst, src)` — copies from src to dst, returns bytes copied.
+pub fn io_copy(mut dst: &mut Vec<u8>, mut src: &[u8]) -> i64 {
+    let n = src.len().min(dst.capacity() - dst.len());
+    dst.extend_from_slice(&src[..n]);
+    n as i64
+}
+
+/// Go's `io.ReadAll(reader)` — reads all bytes from a reader.
+pub fn io_read_all(data: &[u8]) -> Vec<u8> {
+    data.to_vec()
+}
+
+// ─── Go bytes package ──────────────────────────────────────────────────────
+
+/// Go's `bytes.Contains(slice, substr)` — checks if slice contains substr.
+pub fn bytes_contains(slice: &[u8], substr: &[u8]) -> bool {
+    slice.windows(substr.len()).any(|w| w == substr)
+}
+
+/// Go's `bytes.HasPrefix(slice, prefix)` — checks if slice starts with prefix.
+pub fn bytes_has_prefix(slice: &[u8], prefix: &[u8]) -> bool {
+    slice.starts_with(prefix)
+}
+
+/// Go's `bytes.HasSuffix(slice, suffix)` — checks if slice ends with suffix.
+pub fn bytes_has_suffix(slice: &[u8], suffix: &[u8]) -> bool {
+    slice.ends_with(suffix)
+}
+
+/// Go's `bytes.Index(slice, substr)` — finds first occurrence of substr.
+pub fn bytes_index(slice: &[u8], substr: &[u8]) -> i32 {
+    slice
+        .windows(substr.len())
+        .position(|w| w == substr)
+        .map(|i| i as i32)
+        .unwrap_or(-1)
+}
+
+/// Go's `bytes.Split(slice, sep)` — splits slice by separator.
+pub fn bytes_split(slice: &[u8], sep: &[u8]) -> Vec<Vec<u8>> {
+    if sep.is_empty() {
+        return vec![slice.to_vec()];
+    }
+    let mut result = Vec::new();
+    let mut start = 0;
+    while start <= slice.len() {
+        if let Some(pos) = slice[start..].windows(sep.len()).position(|w| w == sep) {
+            let end = start + pos;
+            result.push(slice[start..end].to_vec());
+            start = end + sep.len();
+        } else {
+            result.push(slice[start..].to_vec());
+            break;
+        }
+    }
+    result
+}
+
+/// Go's `bytes.Join(parts, sep)` — joins parts with separator.
+pub fn bytes_join(parts: &[Vec<u8>], sep: &[u8]) -> Vec<u8> {
+    let mut result = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            result.extend_from_slice(sep);
+        }
+        result.extend_from_slice(part);
+    }
+    result
+}
+
+/// Go's `bytes.Replace(slice, old, new, n)` — replaces occurrences.
+pub fn bytes_replace(mut slice: Vec<u8>, old: &[u8], new: &[u8], n: i32) -> Vec<u8> {
+    if old.is_empty() {
+        return slice;
+    }
+    let mut result = Vec::new();
+    let mut count = 0;
+    let mut pos = 0;
+    while pos <= slice.len().saturating_sub(old.len()) && (n < 0 || count < n) {
+        if slice[pos..pos + old.len()] == *old {
+            result.extend_from_slice(new);
+            count += 1;
+            pos += old.len();
+        } else {
+            result.push(slice[pos]);
+            pos += 1;
+        }
+    }
+    result.extend_from_slice(&slice[pos..]);
+    result
+}
+
+// ─── Go encoding/json package ──────────────────────────────────────────────
+
+/// Go's `json.Marshal(v)` — marshals a value to JSON bytes.
+pub fn json_marshal<T: serde::Serialize>(v: &T) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(v).map_err(|e| e.to_string())
+}
+
+/// Go's `json.Unmarshal(data, v)` — unmarshals JSON bytes into a value.
+pub fn json_unmarshal<T: serde::de::DeserializeOwned>(data: &[u8]) -> Result<T, String> {
+    serde_json::from_slice(data).map_err(|e| e.to_string())
+}
+
+// ─── Go time package ───────────────────────────────────────────────────────
+
+/// Go's `time.Now()` — returns the current local time.
+pub fn time_now() -> std::time::SystemTime {
+    std::time::SystemTime::now()
+}
+
+/// Go's `time.Since(t)` — returns the time elapsed since t.
+pub fn time_since(t: std::time::SystemTime) -> std::time::Duration {
+    t.elapsed().unwrap_or(std::time::Duration::ZERO)
+}
+
+/// Go's `time.Until(t)` — returns the duration until t.
+pub fn time_until(t: std::time::SystemTime) -> std::time::Duration {
+    t.duration_since(std::time::SystemTime::now()).unwrap_or(std::time::Duration::ZERO)
+}
+
+/// Go's `time.Sleep(d)` — sleeps for the duration d.
+pub fn time_sleep(d: std::time::Duration) {
+    std::thread::sleep(d);
+}

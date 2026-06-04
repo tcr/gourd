@@ -384,6 +384,7 @@ pub(crate) struct GoParam {
     pub(crate) id: Ident,
     pub(crate) ty: Option<Box<syn::Type>>,
     pub(crate) slice_elem: Option<syn::Type>,
+    pub(crate) variadic: bool, // `...T` variadic parameter
 }
 
 /// Function return type.

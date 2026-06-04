@@ -200,6 +200,14 @@ When working with the concurrency primitives:
 | `fmt.Sprintf` | `fmt_sprintf(...)` | Runtime helper handles `%d`, `%s`, `%v`, `%f` |
 | `fmt.Print/Println/Printf` | `fmt_print` / `fmt_println` / `fmt_printf` | Runtime helpers for format specifiers |
 | Pointers (`&`, `*`) | `&` / `*` via `UnOp` | Address-of and dereference |
+| `continue` | `continue [label]` | Optional label support |
+| Variadic params (`...T`) | `&[T]` slice ref | `GoParam.variadic` flag added to AST |
+| `strings` stdlib | `strings.Replace` → `strings_replace(...)` | 16 functions in transpiler + runtime |
+| `os` stdlib | `os.Open` → `os_open(...)` | 10 functions in transpiler + runtime |
+| `io` stdlib | `io.Copy` → `io_copy(...)` | 2 functions |
+| `bytes` stdlib | `bytes.Contains` → `bytes_contains(...)` | 7 functions |
+| `json` stdlib | `json.Marshal` → `json_marshal(...)` | 2 functions |
+| `time` stdlib | `time.Now` → `time_now(...)` | 4 functions |
 
 ### When to use
 
@@ -290,6 +298,17 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | `defer` | inline Drop guard | ✅ |
 | `complex` | — | ❌ |
 | `min` / `max` | — | ❌ |
+
+### Standard library packages
+
+| Package | Key Functions | Status |
+|---------|--------------|--------|
+| `strings` | Replace, ReplaceAll, HasPrefix, HasSuffix, Contains, Split, Join, Index, LastIndex, Trim, TrimLeft, TrimRight, ToUpper, ToLower, Repeat, Fields | ✅ 16 functions |
+| `os` | Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, Args | ✅ 10 functions |
+| `io` | Copy, ReadAll | ✅ 2 functions |
+| `bytes` | Contains, HasPrefix, HasSuffix, Index, Split, Join, Replace | ✅ 7 functions |
+| `json` | Marshal, Unmarshal | ✅ 2 functions |
+| `time` | Now, Since, Until, Sleep | ✅ 4 functions |
 
 
 ## Working with files

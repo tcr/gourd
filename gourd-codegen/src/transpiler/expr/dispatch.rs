@@ -7,7 +7,7 @@ use quote::quote;
 use syn::Expr;
 
 /// Emit a compile-time error for forms we don't support.
-pub(crate) fn emit_todo(msg: &'static str) -> TokenStream {
+pub(crate) fn emit_todo(msg: &str) -> TokenStream {
     quote! { {
         compile_error!(concat!("TODO: ", #msg));
         unreachable!()
@@ -39,6 +39,7 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Cast(e)           => super::operators::transpile_cast(e),
         Expr::Assign(e)         => super::operators::transpile_assign(e),
         Expr::Break(e)          => super::operators::transpile_break(e),
+        Expr::Continue(e)       => super::operators::transpile_continue(e),
         Expr::Reference(e)      => {
             // Rust `&expr` — Go `&x` is address-of, but in the transpiled
             // output `&x` becomes a reference in Rust, which is fine.

@@ -212,45 +212,123 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             let type_str = quote! { #type_expr }.to_string();
 
             // Determine if this is a channel, map, or slice type.
-            // Channel types use the `chan T` marker (either `chan` or `__go_chan`).
-            // Map types use `map[K]V` syntax.
-            // Slice types use `[]T` syntax.
             if type_str.contains("chan") || type_str.contains("__go_chan") {
-                // Channel: make(chan T) or make(chan T, cap)
                 if make_args.len() == 2 {
-                    // Unbuffered: make(chan T) → GoChannel::<T>::new()
-                    quote! { GoChannel::<#type_tokens>::new() }
+                    return quote! { GoChannel::<#type_tokens>::new() };
                 } else {
-                    // Buffered: make(chan T, cap) → GoChannel::<T>::with_capacity(cap)
                     let cap = super::dispatch::go_to_rust(&make_args[1]);
-                    quote! { GoChannel::<#type_tokens>::with_capacity(#cap) }
+                    return quote! { GoChannel::<#type_tokens>::with_capacity(#cap) };
                 }
-            } else if type_str.contains("map[") {
-                // Map: make(map[K]V) → HashMap::new()
-                quote! { ::std::collections::HashMap::new() }
-            } else if type_str.starts_with("[]") {
-                // Slice: make([]T, len) → vec![0; len]
-                // Need to use default() for the repeat value since type_tokens is a type
+            }
+            if type_str.contains("map[") {
+                return quote! { ::std::collections::HashMap::new() };
+            }
+            if type_str.starts_with("[]") {
                 let type_default: TokenStream = quote! { #type_tokens::default() };
                 if make_args.len() == 2 {
                     let len = super::dispatch::go_to_rust(&make_args[1]);
-                    quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() }
+                    return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
                 } else {
-                    // make([]T, len, cap) — cap is ignored, same as len
                     let len = super::dispatch::go_to_rust(&make_args[1]);
-                    quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() }
+                    return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
                 }
-            } else {
-                // Unknown type — emit compile_error!
-                emit_todo("unsupported type in make()")
             }
+            return emit_todo("unsupported type in make()");
         } else {
-            emit_todo("make() requires at least a type argument")
+            return emit_todo("make() requires at least a type argument");
         }
-    } else {
-        let func = super::dispatch::go_to_rust(&input.func);
-        quote! { #func( #(#args),* ) }
     }
+    // Go `strings` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_strings_call(path)
+    {
+        match func_name.as_str() {
+            "Replace" => return quote! { strings_replace( #(#args),* ) },
+            "ReplaceAll" => return quote! { strings_replace_all( #(#args),* ) },
+            "HasPrefix" => return quote! { has_prefix( #(#args),* ) },
+            "HasSuffix" => return quote! { has_suffix( #(#args),* ) },
+            "Contains" => return quote! { contains_str( #(#args),* ) },
+            "Split" => return quote! { split( #(#args),* ) },
+            "Join" => return quote! { join( #(#args),* ) },
+            "Index" => return quote! { index_str( #(#args),* ) },
+            "LastIndex" => return quote! { last_index_str( #(#args),* ) },
+            "Trim" => return quote! { trim( #(#args),* ) },
+            "TrimLeft" => return quote! { trim_left( #(#args),* ) },
+            "TrimRight" => return quote! { trim_right( #(#args),* ) },
+            "ToUpper" => return quote! { to_upper( #(#args),* ) },
+            "ToLower" => return quote! { to_lower( #(#args),* ) },
+            "Repeat" => return quote! { repeat( #(#args),* ) },
+            "Fields" => return quote! { fields( #(#args),* ) },
+            _ => return emit_todo(&format!("strings.{}()", func_name)),
+        }
+    }
+    // Go `os` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_os_call(path)
+    {
+        match func_name.as_str() {
+            "Open" => return quote! { os_open( #(#args),* ) },
+            "ReadFile" => return quote! { os_read_file( #(#args),* ) },
+            "WriteFile" => return quote! { os_write_file( #(#args),* ) },
+            "Mkdir" => return quote! { os_mkdir( #(#args),* ) },
+            "MkdirAll" => return quote! { os_mkdir_all( #(#args),* ) },
+            "Remove" => return quote! { os_remove( #(#args),* ) },
+            "Chdir" => return quote! { os_chdir( #(#args),* ) },
+            "Getenv" => return quote! { os_getenv( #(#args),* ) },
+            "Setenv" => return quote! { os_setenv( #(#args),* ) },
+            _ => return emit_todo(&format!("os.{func_name}()")),
+        }
+    }
+    // Go `io` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_io_call(path)
+    {
+        match func_name.as_str() {
+            "Copy" => return quote! { io_copy( #(#args),* ) },
+            "ReadAll" => return quote! { io_read_all( #(#args),* ) },
+            _ => return emit_todo(&format!("io.{func_name}()")),
+        }
+    }
+    // Go `bytes` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_bytes_call(path)
+    {
+        match func_name.as_str() {
+            "Contains" => return quote! { bytes_contains( #(#args),* ) },
+            "HasPrefix" => return quote! { bytes_has_prefix( #(#args),* ) },
+            "HasSuffix" => return quote! { bytes_has_suffix( #(#args),* ) },
+            "Index" => return quote! { bytes_index( #(#args),* ) },
+            "Split" => return quote! { bytes_split( #(#args),* ) },
+            "Join" => return quote! { bytes_join( #(#args),* ) },
+            "Replace" => return quote! { bytes_replace( #(#args),* ) },
+            _ => return emit_todo(&format!("bytes.{func_name}()")),
+        }
+    }
+    // Go `encoding/json` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_json_call(path)
+    {
+        match func_name.as_str() {
+            "Marshal" => return quote! { json_marshal( #(#args),* ) },
+            "Unmarshal" => return quote! { json_unmarshal( #(#args),* ) },
+            _ => return emit_todo(&format!("json.{func_name}()")),
+        }
+    }
+    // Go `time` package top-level functions
+    if let Expr::Path(path) = &*input.func
+        && let Some(func_name) = try_parse_time_call(path)
+    {
+        match func_name.as_str() {
+            "Now" => return quote! { time_now( #(#args),* ) },
+            "Since" => return quote! { time_since( #(#args),* ) },
+            "Until" => return quote! { time_until( #(#args),* ) },
+            "Sleep" => return quote! { time_sleep( #(#args),* ) },
+            _ => return emit_todo(&format!("time.{func_name}()")),
+        }
+    }
+    // Default: regular function call
+    let func = super::dispatch::go_to_rust(&input.func);
+    quote! { #func( #(#args),* ) }
 }
 
 /// Handle Rust macro invocations (e.g. `vec![...]`) passed through `quote!`.
@@ -298,9 +376,80 @@ pub fn transpile_field(input: &ExprField) -> TokenStream {
     quote! { #base.#field }
 }
 
+/// Try to parse strings package function calls: `strings.Replace(...)`, etc.
+fn try_parse_strings_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "strings" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
+/// Try to parse os package function calls: `os.Open(...)`, etc.
+fn try_parse_os_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "os" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
+/// Try to parse `io` package function calls: `io.Copy(...)`, etc.
+fn try_parse_io_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "io" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
+/// Try to parse `bytes` package function calls: `bytes.Contains(...)`, etc.
+fn try_parse_bytes_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "bytes" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
+/// Try to parse `encoding/json` package function calls: `json.Marshal(...)`, etc.
+fn try_parse_json_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "json" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
+/// Try to parse `time` package function calls: `time.Now()`, etc.
+fn try_parse_time_call(path: &syn::ExprPath) -> Option<String> {
+    if path.path.segments.len() != 2 {
+        return None;
+    }
+    let pkg = path.path.segments[0].ident.to_string();
+    if pkg != "time" {
+        return None;
+    }
+    Some(path.path.segments[1].ident.to_string())
+}
+
 /// Try to parse `fmt.Sprintf`, `fmt.Print`, etc. from a field access.
 fn try_parse_fmt_field(base: &syn::Expr, field: &syn::Member) -> Option<TokenStream> {
-    // Check if base is the identifier `fmt`
     let base_ident = match base {
         syn::Expr::Path(p) => {
             if p.path.segments.len() == 1 && p.path.segments[0].ident == "fmt" {
@@ -329,3 +478,5 @@ fn try_parse_fmt_field(base: &syn::Expr, field: &syn::Member) -> Option<TokenStr
         _ => None,
     }
 }
+
+
