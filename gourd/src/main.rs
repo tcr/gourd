@@ -88,11 +88,7 @@ fn main() {
 
 /// Parse transpiled TokenStream into a syn::File and format with prettyplease.
 fn format_rust_output(ts: &TokenStream) -> String {
-    let ast: syn::File = match syn::parse2(ts.clone()) {
-        Ok(ast) => ast,
-        Err(_) => return ts.to_string().trim().to_string(),
-    };
-    prettyplease::unparse(&ast)
+    ts.to_string().trim().to_string()
 }
 
 /// Read source text from file, stdin, or treat input as inline Go code.

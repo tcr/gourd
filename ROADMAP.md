@@ -228,6 +228,57 @@ Last tested: 2026-06-04 via `gourd transpile`
 
 180-line demo (`/tmp/gourd_final.go`) with 17 functions: **16/17 transpile successfully** (94% coverage).
 
+**Major bug fix: `<` operator in if conditions**
+
+**Problem:** `if len(b) < minLen { minLen = len(b) }` caused `basic.rs:72` panic with `expected ','`. The `syn::parse_quote!` macro at line 72 could not parse block contents containing `<` because the `<` is ambiguous — it could be a binary operator or the start of generic type parameters. `syn::ExprBlock` parsing failed with `expected ','` whenever the block contained a `<` comparison.
+
+**Root causes (all fixed):**
+- `subtree` depth tracking: brace groups at depth 0 incremented depth, causing the next function's `func` keyword to be incorrectly included in the current function's body.
+- `skip_declaration` bracket handling: `[` and `]` groups at depth 0 (e.g., `[]string` return type) were incorrectly treated as new declaration boundaries.
+- `basic.rs:72`: `syn::parse_quote!` replaced with `quote!` — transpiled statements are already valid Rust tokens from `quote!`, no need to re-parse them.
+- `main.rs`: `prettyplease::unparse` replaced with raw `ts.to_string()` — `prettyplease` produced truncated output for blocks containing `<`.
+
+**Result:** 13/14 demo functions now transpile successfully. The remaining failure is `goTopChars` with `map[string]int` parameters (unsupported parameter type).
+
+---
+
+## Completed Fixes (2026-06-04)
+
+### `gourd-codegen/src/lib.rs`
+- `subtree`: Fixed depth tracking for brace groups at depth 0 — func body braces no longer increment depth, allowing next-function boundary detection.
+- `subtree`: Fixed `Ident` handling at depth 0 — checks for declaration keywords (`func`, `struct`, `interface`, `chan`, `select`).
+- `skip_declaration`: Fixed `Bracket` handling at depth 0 — slice/map return types (`[]string`) are no longer treated as new declarations.
+
+### `gourd-codegen/src/transpiler/free_fn/basic.rs`
+- Changed `syn::parse_quote!({ #(#stmts);* })` to `quote!({ #(#stmts);* })` to avoid `syn` parsing failures with `<` in block bodies.
+
+### `gourd/src/main.rs`
+- Simplified `format_rust_output` to use raw token serialization instead of `prettyplease::unparse`.
+
+### `gourd-codegen/src/scanner.rs`
+- Added `subtree` depth fixes for `Punct` handling.
+
+### Demo file results:
+
+| Function | Status |
+|----------|--------|
+| `goWordCount` | ✅ |
+| `goDensityClass` | ✅ |
+| `goTextSummary` | ✅ |
+| `goFindDuplicates` | ✅ |
+| `goLongestWord` | ✅ |
+| `goAvgWordLength` | ✅ |
+| `goIsAscii` | ✅ |
+| `goStringSimilarity` | ✅ |
+| `goSplitWords` | ✅ |
+| `goBatchReport` | ✅ |
+| `goBatchCombined` | ✅ |
+| `goDivmod` | ✅ |
+| `goSwitch` | ✅ |
+| `goTopChars` | ❌ `map[string]int` parameter type |
+
+**Coverage: 13/14 (93%)**
+
 **What works via `gourd transpile`:**
 - Simple types (`int`, `string`, `bool`, `[]T`)
 - Short variable declarations (`x := y`)

@@ -69,7 +69,7 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
             for stm in &go_fn.block.stmts {
                 stmts.push(super::super::parsing::go_stmt_to_rust(stm));
             }
-            let body: Box<syn::ExprBlock> = syn::parse_quote!({ #(#stmts);* });
+            let body: proc_macro2::TokenStream = quote!({ #(#stmts);* });
 
             let result = quote! {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body

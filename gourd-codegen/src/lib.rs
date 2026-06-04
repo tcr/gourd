@@ -130,7 +130,24 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
 
     for tree in &trees[start..] {
         match tree {
-            proc_macro2::TokenTree::Ident(_) | proc_macro2::TokenTree::Literal(_) => {
+            proc_macro2::TokenTree::Ident(ident) => {
+                // At depth 0, if we've already collected something and see another
+                // declaration keyword (func, struct, interface, chan, select),
+                // stop — this is a new top-level declaration.
+                if depth == 0 && collected {
+                    let name = ident.to_string();
+                    if matches!(name.as_str(), "func" | "fn" | "struct" | "interface" | "chan" | "select") {
+                        return result;
+                    }
+                }
+                if depth == 0 && !collected {
+                    collected = true;
+                }
+                if collected {
+                    result.extend([tree.clone()]);
+                }
+            }
+            proc_macro2::TokenTree::Literal(_) => {
                 if depth == 0 && !collected {
                     collected = true;
                 }
@@ -147,8 +164,11 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
                         // For struct: return immediately
                         return result;
                     }
-                    // For func: continue collecting
-                    depth += 1;
+                    // For func: DON'T increment depth. Keep depth at 0 so the
+                    // next tree's check (`depth == 0 && collected`) fires
+                    // correctly when the next function's `func` keyword appears.
+                    // The body is included as an atomic group — no need to scan
+                    // its internals.
                     continue;
                 }
                 // For paren groups at depth 0 (func: receiver), keep as Group
@@ -222,9 +242,9 @@ fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
                     }
                 }
                 proc_macro2::Delimiter::Bracket => {
-                    if depth == 0 {
-                        return start + i + 1;  // new declaration (e.g., slice/map type)
-                    }
+                    // Bracket groups at depth 0 are part of type annotations
+                    // (e.g., `[]string` in return type `[]string`), NOT new declarations.
+                    // Always treat as part of current declaration.
                     depth += 1;
                 }
                 _ => {}
