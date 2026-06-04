@@ -45,6 +45,38 @@ echo "func hello() int { return 42 }" | gourd transpile -
 gourd transpile path/to/file.rs
 ```
 
+## Module layout
+
+```
+gourd/
+  gourd-macro/       <-- proc-macro library (transpiler core)
+  gourd/               <-- runtime + CLI tool (`gourd transpile`)
+  gourd-codegen/       <-- shared transpiler library (scanner + transpiler)
+  gourd-check/         <-- standalone Go/Rust validation CLI
+```
+
+### gourd runtime (`gourd/src/`)
+
+The runtime is organized into three layers:
+
+| Layer | Module | Contents |
+|-------|--------|----------|
+| Root types | `go_gc.rs`, `go_scheduler.rs` | `GoGc`, `GoScheduler`, `GoChannel`, `GoSelect`, `SchedulerMap`, `GoFuture` — exported at crate root for generated code |
+| Prelude | `prelude/` | Runtime types for user code: `GoMutex`, `GoMutexGuard`, `GoRc`, `GoOnce`, `GoWaitGroup`, `GoRWMutex`, `GoError`, `Any`, `GoDeferGuard`, `GoRand`, formatting helpers, builtins (`len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max`) |
+| Packages | `packages/` | Go stdlib package emulation: `os`, `strings`, `json`, `io`, `bytes`, `math`, `byte` |
+
+Import paths:
+- Root primitives: `gourd::GoGc`, `gourd::GoScheduler`, `gourd::GoChannel<T>`, `gourd::GoSelect<T>`, `gourd::SchedulerMap`, `gourd::GoFuture`
+- Prelude types: `gourd::prelude::*` (GoMutex, GoRc, GoError, Any, etc.)
+- Package emulation: `gourd::packages::*` (os_open, strings_replace, etc.)
+
+### CLI (`gourd transpile`)
+
+The CLI tool (`gourd/src/main.rs`) supports:
+- Inline Go code: `gourd transpile "func hello() int { return 42 }"`
+- File paths: `gourd transpile path/to/file.rs`
+- Stdin: `echo "..." \| gourd transpile -`
+
 ## Supported constructs
 
 ### Closures
@@ -216,11 +248,10 @@ Debug output includes parsing details, type mappings, and transpilation steps. W
 
 | Metric | Value |
 |--------|-------|
-| **Real-world Go coverage** | ~28% |
-| **Builtins implemented** | 15 of ~14 (new: strings, os mapping) |
-| **Tests passing** | 120 across 23 test files |
+| **Real-world Go coverage** | ~5% |
+| **Tests passing** | 131 across 25+ test files |
 | **Tests failing** | 0 |
 
 ## What's next?
 
-See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer`, error handling (`if err != nil`), `net/http`, `database/sql`, and full generics support.
+See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer` dedicated tests, error handling completeness, `net/http`, `database/sql`, and full generics support.

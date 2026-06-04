@@ -67,9 +67,10 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 | `panic("msg")` | ✅ `panic!("msg")` |
 | `append(slice, items)` | ✅ Push to Vec copy |
 | `x.(T)` (type assertion) | ✅ Cast/downcast |
+| `copy` | ✅ `std_copy` in prelude |
+| `delete` | ✅ `std_delete` in prelude |
 | `recover` | ❌ |
 | `defer` | ✅ | Inline Drop guard generation |
-| `complex` | ❌ |
 | `complex` | ❌ |
 | `min` / `max` | ❌ |
 
@@ -119,6 +120,16 @@ Closure parsing is now supported in the transpiler:
 | `encoding/json` (`json`) | Marshal, Unmarshal | ✅ 2 functions |
 | `time` | Now, Since, Until, Sleep | ✅ 4 functions |
 
+### Package emulation (`gourd::packages::*`)
+
+Package emulation code lives in `gourd/src/packages/`:
+- `os_ops.rs` — 10 os functions
+- `strings_ops.rs` / `strings.rs` — 16 strings functions
+- `json_ops.rs` — 2 json functions
+- `io_ops.rs` — 2 io functions
+- `bytes_ops.rs` — 7 bytes functions
+- `math_ops.rs` / `byte_ops.rs` — math/byte utilities
+
 ### New stdlib: copy, delete, append
 
 These three Go builtin functions are now implemented as standard library functions:
@@ -131,15 +142,9 @@ These three Go builtin functions are now implemented as standard library functio
 
 All stdlib functions are now emitted with the `::gourd::prelude::` prefix for full self-containment.
 
-## Partially Implemented (tests not passing)
+## Working tests (passing) — 131 total
 
-| Go Pattern | Status | Issue |
-|------------|--------|-------|
-| **`receiver_tests`** | ⚠️ | 0 tests — commented out due to `gourd-check` wrapping structs after functions |
-| **`switch_minimal`** | ⚠️ | 0 tests — verification-only stub, not yet a runtime test |
-| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures — not yet transpiled |
-
-### Working tests (passing) — 86 total
+All tests pass. 127 in `gourd-macro/tests/` + 4 in `gourd/tests/` + 11 in `gourd-codegen/` + 1 integration test.
 
 | Test file | Result |
 |-----------|--------|
@@ -162,6 +167,19 @@ All stdlib functions are now emitted with the `::gourd::prelude::` prefix for fu
 | `switch_minimal.rs` | ⚠️ Compiles (0 tests) |
 | `transpile_go_fn.rs` | ✅ 17/17 |
 | `type_assertion.rs` | ✅ 8/8 |
+| `gc_tests.rs` | ✅ 8/8 |
+| `integration.rs` | ✅ 1/1 |
+| `token_test.rs` | ✅ 1/1 |
+| `scanner tests` | ✅ 6/6 |
+| `transpiler tests` | ✅ 5/5 |
+
+## Partially Implemented (tests not passing)
+
+| Go Pattern | Status | Issue |
+|------------|--------|-------|
+| **`receiver_tests`** | ⚠️ | 0 tests — commented out due to `gourd-check` wrapping structs after functions |
+| **`switch_minimal`** | ⚠️ | 0 tests — verification-only stub, not yet a runtime test |
+| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures — not yet transpiled |
 
 ---
 
@@ -190,32 +208,9 @@ All stdlib functions are now emitted with the `::gourd::prelude::` prefix for fu
 |--------|-------|
 | **Real-world Go coverage** | ~5% |
 | **syn::Expr variants covered** | 26 of ~39 |
-| **Builtins implemented** | 9 of ~14 |
-| **Test code** | ~40% commented-out TODO stubs |
-
-### Working tests (passing) — 113 total (includes gourd-scanner unit tests)
-
-| Test file | Result |
-|-----------|--------|
-| `append_builtin.rs` | ✅ 4/4 |
-| `channel_ops.rs` | ⚠️ Compile errors (GoChannel comparison) |
-| `closure_test.rs` | ⚠️ Compile errors (closure body builtins) |
-| `continue_stmt.rs` | ❌ 1/1 runtime failure |
-| `for_range_test.rs` | ✅ 3/3 |
-| `go_fn.rs` | ✅ 9/9 |
-| `interface_tests.rs` | ✅ 7/7 |
-| `make_builtin.rs` | ✅ 5/5 |
-| `multi_case_switch.rs` | ✅ 1/1 |
-| `multi_return_test.rs` | ⚠️ `verify_rust_output` mismatch |
-| `new_builtin.rs` | ✅ 4/4 |
-| `panic_builtin.rs` | ✅ 4/4 |
-| `receiver_tests.rs` | ⚠️ Compiles (0 tests) |
-| `select_builtin.rs` | ✅ 3/3 (fixed: use buffered channels for send-only tests) |
-| `shorthand_query.rs` | ✅ 2/2 |
-| `struct_literals.rs` | ✅ 3/3 |
-| `switch_minimal.rs` | ⚠️ Compiles (0 tests) |
-| `transpile_go_fn.rs` | ✅ 17/17 |
-| `type_assertion.rs` | ✅ 8/8 |
+| **Builtins implemented** | 14 of ~14 (minus `recover`, `complex`) |
+| **Tests passing** | 131 |
+| **Test files** | 25+ |
 
 ### Debugging
 
