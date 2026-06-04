@@ -22,6 +22,7 @@ pub mod math_ops;
 pub mod os_ops;
 pub mod strings;
 pub mod strings_ops;
+pub mod time_ops;
 
 // ─── Re-exports ────────────────────────────────────────────────────────────
 
@@ -41,8 +42,14 @@ pub use bytes_ops::{bytes_contains, bytes_has_prefix, bytes_has_suffix, bytes_in
 // JSON operations
 pub use json_ops::{json_marshal, json_unmarshal};
 
+// Time operations
+pub use time_ops::{time_now, time_since, time_until, time_sleep};
+
 // Math operations
 pub use math_ops::{abs_i32, abs_i64, abs_f64, sqrt, floor, ceil, round, min_f64, max_f64, PI, E, exp, log, log10, pow, sign};
 
 // Byte/rune operations
 pub use byte_ops::{byte_of, rune_of, string_to_bytes, bytes_to_string};
+
+#[cfg(test)]
+mod tests;
