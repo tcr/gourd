@@ -8,7 +8,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
-use syn::{Expr, Ident};
+use syn::Expr;
 
 use super::super::ast::{GoBlock, GoSelect, GoSelectCase};
 use super::super::expr::go_to_rust;

@@ -12,7 +12,7 @@ use super::super::stmt_to_rust::go_stmt_to_rust;
 /// Top-level: parse and transpile a Go anonymous function to Rust closure.
 pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
     let trees: Vec<TokenTree> = input.clone().into_iter().collect();
-    eprintln!("DEBUG go_to_rust_closure: {}", input);
+    if crate::debug::enabled() { eprintln!("DEBUG go_to_rust_closure: {}", input); }
 
     // Validate: must start with `func`
     if trees.is_empty() {
@@ -81,11 +81,11 @@ pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
                     );
                     quote! { #brace_group }
                 };
-                eprintln!("DEBUG closure body: {}", wrapped_body);
+                if crate::debug::enabled() { eprintln!("DEBUG closure body: {}", wrapped_body); }
                 match parse2::<GoBlock>(wrapped_body) {
                     Ok(go_block) => {
                         let stmts: Vec<TokenStream> = go_block.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
-                        eprintln!("DEBUG closure body parsed: {}", quote! { #(#stmts);* });
+                        if crate::debug::enabled() { eprintln!("DEBUG closure body parsed: {}", quote! { #(#stmts);* }); }
                         quote! { { #(#stmts);* } }
                     } Err(_) => {
                         // For bodies starting with `if`, handle them specially
@@ -262,8 +262,7 @@ fn map_go_types(ty: &syn::Type) -> syn::Type {
                     // Extract element type from generic args: `chan<T>`
                     let seg = &type_path.path.segments[0];
                     if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                        if let Some(syn::GenericArgument::Type(elem_ty)) = args.args.first() {
-                            let mapped = map_go_types(elem_ty);
+                        if let Some(syn::GenericArgument::Type(_)) = args.args.first() {
                             return syn::Type::Path(syn::TypePath {
                                 qself: None,
                                 path: syn::Path::from(syn::Ident::new("GoChannel", proc_macro2::Span::call_site())),

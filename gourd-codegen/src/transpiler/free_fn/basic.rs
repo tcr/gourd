@@ -10,11 +10,11 @@ use quote::quote;
 
 /// Top-level: parse and transpile a Go function declaration to Rust.
 pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
-    eprintln!("DEBUG go_to_rust_fn input: {}", input.to_string());
+    if crate::debug::enabled() { eprintln!("DEBUG go_to_rust_fn input: {}", input.to_string()); }
     match syn::parse2::<GoFn>(input) {
         Ok(go_fn) => {
-            eprintln!("DEBUG go_to_rust_fn parsed: ident={}, output={:?}, stmts={}", 
-                go_fn.ident, go_fn.output.as_ref().map(|o| o.tys.len()), go_fn.block.stmts.len());
+            if crate::debug::enabled() { eprintln!("DEBUG go_to_rust_fn parsed: ident={}, output={:?}, stmts={}", 
+                go_fn.ident, go_fn.output.as_ref().map(|o| o.tys.len()), go_fn.block.stmts.len()); }
             // Preserve Go function name (camelCase stays camelCase)
             let fn_name = &go_fn.ident;
             let generics = &go_fn.generics;
@@ -71,11 +71,11 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
             let result = quote! {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body
             };
-            eprintln!("DEBUG go_to_rust_fn output: {}", result.to_string());
+            if crate::debug::enabled() { eprintln!("DEBUG go_to_rust_fn output: {}", result.to_string()); }
             result
         }
         Err(e) => {
-            eprintln!("DEBUG go_to_rust_fn error: {}", e);
+            if crate::debug::enabled() { eprintln!("DEBUG go_to_rust_fn error: {}", e); }
             e.to_compile_error()
         }
     }

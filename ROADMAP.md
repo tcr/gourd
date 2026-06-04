@@ -182,6 +182,16 @@ Closure parsing is now supported in the transpiler:
 | `transpile_go_fn.rs` | ✅ 17/17 |
 | `type_assertion.rs` | ✅ 8/8 |
 
+### Debugging
+
+Set `GOURD_DEBUG=1` to enable verbose diagnostic output during transpilation:
+
+```bash
+GOURD_DEBUG=1 gourd transpile "func hello() int { return 42 }"
+```
+
+The transpiler prints parsing details, type mappings, and transpilation steps to stderr. Useful for investigating failed transpilation or unexpected output. Zero overhead when unset.
+
 ### What would it take to be viable?
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.

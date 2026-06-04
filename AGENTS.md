@@ -85,6 +85,16 @@ cargo test --no-default-features  # ~6s, no go build validation
 cargo test -p gourd-check          # pre-compilation validation only
 ```
 
+### Debug Output
+
+Set `GOURD_DEBUG=1` to enable verbose diagnostic output during transpilation:
+
+```bash
+GOURD_DEBUG=1 gourd transpile "func hello() int { return 42 }"
+```
+
+When set, the transpiler prints parsing details, type mappings, and transpilation steps to stderr. This is useful for investigating failed transpilation or unexpected output. The flag is runtime-configured (checked via `std::env::var`), so it has zero overhead when unset. Debug code lives in `gourd-codegen/src/debug.rs` and all debug `eprintln!` calls are wrapped in `if crate::debug::enabled() { ... }` guards.
+
 ## `verify_rust_output` — compile-time transpilation verification
 
 The `#[verify_rust_output({ expected_rust })]` attribute macro applies to any `go!` block to **assert at compile time** that the transpiled output matches the expected Rust tokens. It lives in `gourd-macro/src/lib.rs` and delegates to `gourd_codegen::verify_short()`.

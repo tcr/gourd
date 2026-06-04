@@ -157,7 +157,7 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
     if adv_fork.peek(syn::token::Bracket) {
         input.advance_to(&adv_fork);
         let _ts: proc_macro2::TokenTree = input.parse()?;
-        eprintln!("DEBUG: consumed [, checking rest");
+        if crate::debug::enabled() { eprintln!("DEBUG: consumed [, checking rest"); }
         while !input.is_empty() && !input.peek(syn::token::Bracket) && !input.peek(syn::token::Brace) {
             let _ = input.parse::<proc_macro2::TokenTree>()?;
         }
@@ -192,7 +192,7 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
             return Ok(true);
         }
     }
-    eprintln!("DEBUG: no slice literal found");
+    if crate::debug::enabled() { eprintln!("DEBUG: no slice literal found"); }
 
     // Check for type assertion: `return x.(T)`
     let after_ret = input.fork();

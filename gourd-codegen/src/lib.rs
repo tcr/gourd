@@ -13,17 +13,18 @@
 //! - `verify_short(attr, input)` — verify Go→Rust transpilation output
 //! - `normalize_tokens(tokens)` — normalize token streams for comparison
 
+pub mod debug;
 pub mod scanner;
 mod transpiler;
 mod validate;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use quote::ToTokens;
 
 pub use transpiler::free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch};
 pub use transpiler::funcs::go_to_rust_receiver_fn;
 pub use validate::{validate_go, validate_rust};
+pub use debug::enabled;
 
 /// Public transpilation entry point.
 ///
@@ -574,5 +575,11 @@ mod tests {
         };
         let result = transpile_go(input.clone());
         println!("Struct+receiver result: {}", result);
+    }
+
+    #[test]
+    fn test_func_hello() {
+        let result = transpile_go_text("func hello() int { return 42 }");
+        println!("func hello result: '{}'", result);
     }
 }

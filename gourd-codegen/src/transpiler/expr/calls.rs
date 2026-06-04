@@ -9,6 +9,34 @@ use super::dispatch::emit_todo;
 
 pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
+
+    // Handle Go builtins that don't have direct Rust equivalents
+    if let Expr::Path(path) = &*input.func {
+        if let Some(name) = path.path.get_ident() {
+            let name_str = name.to_string();
+            
+            // `copy(dst, src)` → dst.copy_from_slice(&src) returning len
+            if name_str == "copy" {
+                if input.args.len() != 2 {
+                    return emit_todo("copy() requires exactly two arguments");
+                }
+                let dst = super::dispatch::go_to_rust(&input.args[0]);
+                let src = super::dispatch::go_to_rust(&input.args[1]);
+                return quote! { { #dst.copy_from_slice(&#src); #dst.len() } };
+            }
+            
+            // `delete(m, key)` → m.remove(&key)
+            if name_str == "delete" {
+                if input.args.len() != 2 {
+                    return emit_todo("delete() requires exactly two arguments");
+                }
+                let map = super::dispatch::go_to_rust(&input.args[0]);
+                let key = super::dispatch::go_to_rust(&input.args[1]);
+                return quote! { #map.remove(& #key) };
+            }
+        }
+    }
+
     if let Expr::Path(path) = &*input.func
         && let Some(name) = path.path.get_ident()
         && matches!(name.to_string().as_str(), "len" | "cap")

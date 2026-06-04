@@ -4,11 +4,7 @@
 
 use super::parsing::{GoFnInputs, GoFnOutput};
 use syn::ext::IdentExt;
-use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
-use syn::token;
-use proc_macro2::TokenStream;
-use quote::quote;
 use syn::{Expr, Ident};
 
 /// Receiver parsing: `(name Type)` or `(name *Type)` where * means pointer receiver.

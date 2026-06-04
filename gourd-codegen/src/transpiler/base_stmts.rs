@@ -169,7 +169,6 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
             if input.peek(syn::token::Bracket) {
                 // This is a Go slice literal like `[]int{1, 2, 3}`
                 // Extract elements from the brace-delimited group
-                let elem_fork = input.fork();
                 // Skip past `[]` and type
                 let _ts: proc_macro2::TokenTree = input.parse()?; // [
                 while !input.is_empty() && !input.peek(syn::token::Bracket) && !input.peek(syn::token::Brace) {

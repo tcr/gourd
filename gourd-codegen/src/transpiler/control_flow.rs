@@ -106,7 +106,6 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
 /// Parse `if cond { body } else { ... }`.
 pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     // Accept both `if` keyword (Rust) and `if` identifier (Go)
-    use syn::ext::IdentExt;
     if input.peek(syn::token::If) {
         input.parse::<syn::token::If>()?;
     } else if input.peek(syn::Ident) {

@@ -57,21 +57,19 @@ pub(crate) fn parse_closure(input: &TokenStream) -> Option<GoClosure> {
     i += 1;
 
     // Parse parameter list in parentheses
-    let mut params = Vec::new();
-    if i >= trees.len() {
+    let params: Vec<GoClosureParam> = if i >= trees.len() {
         return None;
-    }
-    if let TokenTree::Group(g) = &trees[i] {
+    } else if let TokenTree::Group(g) = &trees[i] {
         if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
             let param_tokens: Vec<TokenTree> = g.stream().into_iter().collect();
-            params = parse_closure_params(&param_tokens)?;
             i += 1;
+            parse_closure_params(&param_tokens)?
         } else {
             return None;
         }
     } else {
         return None;
-    }
+    };
 
     // Optional return type: either an ident or a grouped type
     let output = if i < trees.len() {

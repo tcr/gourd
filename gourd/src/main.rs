@@ -46,14 +46,13 @@ fn main() {
         Commands::Transpile { input } => {
             let source = read_source(&input);
 
-            // If input is inline Go code, wrap it in a go! block and parse directly
+            // Inline Go code: read_source already wraps in go! { ... }, so just find blocks
             if !input.ends_with(".go") && !input.ends_with(".rs") && input != "-" {
-                // Inline Go code — wrap in macro invocation so scan can extract it
-                let wrapped = format!("go! {{ {} }}", source);
-                let blocks = find_go_blocks_from_source(&wrapped, &input);
+                let blocks = find_go_blocks_from_source(&source, &input);
 
                 if blocks.is_empty() {
-                    let rust = transpile_go_text(&source);
+                    // Fallback: transpile the raw source directly
+                    let rust = transpile_go_text(&input);
                     println!("{}", format_rust_output(&rust));
                     return;
                 }

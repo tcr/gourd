@@ -2,7 +2,6 @@
 
 pub(crate) use super::ast::{GoFn, GoFnInputs, GoFnOutput, GoInterface, GoInterfaceMethod, GoParam, GoStruct, GoStructField};
 use proc_macro2::TokenTree;
-use quote::quote;
 use syn::ext::IdentExt;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream};
 use syn::punctuated::Punctuated;

@@ -161,6 +161,18 @@ gourd transpile "func hello() int { return 42 }"
 
 > Validation is **enabled by default** — every `go!` block is checked with `go build` at compile time. This adds compile time (~34s vs ~6s without validation) but ensures correctness. Use `--no-default-features` to disable validation for fast iterations, or use the `gourd-check` CLI for pre-compilation validation.
 
+## Debug Output
+
+Set the `GOURD_DEBUG` environment variable to print diagnostic messages to stderr:
+
+```bash
+GOURD_DEBUG=1 gourd transpile "func hello() int { return 42 }"
+```
+
+Debug output includes parsing details, type mappings, and transpilation steps. Without `GOURD_DEBUG`, output is clean — only the transpiled Rust tokens.
+
+> **Tip**: Useful for understanding what the transpiler sees when investigating failed transpilation or unexpected output. The flag is runtime-configured (checked at runtime via `std::env::var`), not compile-time — it has zero overhead when unset.
+
 ## Status
 
 | Metric | Value |

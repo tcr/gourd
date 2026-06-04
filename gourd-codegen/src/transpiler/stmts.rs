@@ -1,6 +1,6 @@
 //! Statement block parsing: `parse_go_block`, special statements, block parsing.
 
-pub(crate) use super::ast::{GoBlock, GoSelect, GoSelectCase, GoStmt};
+pub(crate) use super::ast::{GoBlock, GoStmt};
 use super::base_stmts::parse_base_stmt;
 use super::control_flow::{parse_go_for, parse_go_if, parse_go_while};
 use super::free_fn::select::parse_select_body;
@@ -9,11 +9,9 @@ use super::slice_map::parse_go_slice_literal;
 use super::switch::Switch;
 use super::types::map_go_type_str;
 use syn::ext::IdentExt;
-use syn::parse::discouraged::Speculative;
 use syn::parse::ParseStream;
 use syn::token;
 use syn::{Expr, Ident};
-use quote::quote;
 
 /// Parse a block of statements enclosed in braces.
 pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
