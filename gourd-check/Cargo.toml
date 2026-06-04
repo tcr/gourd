@@ -2,6 +2,7 @@
 name = "gourd-check"
 version = "0.1.0"
 edition = "2024"
+publish = false
 description = "Standalone Go/Rust source-level validation tool for gourd projects"
 license = "MIT"
 

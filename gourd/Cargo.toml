@@ -1,6 +1,6 @@
 [package]
 name = "gourd"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Go to Rust transpiler runtime + CLI tool"
 license = "MIT"
