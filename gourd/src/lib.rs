@@ -23,3 +23,6 @@ pub use gourd_codegen::{transpile_go, transpile_go_text};
 /// Source-level scanner for `go!` blocks and `#[verify_rust_output]` attributes.
 pub mod scanner;
 
+/// Go-style runtime prelude.
+pub mod prelude;
+

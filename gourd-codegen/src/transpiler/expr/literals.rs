@@ -6,6 +6,27 @@ use syn::{ExprArray, ExprLit, ExprParen, ExprPath};
 
 use super::super::parsing::ElemParser;
 
+/// Try to parse `fmt.Sprintf`, `fmt.Print`, `fmt.Println`, `fmt.Printf`
+/// from a path (e.g. `fmt::Sprintf` in Rust). Maps to `fmt_sprintf`, `fmt_print`, etc.
+fn try_parse_fmt_method_call(path: &syn::Path) -> Option<TokenStream> {
+    let segs = &path.segments;
+    if segs.len() != 2 {
+        return None;
+    }
+    let first = &segs[0];
+    if first.ident != "fmt" {
+        return None;
+    }
+    let second = &segs[1];
+    match second.ident.to_string().as_str() {
+        "Sprintf" => Some(quote! { fmt_sprintf }),
+        "Print" => Some(quote! { fmt_print }),
+        "Println" => Some(quote! { fmt_println }),
+        "Printf" => Some(quote! { fmt_printf }),
+        _ => None,
+    }
+}
+
 pub fn transpile_lit(input: &ExprLit) -> TokenStream {
     let lit = &input.lit;
     match lit {
@@ -25,6 +46,10 @@ pub fn transpile_lit_pattern(input: &ExprLit) -> TokenStream {
 
 pub fn transpile_path(input: &ExprPath) -> TokenStream {
     let p = &input.path;
+    // Check for `fmt.Sprintf`, `fmt.Print`, `fmt.Println`, `fmt.Printf`
+    if let Some(method_call) = try_parse_fmt_method_call(p) {
+        return method_call;
+    }
     match p.get_ident() {
         Some(ident) => match ident.to_string().as_str() {
             "nil"   => quote! { None },
@@ -82,8 +107,92 @@ pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
         return sliced;
     }
 
+    // Check for `fmt.Sprintf(format, args...)` → `format!(format, args...)`
+    if let Some(fmt_call) = try_parse_fmt_sprintf(tokens) {
+        return fmt_call;
+    }
+    // Check for `fmt.Print(args...)` → `print!(args...)`
+    if let Some(fmt_call) = try_parse_fmt_print(tokens) {
+        return fmt_call;
+    }
+    // Check for `fmt.Println(args...)` → `println!(args...)`
+    if let Some(fmt_call) = try_parse_fmt_println(tokens) {
+        return fmt_call;
+    }
+    // Check for `fmt.Printf(format, args...)` → `format!(format, args...)`
+    if let Some(fmt_call) = try_parse_fmt_printf(tokens) {
+        return fmt_call;
+    }
+
     // No brace group — emit raw tokens (simple literals)
     quote! { #tokens }
+}
+
+/// Try to parse `fmt.Sprintf(format, args...)` → `format!(format, args...)`
+fn try_parse_fmt_sprintf(tokens: &proc_macro2::TokenStream) -> Option<TokenStream> {
+    parse_fmt_call(tokens, "Sprintf", "format")
+}
+
+/// Try to parse `fmt.Print(args...)` → `print!(args...)`
+fn try_parse_fmt_print(tokens: &proc_macro2::TokenStream) -> Option<TokenStream> {
+    parse_fmt_call(tokens, "Print", "print")
+}
+
+/// Try to parse `fmt.Println(args...)` → `println!(args...)`
+fn try_parse_fmt_println(tokens: &proc_macro2::TokenStream) -> Option<TokenStream> {
+    parse_fmt_call(tokens, "Println", "println")
+}
+
+/// Try to parse `fmt.Printf(format, args...)` → `format!(format, args...)`
+fn try_parse_fmt_printf(tokens: &proc_macro2::TokenStream) -> Option<TokenStream> {
+    parse_fmt_call(tokens, "Printf", "format")
+}
+
+/// Generic fmt call parser: `fmt.Method(format, args...)` → `fmt_rust_func(format, args...)`
+fn parse_fmt_call(
+    tokens: &proc_macro2::TokenStream,
+    go_method: &str,
+    rust_fn: &str,
+) -> Option<TokenStream> {
+    // Look for pattern: fmt . Sprintf ( "format", args... )
+    let trees: Vec<proc_macro2::TokenTree> = tokens.clone().into_iter().collect();
+    if trees.len() < 3 {
+        return None;
+    }
+    // Check for `fmt` identifier
+    if let proc_macro2::TokenTree::Ident(id) = &trees[0] {
+        if id.to_string() != "fmt" {
+            return None;
+        }
+    } else {
+        return None;
+    }
+    // Check for `.` dot
+    if let proc_macro2::TokenTree::Punct(p) = &trees[1] {
+        if p.as_char() != '.' {
+            return None;
+        }
+    } else {
+        return None;
+    }
+    // Check for method name
+    if let proc_macro2::TokenTree::Ident(method) = &trees[2] {
+        if method.to_string() != go_method {
+            return None;
+        }
+    } else {
+        return None;
+    }
+    // Parse the arguments from the group
+    if trees.len() >= 4 {
+        if let proc_macro2::TokenTree::Group(g) = &trees[3] {
+            if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
+                let args = g.stream();
+                return Some(quote! { #rust_fn(#args) });
+            }
+        }
+    }
+    None
 }
 
 /// Try to parse Go slice slicing from verbatim tokens: `slice[1:]`, `slice[1:3]`, `slice[:3]`

@@ -38,6 +38,30 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
+// ─── GoDeferGuard — defer support ──────────────────────────────────────────
+
+/// A deferred cleanup guard. Implements `Drop` to run cleanup at end of scope.
+/// Usage: `let _defer = GoDeferGuard::new(|| { /* cleanup code */ });`
+pub struct GoDeferGuard {
+    cleanup: Box<dyn FnOnce()>,
+}
+
+impl GoDeferGuard {
+    /// Creates a new defer guard with the given cleanup closure.
+    pub fn new<F: FnOnce() + 'static>(f: F) -> Self {
+        GoDeferGuard {
+            cleanup: Box::new(f),
+        }
+    }
+}
+
+impl Drop for GoDeferGuard {
+    fn drop(&mut self) {
+        let cleanup = std::mem::replace(&mut self.cleanup, Box::new(|| {}));
+        cleanup();
+    }
+}
+
 // ─── GoGc<T>   ───────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -1620,6 +1644,24 @@ pub fn fmt_sprintf(format: &str, args: &[&dyn std::fmt::Display]) -> String {
     result
 }
 
+
+/// Go's `fmt.Print` — formatted string output to stdout./// Supports format specifiers: `%d`, `%s`, `%v`, `%f`.
+pub fn fmt_print(format: &str, args: &[&dyn std::fmt::Display]) {
+    let result = fmt_sprintf(format, args);
+    println!("{}", result);
+}
+
+/// Go's `fmt.Println` — formatted string output to stdout with newline./// Supports format specifiers: `%d`, `%s`, `%v`, `%f`.
+pub fn fmt_println(format: &str, args: &[&dyn std::fmt::Display]) {
+    let result = fmt_sprintf(format, args);
+    println!("{}", result);
+}
+
+/// Go's `fmt.Printf` — formatted string output to stdout (no trailing newline)./// Supports format specifiers: `%d`, `%s`, `%v`, `%f`.
+pub fn fmt_printf(format: &str, args: &[&dyn std::fmt::Display]) {
+    let result = fmt_sprintf(format, args);
+    print!("{}", result);
+}
 
 // ─── Go rand package ───────────────────────────────────────────────────────
 

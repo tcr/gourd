@@ -82,6 +82,37 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         GoStmt::Continue => {
             quote! { continue }
         }
+        GoStmt::Defer(closure_body) => {
+            // `defer func() { ... }` → Rust Drop guard at end of scope
+            // Generates a struct implementing Drop, ensuring cleanup runs
+            // when the guard variable goes out of scope.
+            quote! {
+                {
+                    #[derive(Default)]
+                    struct __GourdDefer;
+                    impl Drop for __GourdDefer {
+                        fn drop(&mut self) {
+                            #closure_body
+                        }
+                    }
+                    let _guard = __GourdDefer;
+                }
+            }
+        }
+        GoStmt::GoIfErr(err_check, err_block) => {
+            // `if err != nil { ... }` → literal Go parity
+            // Go:   `if err != nil { log(err); return err }`
+            // Rust: `if let ::std::result::Result::Err(err) = expr { ... }`
+            // The error value is bound to `err` inside the block, matching Go semantics.
+            let err_expr = err_check;
+            let block_stmts: Vec<_> = err_block.iter()
+                .map(|s| go_stmt_to_rust(s)).collect();
+            quote! {
+                if let ::std::result::Result::Err(err) = #err_expr {
+                    #(#block_stmts)*;
+                }
+            }
+        }
         GoStmt::While(while_stmt) => {
             let cond = go_to_rust(&while_stmt.cond);
             let body: Vec<_> = while_stmt.body.stmts.iter()

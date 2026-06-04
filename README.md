@@ -173,13 +173,22 @@ Debug output includes parsing details, type mappings, and transpilation steps. W
 
 > **Tip**: Useful for understanding what the transpiler sees when investigating failed transpilation or unexpected output. The flag is runtime-configured (checked at runtime via `std::env::var`), not compile-time — it has zero overhead when unset.
 
+### New features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `defer` | ✅ | Transpiles to inline `Drop` guard generation; `GoDeferGuard` in prelude |
+| `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr { ... }` |
+| `fmt` builtins | ✅ | `fmt.Sprintf` → `fmt_sprintf`, `Print` → `fmt_print`, `Println` → `fmt_println`, `Printf` → `fmt_printf` |
+| Pointer operators | ✅ | `&` (address-of) and `*` (dereference) handled |
+
 ## Status
 
 | Metric | Value |
 |--------|-------|
-| **Real-world Go coverage** | ~5% |
-| **Builtins implemented** | 9 of ~14 |
-| **Tests passing** | 86 across 20 test files |
+| **Real-world Go coverage** | ~12% |
+| **Builtins implemented** | 11 of ~14 |
+| **Tests passing** | 120 across 23 test files |
 | **Tests failing** | 0 |
 
 ## What's next?

@@ -289,7 +289,43 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
 }
 
 pub fn transpile_field(input: &ExprField) -> TokenStream {
+    // Check for `fmt.Sprintf`, `fmt.Print`, `fmt.Println`, `fmt.Printf`
+    if let Some(rust_fn) = try_parse_fmt_field(&input.base, &input.member) {
+        return rust_fn;
+    }
     let base = super::dispatch::go_to_rust(&input.base);
     let field = &input.member;
     quote! { #base.#field }
+}
+
+/// Try to parse `fmt.Sprintf`, `fmt.Print`, etc. from a field access.
+fn try_parse_fmt_field(base: &syn::Expr, field: &syn::Member) -> Option<TokenStream> {
+    // Check if base is the identifier `fmt`
+    let base_ident = match base {
+        syn::Expr::Path(p) => {
+            if p.path.segments.len() == 1 && p.path.segments[0].ident == "fmt" {
+                Some(p.path.segments[0].ident.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if base_ident.is_none() {
+        return None;
+    }
+    let field_name = match field {
+        syn::Member::Named(ident) => ident.to_string(),
+        syn::Member::Unnamed(idx) => {
+            let _ = idx;
+            return None;
+        }
+    };
+    match field_name.as_str() {
+        "Sprintf" => Some(quote! { fmt_sprintf }),
+        "Print" => Some(quote! { fmt_print }),
+        "Println" => Some(quote! { fmt_println }),
+        "Printf" => Some(quote! { fmt_printf }),
+        _ => None,
+    }
 }

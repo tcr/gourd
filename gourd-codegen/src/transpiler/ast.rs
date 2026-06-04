@@ -24,6 +24,8 @@ pub(crate) enum GoStmt {
     GoMake(String),   // `make(...)` with raw argument string
     RawStmt(TokenStream),
     Select(GoSelect), // `select { ... }`
+    Defer(TokenStream), // `defer func() { ... }` - runs at end of scope
+    GoIfErr(TokenStream, Vec<GoStmt>), // `if err != nil { ... }` error handling
 }
 
 /// Select statement: `select { case ... default: ... }`.

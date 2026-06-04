@@ -8,6 +8,7 @@ use super::return_stmts::parse_go_return;
 use super::slice_map::parse_go_slice_literal;
 use super::switch::Switch;
 use super::types::map_go_type_str;
+use proc_macro2::TokenStream;
 use syn::ext::IdentExt;
 use syn::parse::ParseStream;
 use syn::token;
@@ -219,6 +220,54 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
                     let _semi: token::Semi = input.parse()?;
                 }
                 return Ok(true);
+            }
+            // 7b. Check for `defer` — Go's defer statement
+            if kw_str == "defer" {
+                let _defer: syn::Ident = input.parse()?;
+                // Parse the closure body: `defer func() { ... }`
+                let closure_body: TokenStream = input.parse()?;
+                stmts.push(GoStmt::Defer(closure_body));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+            // 7c. Check for `if err != nil` pattern
+            if kw_str == "if" {
+                // Look ahead past `if` to detect `if err != nil`
+                let fork = input.fork();
+                if let Ok(_if) = fork.parse::<syn::Ident>() {
+                    // Check for `err != nil` pattern
+                    if fork.peek(syn::Ident) {
+                        let err_fork = fork.fork();
+                        if let Ok(err_name) = err_fork.parse::<syn::Ident>() {
+                            let err_name_str = err_name.to_string();
+                            // Check for `!=` operator (verify it's Bang followed by Eq)
+                            if err_fork.peek2(syn::token::Eq) {
+                                // We have `if <ident> != nil` — parse it
+                                let _if: syn::Ident = input.parse()?;
+                                let _err: syn::Ident = input.parse()?;
+                                // Parse the error expression as the err variable
+                                let err_expr: TokenStream = quote::quote! { #err_name_str };
+                                // Parse the body block
+                                let body_content;
+                                syn::braced!(body_content in input);
+                                let mut err_block = Vec::new();
+                                while !body_content.is_empty() {
+                                    if parse_go_special_stmt(&body_content, &mut err_block)? {
+                                        continue;
+                                    }
+                                    parse_base_stmt(&body_content, &mut err_block)?;
+                                }
+                                stmts.push(GoStmt::GoIfErr(err_expr, err_block));
+                                if input.peek(token::Semi) {
+                                    let _semi: token::Semi = input.parse()?;
+                                }
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

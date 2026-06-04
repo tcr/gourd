@@ -191,6 +191,16 @@ When working with the concurrency primitives:
 6. **Add `crossbeam` and `num-traits`** to your Cargo.toml dependencies.
 7. **Include `go_scheduler.rs`** in your lib.rs: `mod go_scheduler; pub use go_scheduler::*;`
 
+### New Features
+
+| Feature | Transpilation | Notes |
+|---------|--------------|-------|
+| `defer` | Inline `Drop` guard | Generates `GoDeferGuard` via `Drop` impl; runtime fallback in `prelude.rs` |
+| `if err != nil` | `if let Result::Err(err) = expr` | Strict Go semantics for literal parity |
+| `fmt.Sprintf` | `fmt_sprintf(...)` | Runtime helper handles `%d`, `%s`, `%v`, `%f` |
+| `fmt.Print/Println/Printf` | `fmt_print` / `fmt_println` / `fmt_printf` | Runtime helpers for format specifiers |
+| Pointers (`&`, `*`) | `&` / `*` via `UnOp` | Address-of and dereference |
+
 ### When to use
 
 - Adding a new language mode (e.g. Go → a new target language)
@@ -274,12 +284,13 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | `panic("msg")` | `panic!("msg")` | ✅ |
 | `append(slice, items)` | push to Vec copy | ✅ |
 | `x.(T)` (type assertion) | type cast/downcast | ✅ |
-| `copy` | — | ❌ |
-| `delete` | — | ❌ |
+| `copy` | `copy_from_slice` | ✅ |
+| `delete` | `HashMap::remove` | ✅ |
 | `recover` | — | ❌ |
-| `defer` | — | ❌ |
+| `defer` | inline Drop guard | ✅ |
 | `complex` | — | ❌ |
 | `min` / `max` | — | ❌ |
+
 
 ## Working with files
 

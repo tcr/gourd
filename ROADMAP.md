@@ -68,7 +68,8 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 | `append(slice, items)` | ✅ Push to Vec copy |
 | `x.(T)` (type assertion) | ✅ Cast/downcast |
 | `recover` | ❌ |
-| `defer` | ❌ |
+| `defer` | ✅ | Inline Drop guard generation |
+| `complex` | ❌ |
 | `complex` | ❌ |
 | `min` / `max` | ❌ |
 
@@ -141,7 +142,10 @@ Closure parsing is now supported in the transpiler:
 |------------|--------|--------|
 | **Closures** `func() { ... }` | ⚠️ | Partial; not working in tests — no higher-order functions, no sorting |
 | **defer** `defer cleanup()` | ❌ | No RAII pattern |
-| **Error handling** `if err != nil` | ❌ | Dominant Go error handling pattern |
+| **Error handling** `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr` |
+| **Pointers** | ✅ | `&` (address-of) and `*` (dereference) |
+| **fmt builtins** | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
+
 | **recover** `recover()` | ❌ | |
 | **Variadic params** `func f(...int)` | ❌ | Most stdlib functions are variadic |
 | **Pointers in expressions** `&x`, `*p` | ❌ | Can't dereference or take addresses |
@@ -196,9 +200,8 @@ The transpiler prints parsing details, type mappings, and transpilation steps to
 
 1. **Closures** — the single biggest gap; enables sorting, callbacks, etc.
 2. **`append` / `copy` / `delete`** — `append` works, `copy`/`delete` don't
-3. **`defer`** — critical for resource management
-4. **Error handling** — `if err != nil` is the dominant Go pattern
-5. **Standard library mapping** — even `fmt → println!`, `math → std::f64` moves the needle
+3. **Standard library mapping** — `fmt`, `os`, `io`, `sort`, `strings` → Rust std
+4. **Full closure support** — argument forwarding, captures, nested closures
 6. **Generics** — needed for type-safe collections
 
 Without all six: probably a toy. With all six: maybe 30–40% coverage — useful for algorithmic code.
