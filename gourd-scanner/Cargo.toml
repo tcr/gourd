@@ -1,0 +1,8 @@
+[package]
+name = "gourd-scanner"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+proc-macro2 = "1.0"
+walkdir = "2.3"

@@ -11,10 +11,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+gourd-scanner = { path = "../gourd-scanner" }
 clap = { version = "4", features = ["derive"] }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "parsing"] }
 tempfile = "3"
 toml = "0.8"
-walkdir = "2"

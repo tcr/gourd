@@ -1,3 +1,7 @@
 [workspace]
-members = ["gourd", "gourd-codegen", "gourd-macro", "gourd-check"]
+members = ["gourd", "gourd-codegen", "gourd-macro", "gourd-check", "gourd-scanner"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"

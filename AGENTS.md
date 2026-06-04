@@ -8,6 +8,7 @@ gourd/
   gourd/               <-- runtime + CLI tool (`gourd transpile`)
   gourd-codegen/       <-- shared transpiler library (used by both macro and CLI)
   gourd-check/         <-- standalone Go/Rust validation CLI
+  gourd-scanner/       <-- shared source scanner crate
 ```
 
 [`gourd-codegen/src/transpiler/`] -- Go → Rust transpiler (modular)

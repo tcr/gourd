@@ -158,7 +158,7 @@ Closure parsing is now supported in the transpiler:
 | **Builtins implemented** | 9 of ~14 |
 | **Test code** | ~40% commented-out TODO stubs |
 
-### Working tests (passing) — 86 total
+### Working tests (passing) — 113 total (includes gourd-scanner unit tests)
 
 | Test file | Result |
 |-----------|--------|
