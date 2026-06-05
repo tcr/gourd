@@ -16,19 +16,19 @@ pub fn go_to_rust_switch(input: TokenStream) -> TokenStream {
 }
 
 pub fn transpile_switch(switch: &Switch) -> TokenStream {
-    eprintln!("DEBUG: transpile_switch called, selector={:?}, cases={}, default_stmts={}", 
+    crate::debug_println!("DEBUG: transpile_switch called, selector={:?}, cases={}, default_stmts={}", 
         switch.selector.is_some(), switch.cases.len(), switch.default_stmts.len());
     // Build match arms from case expressions
     let mut arms = Vec::new();
-    eprintln!("DEBUG: transpile_switch - building {} arms", switch.cases.len());
+    crate::debug_println!("DEBUG: transpile_switch - building {} arms", switch.cases.len());
 
     for case in &switch.cases {
-        eprintln!("DEBUG: transpile_switch - processing case, exprs={}, stmts={}", 
+        crate::debug_println!("DEBUG: transpile_switch - processing case, exprs={}, stmts={}", 
             case.exprs.len(), case.stmts.len());
         if case.exprs.is_empty() {
             // Empty exprs means this is a default-like case
             // but we handle default separately
-            eprintln!("DEBUG: transpile_switch - case has empty exprs, skipping");
+            crate::debug_println!("DEBUG: transpile_switch - case has empty exprs, skipping");
             continue;
         }
 
@@ -39,10 +39,10 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
         // Single or multi-expression case
         // Multi-expr: `case 1, 2, 3:` → `1 | 2 | 3 =>`
         let arm_tokens = quote! { #(#pattern)|* => { #(#body);* } };
-        eprintln!("DEBUG: transpile_switch - adding arm with pattern: {}", arm_tokens);
+        crate::debug_println!("DEBUG: transpile_switch - adding arm with pattern: {}", arm_tokens);
         arms.push(arm_tokens);
     }
-    eprintln!("DEBUG: transpile_switch - built {} arms", arms.len());
+    crate::debug_println!("DEBUG: transpile_switch - built {} arms", arms.len());
 
     // Handle default case with `_` pattern
     if !switch.default_stmts.is_empty() {
@@ -101,23 +101,23 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
             .map(|s| crate::transpiler::expr::go_to_rust(s))
             .unwrap_or_else(|| quote! { () });
 
-        eprintln!("DEBUG: transpile_switch - arms before quote:");
+        crate::debug_println!("DEBUG: transpile_switch - arms before quote:");
         for (i, arm) in arms.iter().enumerate() {
-            eprintln!("DEBUG: transpile_switch - arm {}: {}", i, arm);
+            crate::debug_println!("DEBUG: transpile_switch - arm {}: {}", i, arm);
         }
         // Debug: collect arms into a single token stream
         let arms_as_tokens: proc_macro2::TokenStream = arms.iter().cloned().collect();
-        eprintln!("DEBUG: transpile_switch - arms_as_tokens: {}", arms_as_tokens);
-        eprintln!("DEBUG: transpile_switch - arms_as_tokens is_empty: {}", arms_as_tokens.is_empty());
+        crate::debug_println!("DEBUG: transpile_switch - arms_as_tokens: {}", arms_as_tokens);
+        crate::debug_println!("DEBUG: transpile_switch - arms_as_tokens is_empty: {}", arms_as_tokens.is_empty());
         // Build match expression with arms - use quote! correctly
         let result = quote! {
             match #selector {
                 #arms_as_tokens
             }
         };
-        eprintln!("DEBUG: transpile_switch - final result (len={}): {}", result.to_string().len(), result);
-        eprintln!("DEBUG: transpile_switch - arms count: {}", arms.len());
-        eprintln!("DEBUG: transpile_switch - result is_empty: {}", result.is_empty());
+        crate::debug_println!("DEBUG: transpile_switch - final result (len={}): {}", result.to_string().len(), result);
+        crate::debug_println!("DEBUG: transpile_switch - arms count: {}", arms.len());
+        crate::debug_println!("DEBUG: transpile_switch - result is_empty: {}", result.is_empty());
         result
     }
 }

@@ -14,7 +14,7 @@ use syn::{Expr, Ident};
 /// Parse `return` — handles single, multi-return, slice returns, make(), and append().
 pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     input.parse::<syn::token::Return>()?;
-    eprintln!("DEBUG: parsed return keyword");
+    crate::debug_println!("DEBUG: parsed return keyword");
 
     // Check for `return switch ...` - handle switch statement after return
     let switch_fork = input.fork();
@@ -23,7 +23,7 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
         if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
             let kw_str = kw.to_string();
             if kw_str == "switch" {
-                eprintln!("DEBUG: found switch after return, parsing switch");
+                crate::debug_println!("DEBUG: found switch after return, parsing switch");
                 // Reposition to switch_fork and parse switch from there
                 input.advance_to(&switch_fork);
                 // Now parse the switch statement (which includes the 'switch' keyword)
@@ -39,11 +39,11 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
     }
 
     // Check for channel receive: `return <-ch`
-    eprintln!("DEBUG: checking for channel receive");
+    crate::debug_println!("DEBUG: checking for channel receive");
     if input.cursor().punct().is_some() {
         if let Some((p, _)) = input.cursor().punct() {
             if p.as_char() == '<' && p.spacing() == proc_macro2::Spacing::Joint {
-                eprintln!("DEBUG: found channel receive");
+                crate::debug_println!("DEBUG: found channel receive");
                 let _p1: proc_macro2::Punct = input.parse()?;
                 let _p2: proc_macro2::Punct = input.parse()?;
                 let ch_ident: Ident = input.parse()?;
@@ -56,7 +56,7 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
             }
         }
     }
-    eprintln!("DEBUG: not channel receive, checking for expression");
+    crate::debug_println!("DEBUG: not channel receive, checking for expression");
 
     // Check for `return make(...)`
     let make_fork = input.fork();
