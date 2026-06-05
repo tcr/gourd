@@ -4,7 +4,7 @@ use super::ast::{GoBlock, GoFor, GoForInit, GoIf, GoStmt, GoWhile};
 use super::base_stmts::parse_base_stmt;
 use syn::ext::IdentExt;
 use syn::parse::{ParseStream, discouraged::Speculative};
-use syn::{Expr};
+use syn::{parse_quote, Expr};
 
 /// Parse `while cond { body }`.
 pub(crate) fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
@@ -43,23 +43,38 @@ pub(crate) fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
 pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
     let _: syn::token::For = input.parse()?;
 
-    // Parse optional init (either `i := 0` or nothing for C-style loops)
-    let init = if input.peek(syn::Ident) {
+    // Parse optional init (either `i := 0` or nothing for C-style loops).
+    // Use parse_any to allow `_` as a loop variable (underscore is a reserved
+    // keyword in Rust but valid in Go range loops).
+    let init = if input.peek(syn::Ident) || input.peek(syn::token::Underscore) {
         let fork = input.fork();
-        if let Ok(first_ident) = fork.parse::<syn::Ident>() {
+        if let Ok(first_ident) = fork.call(syn::Ident::parse_any) {
             if first_ident.to_string() == "range" {
                 None
             } else {
-                let parsed_ident = input.parse::<syn::Ident>()?;
+                let parsed_ident = input.call(syn::Ident::parse_any)?;
                 if input.peek(syn::token::Comma) {
                     let _: syn::token::Comma = input.parse()?;
-                    let second_ident = input.parse::<syn::Ident>()?;
+                    let second_ident = input.call(syn::Ident::parse_any)?;
                     let _: syn::token::Colon = input.parse()?;
                     let _: syn::token::Eq = input.parse()?;
                     // Parse the init value (e.g., `0` in `i := 0`)
                     // Range loops don't have an init value; they have `range` after `:=`
-                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) || input.peek(syn::Ident) {
-                        None // No init value (range loop or C-style without init)
+                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) {
+                        None // No init value (C-style without init)
+                    } else if input.peek(syn::Ident) {
+                        // Check if ident is `range` (range loop) or actual init value
+                        let val_fork = input.fork();
+                        if let Ok(r) = val_fork.parse::<syn::Ident>() {
+                            if r.to_string() == "range" {
+                                None  // Range loop
+                            } else {
+                                // Init value is an ident — parse it as expr
+                                Some(Box::new(input.parse()?))
+                            }
+                        } else {
+                            Some(Box::new(input.parse()?))
+                        }
                     } else {
                         Some(Box::new(input.parse()?))
                     };
@@ -69,8 +84,21 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
                     let _: syn::token::Eq = input.parse()?;
                     // Parse the init value (e.g., `0` in `i := 0`)
                     // Range loops don't have an init value; they have `range` after `:=`
-                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) || input.peek(syn::Ident) {
-                        None
+                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) {
+                        None  // No init value (C-style without init)
+                    } else if input.peek(syn::Ident) {
+                        // Check if ident is `range` (range loop) or actual init value
+                        let val_fork = input.fork();
+                        if let Ok(r) = val_fork.parse::<syn::Ident>() {
+                            if r.to_string() == "range" {
+                                None  // Range loop
+                            } else {
+                                // Init value is an ident — parse it as expr
+                                Some(Box::new(input.parse()?))
+                            }
+                        } else {
+                            Some(Box::new(input.parse()?))
+                        }
                     } else {
                         Some(Box::new(input.parse()?))
                     };
@@ -85,11 +113,11 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
     };
 
     // Detect C-style `for` vs `for` with `range`
-    let is_range = if input.peek(syn::Ident) {
+    let is_range = if input.peek(syn::Ident) || input.peek(syn::token::Underscore) {
         let fork = input.fork();
-        if let Ok(range_kw) = fork.parse::<syn::Ident>() {
+        if let Ok(range_kw) = fork.call(syn::Ident::parse_any) {
             if range_kw.to_string() == "range" {
-                let _: syn::Ident = input.parse()?;
+                let _: syn::Ident = input.call(syn::Ident::parse_any)?;
                 true
             } else {
                 false
@@ -131,23 +159,32 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
         if input.peek(syn::token::Semi) {
             let _: syn::token::Semi = input.parse()?;
             if !input.peek(syn::token::Semi) && !input.peek(syn::token::Brace) {
-                // Parse condition. When no post statement follows, the condition
-                // is followed directly by {. Comparison operators (<, <=, >=,
-                // >, ==, !=) are ambiguous in this context because syn tries
-                // to parse beyond the condition into the brace group.
-                // For this case, parse the condition using input.parse() which
-                // works when the condition is followed by a delimiter (; or {}).
-                // When followed by { (no post), the < operator is ambiguous.
-                // In that case, treat as a while-loop pattern instead.
-                let expr: syn::Expr = input.parse()?;
+                // Parse condition using fork-to-brace approach. Collect tokens
+                // into a separate stream (stopping at `{` or `;`), then parse as
+                // Expr. This avoids syn trying to parse the body brace as part
+                // of the condition expression, and also excludes the `;` separator.
+                let cond_fork = input.fork();
+                let mut cond_tokens: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+                while !cond_fork.is_empty() && !cond_fork.peek(syn::token::Brace) && !cond_fork.peek(syn::token::Semi) {
+                    if let Ok(tt) = cond_fork.parse::<proc_macro2::TokenTree>() {
+                        cond_tokens.extend(std::iter::once(tt));
+                    } else {
+                        break;
+                    }
+                }
+                let expr: syn::Expr = syn::parse2(cond_tokens)?;
                 cond = Some(Box::new(expr));
+                input.advance_to(&cond_fork);
             }
             if input.peek(syn::token::Semi) {
                 let _: syn::token::Semi = input.parse()?;
                 if !input.peek(syn::token::Brace) {
-                    let expr: syn::Expr = input.parse()?;
-                    post = Some(Box::new(expr));
+                    // Parse the post statement. Go supports `i++` and `i--` but
+                    // Rust doesn't. Convert them to `i += 1` / `i -= 1`.
+                    post = Some(parse_go_post(input)?);
+                } else {
                 }
+            } else {
             }
         }
 
@@ -170,6 +207,42 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
             body,
         })
     }
+}
+
+/// Parse a Go post-statement for C-style `for` loops.
+/// Go supports `i++` and `i--` which don't exist in Rust.
+/// Convert them to `i += 1` / `i -= 1`.
+pub(crate) fn parse_go_post(input: ParseStream) -> syn::Result<Box<syn::Expr>> {
+    let fork = input.fork();
+    if let Ok(id) = fork.call(syn::Ident::parse_any) {
+        let cursor = fork.cursor();
+        if let Some((p, _rest)) = cursor.punct() {
+            let ch = p.as_char();
+            let spacing = p.spacing();
+            if ch == '+' && spacing == proc_macro2::Spacing::Joint {
+                input.parse::<syn::Ident>()?;
+                // In proc_macro2, `++` is a single Punct token with Joint spacing.
+                // syn's Punct parser only consumes the first char, leaving the rest.
+                // So we parse the Punct (first `+`), then parse the second `+` as
+                // another Punct.
+                let _first_punct: proc_macro2::Punct = input.parse()?;
+                // Parse the second `+` — it's a separate Punct in the token stream
+                let _second_punct: proc_macro2::Punct = input.parse()?;
+                let ident = id.clone();
+                let expr: syn::Expr = parse_quote! { #ident += 1 };
+                return Ok(Box::new(expr));
+            }
+            if ch == '-' && spacing == proc_macro2::Spacing::Joint {
+                input.parse::<syn::Ident>()?;
+                let _: proc_macro2::Punct = input.parse()?;
+                let ident = id.clone();
+                let expr: syn::Expr = parse_quote! { #ident -= 1 };
+                return Ok(Box::new(expr));
+            }
+        }
+    }
+    let expr: syn::Expr = input.parse()?;
+    Ok(Box::new(expr))
 }
 
 /// Parse `if cond { body } else { ... }`.
@@ -236,6 +309,7 @@ pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
     }));
     Ok(true)
 }
+
 
 
 

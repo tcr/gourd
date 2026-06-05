@@ -198,9 +198,12 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
                         '(' | '{' | '[' => depth += 1,
                         ')' | '}' | ']' => {
                             depth = depth.saturating_sub(1);
-                            if depth == 0 && collected {
-                                return result;
-                            }
+                            // Don't return at `)` or `]` at depth 0 — we must
+                            // continue past the return type and body. Only
+                            // return when we hit a new declaration keyword.
+                        }
+                        '<' | '>' => {
+                            // Comparison operators — skip them.
                         }
                         _ => {}
                     }
@@ -220,44 +223,56 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
 
 /// Skip past a declaration starting at index `start`.
 /// Returns the index of the first token after the declaration.
+///
+/// This function scans tokens after the declaration keyword to find where
+/// the current declaration ends and the next one begins. It uses depth tracking
+/// through paren groups `()` and bracket groups `[]`. For functions with bodies,
+/// it skips past the body brace group. The key rule: only return when depth
+/// reaches 0 after a brace group at depth 0 — closing `)` or `]` at depth 0
+/// does NOT end the declaration (we must continue past the body).
 fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
     let mut depth: i32 = 0;
     for (i, tree) in trees[start..].iter().enumerate() {
         match tree {
             proc_macro2::TokenTree::Group(g) => match g.delimiter() {
                 proc_macro2::Delimiter::Brace => {
-                    // A Brace group at depth 0 means we've hit a new declaration.
+                    // At depth 0, a brace group means the function body.
+                    // Skip past it — we've found the end of the declaration.
                     if depth == 0 {
-                        return start + i + 1;  // skip past this Group token
+                        return start + i + 1;
                     }
                     depth += 1;
                 }
                 proc_macro2::Delimiter::Parenthesis => {
-                    // A Parenthesis group at depth 0 is part of the current declaration
-                    // (like a receiver or param group). Don't return early.
                     if depth == 0 {
-                        // Continue scanning — this is part of the current declaration
+                        // Param/receiver group at depth 0 — part of the current
+                        // declaration. Keep scanning.
                     } else {
                         depth += 1;
                     }
                 }
                 proc_macro2::Delimiter::Bracket => {
-                    // Bracket groups at depth 0 are part of type annotations
-                    // (e.g., `[]string` in return type `[]string`), NOT new declarations.
-                    // Always treat as part of current declaration.
-                    depth += 1;
+                    // Type annotations (e.g., `[]string`) at depth 0 — not
+                    // new declarations. Keep scanning.
+                    if depth == 0 {
+                        // part of current declaration
+                    } else {
+                        depth += 1;
+                    }
                 }
                 _ => {}
             },
             proc_macro2::TokenTree::Punct(p) => {
                 if depth == 0 {
                     match p.as_char() {
-                        '(' | '{' | '[' => depth += 1,
-                        ')' | '}' | ']' => {
+                        '(' | '[' => depth += 1,
+                        ')' | ']' => {
+                            // Close paren/bracket at depth 0 — don't return.
+                            // We need to continue past the body (brace group).
                             depth = depth.saturating_sub(1);
-                            if depth == 0 {
-                                return start + 1 + i;
-                            }
+                        }
+                        '<' | '>' => {
+                            // Comparison operators — skip.
                         }
                         _ => {}
                     }

@@ -22,10 +22,13 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             let cond = go_to_rust(&go_if.cond);
             let then_body: Vec<_> = go_if.then_block.stmts.iter()
                 .map(|s| go_stmt_to_rust(s)).collect();
-            let then_block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#then_body);* });
+            // Use quote! instead of parse_quote! — the statements are already valid
+            // Rust tokens. Using parse_quote! breaks when bodies contain < comparisons
+            // (syn interprets < as generic type params rather than binary operators).
+            let then_block: TokenStream = quote!({ #(#then_body);* });
             let else_block = go_if.else_block.as_ref().map(|eb| {
                 let else_body: Vec<_> = eb.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
-                let block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#else_body);* });
+                let block: TokenStream = quote!({ #(#else_body);* });
                 quote! { else #block }
             });
             quote! { if #cond #then_block #else_block }
@@ -117,12 +120,46 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             let cond = go_to_rust(&while_stmt.cond);
             let body: Vec<_> = while_stmt.body.stmts.iter()
                 .map(|s| go_stmt_to_rust(s)).collect();
+            // quote! produces valid Rust tokens directly — no re-parsing needed.
             quote! { while #cond { #(#body);* } }
+        }
+        GoStmt::GoImport(import) => {
+            // `import "strings"` → already bundled in prelude
+            // `import s "strings"` → `use ::gourd::prelude as s;`
+            // `import . "fmt"` → `use ::gourd::prelude::*;`
+            // `import _ "os"` → blank, no output
+            if import.blank {
+                // Side-effect only, nothing to emit
+                quote! {}
+            } else if import.dot {
+                // Dot import: make all names visible
+                quote! { use ::gourd::prelude::*; }
+            } else if let Some(alias) = &import.alias {
+                // Aliased import: map known packages to prelude module
+                let alias_ident = alias.clone();
+                match import.path.as_str() {
+                    "strings" | "os" | "io" | "bytes" | "json" | "time" | "math" | "byte" => {
+                        quote! { use ::gourd::prelude as #alias_ident; }
+                    }
+                    _ => {
+                        // External packages not yet supported
+                        let msg = format!("TODO: import external packages: {}", import.path);
+                        quote! { compile_error!(concat!(#msg)) }
+                    }
+                }
+            } else {
+                // Default import: already implicit via `gourd::prelude::*`
+                // No `use` needed, but emit a no-op to show it was parsed
+                quote! {}
+            }
         }
         GoStmt::GoFor(for_stmt) => {
             let body: Vec<_> = for_stmt.body.stmts.iter()
                 .map(|s| go_stmt_to_rust(s)).collect();
-            let body_block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#body);* });
+            // Use quote! instead of parse_quote! — the body is already valid Rust tokens.
+            // parse_quote! breaks when the body contains < comparisons because syn
+            // interprets < as generic type parameters rather than comparison operators.
+            let body_block: TokenStream = quote!({ #(#body);* });
 
             match (&for_stmt.init, &for_stmt.is_range) {
                 (Some(GoForInit::Double(i, v, _)), true) => {

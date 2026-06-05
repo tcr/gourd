@@ -2,8 +2,8 @@
 
 Go to Userland Rust — at compile time via a procedural macro.
 
-> ⚠️ **EXPERIMENTAL — NOT PRODUCTION READY**  
-> Gourd is an early experimental project. It transpiles **basic Go syntax** into Rust. Real-world Go code coverage is ~5%. It is **not suitable for most Go projects**. If you need a reliable Go-to-Rust tool, look elsewhere. If you want a fun toy to tinker with, read on.
+> ⚠️ **EXPERIMENTAL — NOT PRODUCTION READY**
+> Gourd is an early experimental project. It transpiles **basic Go syntax** into Rust. Real-world Go code coverage is ~5–8%. It is **not suitable for most Go projects**. If you need a reliable Go-to-Rust tool, look elsewhere. If you want a fun toy to tinker with, read on.
 
 ## Why Gourd?
 
@@ -62,8 +62,8 @@ The runtime is organized into three layers:
 | Layer | Module | Contents |
 |-------|--------|----------|
 | Root types | `go_gc.rs`, `go_scheduler.rs` | `GoGc`, `GoScheduler`, `GoChannel`, `GoSelect`, `SchedulerMap`, `GoFuture` — exported at crate root for generated code |
-| Prelude | `prelude/` | Runtime types for user code: `GoMutex`, `GoMutexGuard`, `GoRc`, `GoOnce`, `GoWaitGroup`, `GoRWMutex`, `GoError`, `Any`, `GoDeferGuard`, `GoRand`, formatting helpers, builtins (`len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max`) |
-| Packages | `packages/` | Go stdlib package emulation: `os`, `strings`, `json`, `io`, `bytes`, `math`, `byte` |
+| Prelude | `prelude/` | Runtime types for user code: `GoDeferGuard`, `GoMutex`, `GoRc`, `GoOnce`, `GoWaitGroup`, `GoRWMutex`, `GoError`, `Any`, `GoRand`, formatting helpers (`fmt_sprintf`, `fmt_print`, `fmt_println`, `fmt_printf`), builtins (`len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max`, `std_copy`, `std_delete`, `std_append`) |
+| Packages | `packages/` | Go stdlib package emulation: os, strings, json, io, bytes, math, byte, time |
 
 Import paths:
 - Root primitives: `gourd::GoGc`, `gourd::GoScheduler`, `gourd::GoChannel<T>`, `gourd::GoSelect<T>`, `gourd::SchedulerMap`, `gourd::GoFuture`
@@ -143,6 +143,7 @@ Variadic `...T` parameters are mapped to slice references `&[T]`.
 | `[]int{1, 2, 3}` | `vec![1, 2, 3]` |
 | `map[string]int{...}` | `HashMap` + inserts |
 | `x.(T)` (type assertion) | type cast/downcast |
+| `&T`, `*p` (pointers) | `&T`, `*p` via `UnOp` |
 
 ### Control flow
 
@@ -153,6 +154,7 @@ Variadic `...T` parameters are mapped to slice references `&[T]`.
 - `continue`, `break`
 - `return` (single and multi-return)
 - Struct literals, map literals, slice literals, ranges
+- `match` expressions (Rust native)
 
 ### Concurrency (crossbeam-backed)
 
@@ -172,11 +174,13 @@ The transpiler recognizes and maps common Go standard library packages to Rust e
 | Go Package | Functions Mapped |
 |------------|-----------------|
 | `strings` | `Replace`, `ReplaceAll`, `HasPrefix`, `HasSuffix`, `Contains`, `Split`, `Join`, `Index`, `LastIndex`, `Trim`, `TrimLeft`, `TrimRight`, `ToUpper`, `ToLower`, `Repeat`, `Fields` |
-| `os` | `Open`, `ReadFile`, `WriteFile`, `Mkdir`, `MkdirAll`, `Remove`, `Chdir`, `Getenv`, `Setenv`, `Args` |
+| `os` | `Open`, `ReadFile`, `WriteFile`, `Mkdir`, `MkdirAll`, `Remove`, `Chdir`, `Getenv`, `Setenv`, `EnvKeys`, `Args` |
 | `io` | `Copy`, `ReadAll` |
 | `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Split`, `Join`, `Replace` |
 | `encoding/json` (as `json`) | `Marshal`, `Unmarshal` |
 | `time` | `Now`, `Since`, `Until`, `Sleep` |
+| `math` | `Abs`, `Sqrt`, `Floor`, `Ceil`, `Round`, `Min`, `Max`, `PI`, `E`, `Exp`, `Log`, `Log10`, `Pow`, `Sign` |
+| `byte` | `Of`, `RuneOf`, `StringToBytes`, `BytesToString` |
 
 ## Compile-time verification
 
@@ -208,12 +212,12 @@ gourd-check -r PATHS         # Rust-only
 ## Running
 
 ```bash
-cargo test                    # ~34s with validation (go build on every go! block)
+cargo test                    # ~112 tests in gourd-macro
 cargo expand -p gourd         # See expanded transpilation
 gourd transpile "func hello() int { return 42 }"
 ```
 
-> Validation is **enabled by default** — every `go!` block is checked with `go build` at compile time. This adds compile time (~34s vs ~6s without validation) but ensures correctness. Use `--no-default-features` to disable validation for fast iterations, or use the `gourd-check` CLI for pre-compilation validation.
+> Validation is **enabled by default** via the `validate` feature — every `go!` block is checked with `go build` at compile time. Use `--no-default-features` to disable validation for fast iterations, or use the `gourd-check` CLI for pre-compilation validation.
 
 ## Debug Output
 
@@ -227,31 +231,15 @@ Debug output includes parsing details, type mappings, and transpilation steps. W
 
 > **Tip**: Useful for understanding what the transpiler sees when investigating failed transpilation or unexpected output. The flag is runtime-configured (checked at runtime via `std::env::var`), not compile-time — it has zero overhead when unset.
 
-### New features
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| `defer` | ✅ | Transpiles to inline `Drop` guard generation; `GoDeferGuard` in prelude |
-| `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr { ... }` |
-| `fmt` builtins | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
-| Pointer operators | ✅ | `&` (address-of) and `*` (dereference) handled |
-| `continue` statement | ✅ | `continue [label]` with optional label |
-| Variadic params (`...T`) | ✅ | Mapped to `&[T]` slice references |
-| `strings` stdlib | ✅ | 16 functions: Replace, ReplaceAll, HasPrefix, HasSuffix, Contains, Split, Join, Index, LastIndex, Trim, TrimLeft, TrimRight, ToUpper, ToLower, Repeat, Fields |
-| `os` stdlib | ✅ | 10 functions: Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, Args |
-| `io` stdlib | ✅ | `Copy`, `ReadAll` |
-| `bytes` stdlib | ✅ | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Split`, `Join`, `Replace` |
-| `json` stdlib | ✅ | `Marshal`, `Unmarshal` |
-| `time` stdlib | ✅ | `Now`, `Since`, `Until`, `Sleep` |
-
-## Status
+### Status
 
 | Metric | Value |
 |--------|-------|
-| **Real-world Go coverage** | ~5% |
-| **Tests passing** | 131 across 25+ test files |
-| **Tests failing** | 0 |
+| **Real-world Go coverage** | ~5–8% |
+| **Tests passing** | 112 in `gourd-macro` |
+| **Transpiler code** | ~6,292 lines (3495 transpiler root + 2797 sub-modules) |
+| **Expr variants handled** | 29 of ~39 |
 
-## What's next?
+### What's next?
 
-See [ROADMAP.md](ROADMAP.md). The remaining big gaps are `defer` dedicated tests, error handling completeness, `net/http`, `database/sql`, and full generics support.
+See [ROADMAP.md](ROADMAP.md). The remaining gaps are `defer` dedicated tests, full error handling completeness, `net/http`, `database/sql`, and generics support.

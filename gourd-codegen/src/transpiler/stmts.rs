@@ -1,6 +1,6 @@
 //! Statement block parsing: `parse_go_block`, special statements, block parsing.
 
-pub(crate) use super::ast::{GoBlock, GoStmt};
+pub(crate) use super::ast::{GoBlock, GoImport, GoStmt};
 use super::base_stmts::parse_base_stmt;
 use super::control_flow::{parse_go_for, parse_go_if, parse_go_while};
 use super::free_fn::select::parse_select_body;
@@ -136,6 +136,108 @@ fn parse_stmt_from_str(s: &str) -> Option<GoStmt> {
     None
 }
 
+/// Parse a Go import declaration.
+///
+/// Supported forms:
+/// - `import "strings"` → default alias (package name)
+/// - `import s "strings"` → explicit alias
+/// - `import . "fmt"` → dot import (makes all names visible)
+/// - `import _ "os"` → blank import (side-effect only, no Rust output)
+fn parse_go_import(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
+    // Consume `import`
+    let _import: syn::Ident = input.parse()?;
+
+    // Check for multi-import: `import ("os" "time")`
+    if input.peek(syn::token::Paren) {
+        let content;
+        let _paren = syn::parenthesized!(content in input);
+        while !content.is_empty() {
+            let path: syn::LitStr = content.parse()?;
+            // Each string in a multi-import is a simple import with default alias
+            stmts.push(GoStmt::GoImport(GoImport {
+                alias: None,
+                dot: false,
+                blank: false,
+                path: path.value(),
+            }));
+            if content.peek(syn::token::Semi) {
+                let _semi: token::Semi = content.parse()?;
+            }
+        }
+        if input.peek(syn::token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(true);
+    }
+
+    // Single import forms: check for alias, dot, blank
+    let fork = input.fork();
+    let alias = if let Ok(ident) = fork.call(syn::Ident::parse_any) {
+        let ident_str = ident.to_string();
+        if ident_str == "." {
+            // `import . "fmt"` — dot import
+            let _dot: syn::Ident = input.parse()?;
+            let path: syn::LitStr = input.parse()?;
+            stmts.push(GoStmt::GoImport(GoImport {
+                alias: None,
+                dot: true,
+                blank: false,
+                path: path.value(),
+            }));
+            if input.peek(syn::token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+        if ident_str == "_" {
+            // `import _ "os"` — blank import
+            let _blank: syn::Ident = input.parse()?;
+            let path: syn::LitStr = input.parse()?;
+            stmts.push(GoStmt::GoImport(GoImport {
+                alias: None,
+                dot: false,
+                blank: true,
+                path: path.value(),
+            }));
+            if input.peek(syn::token::Semi) {
+                let _semi: token::Semi = input.parse()?;
+            }
+            return Ok(true);
+        }
+        Some(ident)
+    } else {
+        None
+    };
+
+    // `import s "strings"` — aliased import
+    if let Some(ident) = alias {
+        let path: syn::LitStr = input.parse()?;
+        stmts.push(GoStmt::GoImport(GoImport {
+            alias: Some(ident),
+            dot: false,
+            blank: false,
+            path: path.value(),
+        }));
+        if input.peek(syn::token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(true);
+    }
+
+    // `import "strings"` — default import (no alias)
+    let path: syn::LitStr = input.parse()?;
+    stmts.push(GoStmt::GoImport(GoImport {
+        alias: None,
+        dot: false,
+        blank: false,
+        path: path.value(),
+    }));
+    if input.peek(syn::token::Semi) {
+        let _semi: token::Semi = input.parse()?;
+    }
+    Ok(true)
+}
+
 /// Try to parse a Go-specific statement. Returns `true` if consumed.
 pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     // 1. Check for Go slice literal: `[]...{...}`
@@ -162,12 +264,15 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
         return Ok(true);
     }
 
-    // Check for reserved keywords as identifiers (if, while, for)
+    // Check for reserved keywords as identifiers (if, while, for, import)
     if input.peek(syn::Ident) || input.peek(syn::token::While) {
         let fork = input.fork();
         match fork.call(syn::Ident::parse_any) {
             Ok(kw) => {
                 let kw_str = kw.to_string();
+                if kw_str == "import" {
+                    return parse_go_import(input, stmts);
+                }
                 if kw_str == "if" {
                     return parse_go_if(input, stmts);
                 }

@@ -23,8 +23,8 @@ Three layers:
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | **Root types** | `go_gc.rs`, `go_scheduler.rs` | `GoGc`, `GoScheduler`, `GoChannel`, `GoSelect`, `SchedulerMap`, `GoFuture` — exported at crate root for generated code |
-| **Prelude** | `prelude/` | Runtime types for user code: `GoMutex`, `GoRc`, `GoError`, `Any`, `GoDeferGuard`, builtins |
-| **Packages** | `packages/` | Go stdlib package emulation: os, strings, json, io, bytes |
+| **Prelude** | `prelude/` | Runtime types for user code: `GoDeferGuard`, `GoMutex`, `GoRc`, `GoOnce`, `GoWaitGroup`, `GoRWMutex`, `GoError`, `Any`, `GoRand`, formatting helpers, builtins |
+| **Packages** | `packages/` | Go stdlib package emulation: os, strings, json, io, bytes, math, byte, time |
 
 Import paths:
 - Root: `gourd::GoGc`, `gourd::GoScheduler`, `gourd::GoChannel<T>`, `gourd::GoSelect<T>`, `gourd::SchedulerMap`, `gourd::GoFuture`
@@ -40,27 +40,33 @@ The transpiler is split across these files under `gourd-codegen/src/transpiler/`
 | `ast.rs` | Go AST types (`GoFn`, `GoStruct`, `GoStmt`, `GoSelect`, `Switch`, etc.) |
 | `params.rs` | Function parameter parsing (GoFnInputs, GoFnOutput) |
 | `types.rs` | Go type name mapping to Rust equivalents |
-| `free_fn/mod.rs` | Top-level function, struct, interface, switch, select dispatch |
-| `funcs/mod.rs` | Receiver (impl block) function transpilation |
+| `free_fn/mod.rs` | Top-level function dispatch |
+| `free_fn/basic.rs` | Top-level function, struct, interface, switch, select transpilation |
+| `free_fn/closure.rs` | Top-level closure transpilation |
+| `free_fn/interface.rs` | Interface transpilation |
+| `free_fn/select.rs` | Select statement transpilation |
+| `free_fn/switch.rs` | Switch case/transpilation |
+| `free_fn/util.rs` | Utility helpers |
+| `funcs/mod.rs` | Receiver (impl block) dispatch |
+| `funcs/basic.rs` | Impl block function transpilation |
+| `funcs/receiver.rs` | Receiver parsing (pointer/value receiver detection) |
 | `expr.rs` | Expression-level transpilation entry point |
-| `expr/dispatch.rs` | `go_to_rust()` — routes `syn::Expr` variants to handlers |
-| `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim`, slice slicing (`it[1:]`, `it[1:3]`) |
-| `expr/operators.rs` | `Binary`, `Unary`, `Cast`, `Assign`, `Break` |
+| `expr/dispatch.rs` | `go_to_rust()` — routes `syn::Expr` variants to handlers (29 Expr variants covered) |
+| `expr/literals.rs` | `Lit`, `Path`, `Paren`, `Array`, `Verbatim` |
+| `expr/operators.rs` | `Binary`, `Unary`, `Cast`, `Assign`, `Break`, `Continue` |
 | `expr/calls.rs` | `Call`, `MethodCall`, `Field`, `Index`, `Macro` |
-| `expr/closures.rs` | Go anonymous functions (partial; closure body if statements transpiled, builtins not yet) |
-| `expr/control_flow.rs` | `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`, `While`, `Range`, `If`, `Block` |
+| `expr/closures.rs` | Go anonymous functions |
+| `expr/control_flow.rs` | `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`, `While`, `Range`, `If`, `Block`, `Match` |
 | `expr/structs.rs` | Struct literal transpilation |
 | `stmts.rs` | Block parsing (`parse_go_block`, `parse_go_special_stmt`, `parse_body_from_group`) |
 | `stmt_to_rust.rs` | `go_stmt_to_rust()` — bridges GoStmt AST to Rust tokens |
 | `slice_map.rs` | Map/slice literal parsing (`ElemParser`, `MapEntryParser`) |
 | `switch.rs` | Switch case parsing |
-| `switch_v2.rs` | Switch statement transpilation |
-| `base_stmts.rs` | Fallback statement parser (slice literals in short vars) |
+| `base_stmts.rs` | Fallback statement parser |
 | `return_stmts.rs` | Return parsing (multi-return, make, append, type assertion) |
 | `control_flow.rs` | If, while, for parsing |
 | `receiver.rs` | Receiver parsing (pointer/value receiver detection) |
 | `parsing.rs` | Re-exports from modular sub-modules |
-| `validate/mod.rs` | Validation helpers |
 
 ### CLI (`gourd transpile`)
 
@@ -88,17 +94,16 @@ consumer's crate. See [ROADMAP.md](ROADMAP.md) for the full list of missing feat
 ## Running
 
 ```bash
-cargo test           # run all tests (~34s with validation, ~6s without)
+cargo test           # 112 tests in gourd-macro
 cargo test --lib     # unit tests only
-cargo expand -p gourd # see expanded Go → Rust transpilation.
+cargo expand -p gourd # see expanded Go → Rust transpilation
 gourd transpile "func hello() int { return 42 }"  # transpile CLI tool
 gourd-check [PATHS...]  # standalone Go/Rust validation
 ```
 
-Validation is **enabled by default** via the `validate` feature. Every `go!` block is checked with `go build` at compile time. This adds ~28s to compile time but ensures correctness. For fast iterations:
+Validation is **enabled by default** via the `validate` feature. Every `go!` block is checked with `go build` at compile time. Use `--no-default-features` to skip validation for fast iterations.
 
 ```bash
-cargo test --no-default-features  # ~6s, no go build validation
 cargo test -p gourd-check          # pre-compilation validation only
 ```
 
@@ -110,7 +115,7 @@ Set `GOURD_DEBUG=1` to enable verbose diagnostic output during transpilation:
 GOURD_DEBUG=1 gourd transpile "func hello() int { return 42 }"
 ```
 
-When set, the transpiler prints parsing details, type mappings, and transpilation steps to stderr. This is useful for investigating failed transpilation or unexpected output. The flag is runtime-configured (checked via `std::env::var`), so it has zero overhead when unset. Debug code lives in `gourd-codegen/src/debug.rs` and all debug `eprintln!` calls are wrapped in `if crate::debug::enabled() { ... }` guards.
+When set, the transpiler prints parsing details, type mappings, and transpilation steps to stderr. This is useful for investigating failed transpilation or unexpected output. The flag is runtime-configured (checked via `std::env::var`), so it has zero overhead when unset. Debug code is inlined throughout the transpiler and wrapped in `if crate::debug::enabled() { ... }` guards.
 
 ## `verify_rust_output` — compile-time transpilation verification
 
@@ -177,7 +182,7 @@ The brace group `{ ... }` contains the **expected Rust tokens** — exactly what
 
 - **Function names**: Go names are **preserved as camelCase** — no conversion to snake_case. The transpiler emits the Go identifier directly (e.g., `goShorthand2`, `goAdd`, `isEven`). Rust's `clippy` snake_convention warnings are suppressed with `#[allow(non_snake_case)]` so camelCase names compile without warnings.
 - **Return statements**: The transpiler always adds explicit `return` before expressions. Expected: `{ return a + b }`, not `{ a + b }`.
-- **Method calls on string/slice**: `len(s)` in Go becomes `s.len() as i32` in Rust (type conversion is wrapped in `int(...)` in (now fully handled — see "Type conversions" section above).
+- **Method calls on string/slice**: `len(s)` in Go becomes `s.len() as i32` in Rust.
 - **String literals**: `"hello"` in Go becomes `::std::string::String::from("hello")` in Rust.
 - **Slice/map types**: `[]int` becomes `&[i32]`, slice literals `[]int{...}` inside function bodies ARE transpiled (produce `vec![...]`). Go slice type `[]int` in function signatures is detected via `[]` bracket marker in `GoFnOutput::parse` and the element type is stored for `Vec<i32>` return generation.
 
@@ -190,7 +195,7 @@ When adding a new language mode or validating transpiled output, **always use `g
 The `gourd` runtime crate exports Go runtime primitives at the crate root:
 
 | Type | Purpose |
-|------|--------|
+|------|---------|
 | `GoGc<T>` | Arc-based reference-counted wrapper (Go GC semantics) |
 | `GoScheduler` | Thread-safe task scheduler — `submit()` adds closures, `run()` executes them sequentially |
 | `GoChannel<T>` | Generic channel — `send()`, `recv()`, `try_send()`, `try_recv()`, `with_capacity()` |
@@ -220,7 +225,7 @@ Prelude provides runtime types for user code (not generated by the transpiler):
 | `rand` | `GoRand` — pseudo-random numbers |
 | `error` | `GoError`, `make_error`, `check_error`, `recover` |
 | `any` | `Any` — Go's `interface{}` |
-| `std` | `len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max` |
+| `std` | `len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max`, `std_copy`, `std_delete`, `std_append` |
 
 ## Package emulation (`gourd::packages::*`)
 
@@ -228,12 +233,14 @@ Package emulation code lives in `gourd/src/packages/`:
 
 | File | Functions |
 |------|-----------|
-| `os_ops.rs` | 10 os functions |
+| `os_ops.rs` | 11 os functions |
 | `strings_ops.rs`, `strings.rs` | 16 strings functions |
 | `json_ops.rs` | 2 json functions |
 | `io_ops.rs` | 2 io functions |
 | `bytes_ops.rs` | 7 bytes functions |
-| `math_ops.rs`, `byte_ops.rs` | math/byte utilities |
+| `math_ops.rs` | 14 math functions |
+| `byte_ops.rs` | 4 byte utilities |
+| `time_ops.rs` | 4 time functions |
 
 ### New Features
 
@@ -247,11 +254,13 @@ Package emulation code lives in `gourd/src/packages/`:
 | `continue` | `continue [label]` | Optional label support |
 | Variadic params (`...T`) | `&[T]` slice ref | `GoParam.variadic` flag added to AST |
 | `strings` stdlib | `strings.Replace` → `strings_replace(...)` | 16 functions in transpiler + runtime |
-| `os` stdlib | `os.Open` → `os_open(...)` | 10 functions in transpiler + runtime |
+| `os` stdlib | `os.Open` → `os_open(...)` | 11 functions in transpiler + runtime |
 | `io` stdlib | `io.Copy` → `io_copy(...)` | 2 functions |
 | `bytes` stdlib | `bytes.Contains` → `bytes_contains(...)` | 7 functions |
 | `json` stdlib | `json.Marshal` → `json_marshal(...)` | 2 functions |
 | `time` stdlib | `time.Now` → `time_now(...)` | 4 functions |
+| `math` stdlib | Math operations | 14 functions |
+| `byte` stdlib | Byte operations | 4 functions |
 
 ### When to use
 
@@ -338,22 +347,23 @@ Use `proc_macro` only for the actual **transpilation** — when you need to tran
 | `x.(T)` (type assertion) | type cast/downcast | ✅ |
 | `copy` | `copy_from_slice` | ✅ |
 | `delete` | `HashMap::remove` | ✅ |
-| `recover` | — | ❌ |
 | `defer` | inline Drop guard | ✅ |
+| `min` / `max` | `min(a, b)`, `max(a, b)` | ✅ |
+| `recover` | — | ❌ |
 | `complex` | — | ❌ |
-| `min` / `max` | — | ❌ |
 
 ### Standard library packages
 
 | Package | Key Functions | Status |
 |---------|--------------|--------|
 | `strings` | Replace, ReplaceAll, HasPrefix, HasSuffix, Contains, Split, Join, Index, LastIndex, Trim, TrimLeft, TrimRight, ToUpper, ToLower, Repeat, Fields | ✅ 16 functions |
-| `os` | Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, Args | ✅ 10 functions |
+| `os` | Open, ReadFile, WriteFile, Mkdir, MkdirAll, Remove, Chdir, Getenv, Setenv, EnvKeys, Args | ✅ 11 functions |
 | `io` | Copy, ReadAll | ✅ 2 functions |
 | `bytes` | Contains, HasPrefix, HasSuffix, Index, Split, Join, Replace | ✅ 7 functions |
 | `json` | Marshal, Unmarshal | ✅ 2 functions |
 | `time` | Now, Since, Until, Sleep | ✅ 4 functions |
-
+| `math` | Abs, Sqrt, Floor, Ceil, Round, Min, Max, PI, E, Exp, Log, Log10, Pow, Sign | ✅ 14 functions |
+| `byte` | Of, RuneOf, StringToBytes, BytesToString | ✅ 4 functions |
 
 ## Working with files
 
@@ -426,8 +436,7 @@ exactly which feature is missing.
 let debug_str = quote! { #some_type }.to_string();
 ```
 
-This is `transpiler.rs:464` technique — necessary for printing type info
-during macro expansion.
+This technique is necessary for printing type info during macro expansion.
 
 ### Using `quote::quote!` to inject TokenStreams
 

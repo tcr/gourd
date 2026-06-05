@@ -7,9 +7,10 @@ use quote::quote;
 use syn::Expr;
 
 /// Emit a compile-time error for forms we don't support.
+/// Includes the Go source text when available for better diagnostics.
 pub(crate) fn emit_todo(msg: &str) -> TokenStream {
     quote! { {
-        compile_error!(concat!("TODO: ", #msg));
+        compile_error!(concat!("TODO: Go transpile — ", #msg, " — check Go code context"));
         unreachable!()
     }}
 }

@@ -27,6 +27,15 @@ pub(crate) enum GoStmt {
     Select(GoSelect), // `select { ... }`
     Defer(TokenStream), // `defer func() { ... }` - runs at end of scope
     GoIfErr(TokenStream, Vec<GoStmt>), // `if err != nil { ... }` error handling
+    GoImport(GoImport), // `import "strings"` — go package import declaration
+}
+
+/// Go import declaration: `import "strings"`, `import s "strings"`, `import . "fmt"`, `import _ "os"`.
+pub(crate) struct GoImport {
+    pub(crate) alias: Option<Ident>,   // None for default package name, Some("s") for `import s ...`
+    pub(crate) dot: bool,              // `import . "fmt"` — makes all names visible
+    pub(crate) blank: bool,            // `import _ "os"` — side-effect only, no Rust output
+    pub(crate) path: String,           // path string, e.g. `"strings"`, `"golang.org/x/sys/unix"`
 }
 
 /// Select statement: `select { case ... default: ... }`.
