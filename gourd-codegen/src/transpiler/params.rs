@@ -352,12 +352,67 @@ impl Parse for GoFn {
         let paren_content;
         let _paren = syn::parenthesized!(paren_content in input);
         let inputs = paren_content.parse()?;
-        let output = if !input.is_empty() {
-            let outer = input.parse()?;
-            Some(outer)
+
+        // CLI context: function body is tokenized as a single Group(Brace).
+        // The cursor after `()` may be at an ident (return type) or directly
+        // at the Group(Brace). We handle both cases.
+        //
+        // IMPORTANT: In CLI context, calling `input.parse::<syn::Type>()`
+        // on the main cursor records the following `{` as unexpected
+        // (because it's a Group(Brace) token). To avoid this, we parse
+        // simple types from a fork and advance without chaining the
+        // `unexpected` chain using `step`.
+        let output = if input.peek(syn::token::Brace) {
+            // No return type — cursor is directly at the body
+            None
+        } else if input.peek(syn::Ident) {
+            let fork = input.fork();
+            if let Ok(first_ident) = fork.parse::<syn::Ident>() {
+                let first_name = first_ident.to_string();
+                if first_name == "chan" || first_name == "map" {
+                    // Complex type — use GoFnOutput::parse
+                    Some(input.parse()?)
+                } else {
+                    // Simple type like `int`, `string` — parse directly.
+                    // We already confirmed `peek(syn::Ident)` is true.
+                    // `Ident::parse` doesn't look ahead to record `{` as unexpected.
+                    let consumed_ident: syn::Ident = input.parse()?;
+                    // Check for generic type like `Vec<i32>` — consume `<` if present.
+                    let path = if input.peek(syn::token::Lt) {
+                        // Use syn::parse2 on a fork so `{` on main cursor isn't
+                        // recorded as unexpected. Then advance the main cursor
+                        // past the angle-bracketed args (the `>` closes it,
+                        // leaving `{` safe to be recorded on next parse).
+                        let remaining = input.fork();
+                        let args: syn::AngleBracketedGenericArguments =
+                            remaining.parse()?;
+                        let mut p = syn::Path::from(consumed_ident);
+                        p.segments.last_mut().unwrap().arguments =
+                            syn::PathArguments::AngleBracketed(args);
+                        input.advance_to(&remaining);
+                        p
+                    } else {
+                        syn::Path::from(consumed_ident)
+                    };
+                    let t: syn::Type = syn::Type::Path(syn::TypePath {
+                        path,
+                        qself: None,
+                    });
+                    Some(GoFnOutput {
+                        tys: vec![t],
+                        is_slice: false,
+                        elem_type: None,
+                    })
+                }
+            } else {
+                Some(input.parse()?)
+            }
+        } else if !input.is_empty() {
+            Some(input.parse()?)
         } else {
             None
         };
+
         let block = super::stmts::parse_go_block(input)?;
         Ok(GoFn { ident, generics, inputs, output, block })
     }
