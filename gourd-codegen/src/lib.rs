@@ -78,6 +78,7 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                     }
                     "func" | "fn" => {
                         // Check if it's a receiver function, closure, or free function
+                        eprintln!("[transpile_go] func at i={}, next={:?}", i, trees.get(i + 1));
                         if let Some(proc_macro2::TokenTree::Group(g)) = trees.get(i + 1) {
                             if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
                                 // Could be a receiver function OR a closure.
@@ -94,7 +95,9 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                                 i = skip_declaration(&trees, i);
                             }
                         } else {
-                            result.extend(go_to_rust_fn(subtree(&trees, i, true)));
+                            let ts = go_to_rust_fn(subtree(&trees, i, true));
+                            eprintln!("[transpile_go] go_to_rust_fn result (non-group): {}", ts);
+                            result.extend(ts);
                             i = skip_declaration(&trees, i);
                         }
                     }
