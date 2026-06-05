@@ -217,10 +217,27 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
     }
 
     // 3. Try standard expression parsing
-    let fork = input.fork();
-    if let Ok(expr) = fork.parse::<Expr>() {
-        input.advance_to(&fork);
+    // Pre-process Go slice range syntax: `[start:end]` → `[start..end]`
+    let fs = input.fork();
+    if let Ok(expr) = fs.parse::<Expr>() {
+        input.advance_to(&fs);
         stmts.push(GoStmt::Expr(expr));
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(());
+    }
+
+    // 3b. Try parsing with Go slice range preprocessing.
+    // Go's `a[1:3]` is not valid Rust — convert to `a[1..3]` first.
+    let expr_str = fs.cursor().token_stream().to_string();
+    let converted = convert_go_slice_ranges(&expr_str);
+    if let Ok(_expr) = syn::parse_str::<Expr>(&converted) {
+        // Use the converted expression tokens directly
+        let converted_ts: TokenStream = syn::parse_str::<Expr>(&converted)
+            .map(|e| quote! { #e })
+            .unwrap_or_default();
+        stmts.push(GoStmt::RawStmt(converted_ts));
         if input.peek(token::Semi) {
             let _semi: token::Semi = input.parse()?;
         }
@@ -266,6 +283,73 @@ fn normalize_make_args(raw_args: &str) -> String {
         .replace(" [", "[")
         .replace(" ]", "]")
         .replace("  ", " ")
+}
+
+/// Convert Go slice range syntax `[start:end]` to Rust range `[start..end]`.
+/// Also handles `[start:]`, `[:end]`, and `[:]` (full slice).
+pub(crate) fn convert_go_slice_ranges(expr_str: &str) -> String {
+    let mut result = String::with_capacity(expr_str.len());
+    let mut chars = expr_str.chars().peekable();
+    let mut depth = 0usize;
+    let mut in_bracket = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '[' => {
+                depth += 1;
+                in_bracket = depth >= 1;
+                result.push(c);
+            }
+            ']' => {
+                depth = depth.saturating_sub(1);
+                in_bracket = depth >= 1;
+                result.push(c);
+            }
+            ':' => {
+                if in_bracket {
+                    // Check if this colon is inside an index expression (not a type annotation)
+                    // In Go `a[1:3]`, the colon is the slice range separator
+                    // We need to convert it to Rust's `..`
+                    // Look ahead to see if next non-space char is a digit or `]`
+                    let mut peeked = Vec::new();
+                    while let Some(&pc) = chars.peek() {
+                        if pc == ' ' || pc == '\t' || pc == '\n' || pc == '\r' {
+                            peeked.push(pc);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Some(&nc) = chars.peek() {
+                        if nc == ']' || nc.is_ascii_digit() || nc == '-' || nc.is_ascii_alphabetic() {
+                            // This is a slice range colon — convert to `..`
+                            result.push_str("..");
+                            for pc in &peeked {
+                                result.push(*pc);
+                            }
+                        } else {
+                            // Not a slice range (e.g., type annotation inside brackets)
+                            result.push(':');
+                            for pc in &peeked {
+                                result.push(*pc);
+                            }
+                        }
+                    } else {
+                        result.push(':');
+                        for pc in &peeked {
+                            result.push(*pc);
+                        }
+                    }
+                } else {
+                    result.push(c);
+                }
+            }
+            _ => {
+                result.push(c);
+            }
+        }
+    }
+    result
 }
 
 /// Match normalized make arguments to Rust code.
