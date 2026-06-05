@@ -38,27 +38,43 @@ pub(crate) fn parse_go_while(input: ParseStream) -> syn::Result<GoWhile> {
     })
 }
 
-/// Parse `for init := range iter { body }` or `for init, v := range iter { body }`.
+/// Parse `for init := range iter { body }`, `for init, v := range iter { body }`,
+/// or C-style `for i := 0; i < n; i++ { body }`.
 pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
     let _: syn::token::For = input.parse()?;
 
+    // Parse optional init (either `i := 0` or nothing for C-style loops)
     let init = if input.peek(syn::Ident) {
         let fork = input.fork();
         if let Ok(first_ident) = fork.parse::<syn::Ident>() {
             if first_ident.to_string() == "range" {
                 None
             } else {
-                input.parse::<syn::Ident>()?;
+                let parsed_ident = input.parse::<syn::Ident>()?;
                 if input.peek(syn::token::Comma) {
                     let _: syn::token::Comma = input.parse()?;
                     let second_ident = input.parse::<syn::Ident>()?;
                     let _: syn::token::Colon = input.parse()?;
                     let _: syn::token::Eq = input.parse()?;
-                    Some(GoForInit::Double(first_ident, second_ident))
+                    // Parse the init value (e.g., `0` in `i := 0`)
+                    // Range loops don't have an init value; they have `range` after `:=`
+                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) || input.peek(syn::Ident) {
+                        None // No init value (range loop or C-style without init)
+                    } else {
+                        Some(Box::new(input.parse()?))
+                    };
+                    Some(GoForInit::Double(parsed_ident, second_ident, init_val))
                 } else {
                     let _: syn::token::Colon = input.parse()?;
                     let _: syn::token::Eq = input.parse()?;
-                    Some(GoForInit::Single(first_ident))
+                    // Parse the init value (e.g., `0` in `i := 0`)
+                    // Range loops don't have an init value; they have `range` after `:=`
+                    let init_val: Option<Box<syn::Expr>> = if input.peek(syn::token::Semi) || input.peek(syn::Ident) {
+                        None
+                    } else {
+                        Some(Box::new(input.parse()?))
+                    };
+                    Some(GoForInit::Single(parsed_ident, init_val))
                 }
             }
         } else {
@@ -68,39 +84,92 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
         None
     };
 
-    // Consume 'range' keyword
-    if !matches!(&init, None) || input.peek(syn::Ident) {
+    // Detect C-style `for` vs `for` with `range`
+    let is_range = if input.peek(syn::Ident) {
         let fork = input.fork();
-        match fork.parse::<syn::Ident>() {
-            Ok(range_kw) => {
-                if range_kw.to_string() == "range" {
-                    let _: syn::Ident = input.parse()?;
-                } else {
-                    return Err(syn::Error::new(input.span(), "expected `range` keyword"));
+        if let Ok(range_kw) = fork.parse::<syn::Ident>() {
+            if range_kw.to_string() == "range" {
+                let _: syn::Ident = input.parse()?;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else if input.peek(syn::token::Semi) {
+        false // C-style: no range keyword
+    } else {
+        true // default to range
+    };
+
+    if is_range {
+        let iterable: syn::Path = input.parse()?;
+        let body_content;
+        let _brace = syn::braced!(body_content in input);
+        let mut body_stmts = Vec::new();
+        while !body_content.is_empty() {
+            if super::stmts::parse_go_special_stmt(&body_content, &mut body_stmts)? {
+                continue;
+            }
+            parse_base_stmt(&body_content, &mut body_stmts)?;
+        }
+        let body: GoBlock = GoBlock { stmts: body_stmts };
+        Ok(GoFor {
+            init,
+            is_range: true,
+            iterable: Some(iterable),
+            cond: None,
+            post: None,
+            body,
+        })
+    } else {
+        // C-style `for` loop: `for init; cond; post { body }`
+        let mut cond: Option<Box<syn::Expr>> = None;
+        let mut post: Option<Box<syn::Expr>> = None;
+
+        if input.peek(syn::token::Semi) {
+            let _: syn::token::Semi = input.parse()?;
+            if !input.peek(syn::token::Semi) && !input.peek(syn::token::Brace) {
+                // Parse condition. When no post statement, the condition is
+                // followed directly by {. Comparison operators like <, <=, >=
+                // are ambiguous in this context. Use a fork to extract the
+                // condition text and parse it via parse_str for unambiguous
+                // < operator handling. Then advance input past the condition.
+                // We parse by consuming tokens one by one using input.parse().
+                // For expressions like i < n, we need to parse carefully.
+                // Use input.parse() which works in most cases.
+                let expr: syn::Expr = input.parse()?;
+                cond = Some(Box::new(expr));
+            }
+            if input.peek(syn::token::Semi) {
+                let _: syn::token::Semi = input.parse()?;
+                if !input.peek(syn::token::Brace) {
+                    let expr: syn::Expr = input.parse()?;
+                    post = Some(Box::new(expr));
                 }
             }
-            Err(_) => {
-                return Err(syn::Error::new(input.span(), "expected `range` keyword"));
-            }
         }
-    }
 
-    let iterable: syn::Path = input.parse()?;
-    let body_content;
-    let _brace = syn::braced!(body_content in input);
-    let mut body_stmts = Vec::new();
-    while !body_content.is_empty() {
-        if super::stmts::parse_go_special_stmt(&body_content, &mut body_stmts)? {
-            continue;
+        let body_content;
+        let _brace = syn::braced!(body_content in input);
+        let mut body_stmts = Vec::new();
+        while !body_content.is_empty() {
+            if super::stmts::parse_go_special_stmt(&body_content, &mut body_stmts)? {
+                continue;
+            }
+            parse_base_stmt(&body_content, &mut body_stmts)?;
         }
-        parse_base_stmt(&body_content, &mut body_stmts)?;
+        let body: GoBlock = GoBlock { stmts: body_stmts };
+        Ok(GoFor {
+            init,
+            is_range: false,
+            iterable: None,
+            cond,
+            post,
+            body,
+        })
     }
-    Ok(GoFor {
-        init,
-        is_range: true,
-        iterable,
-        body: GoBlock { stmts: body_stmts },
-    })
 }
 
 /// Parse `if cond { body } else { ... }`.
@@ -167,3 +236,8 @@ pub(crate) fn parse_go_if(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::R
     }));
     Ok(true)
 }
+
+
+
+
+

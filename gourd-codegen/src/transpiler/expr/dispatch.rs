@@ -50,6 +50,7 @@ pub fn go_to_rust(input: &Expr) -> TokenStream {
         Expr::Macro(e)          => super::calls::go_to_rust_macro(e),
         Expr::Verbatim(tokens)  => super::literals::transpile_verbatim(tokens),
         Expr::Struct(e)         => super::structs::transpile_struct(e),
+        Expr::Match(e)          => super::control_flow::transpile_match(e),
         _                       => emit_todo("unsupported Go form"),
     }
 }
@@ -73,7 +74,6 @@ pub fn go_to_rust_pattern(input: &Expr) -> TokenStream {
 
 #[cfg(test)]
 mod test_expr_parse {
-    use super::*;
     use syn::Expr;
 
     #[test]

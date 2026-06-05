@@ -23,6 +23,7 @@ pub(crate) enum GoStmt {
     GoTypeAssert(Expr, syn::Type), // `x.(T)` type assertion
     GoMake(String),   // `make(...)` with raw argument string
     RawStmt(TokenStream),
+    SwitchReturn(TokenStream),  // `return switch ...` with pre-transpiled match
     Select(GoSelect), // `select { ... }`
     Defer(TokenStream), // `defer func() { ... }` - runs at end of scope
     GoIfErr(TokenStream, Vec<GoStmt>), // `if err != nil { ... }` error handling
@@ -47,19 +48,23 @@ pub(crate) enum GoSelectCase {
 pub(crate) struct GoFor {
     /// Optional init (e.g., `i := 0` or `i, v := `)
     pub(crate) init: Option<GoForInit>,
-    /// Always true for `for` with `range`
+    /// True for `for` with `range`, false for C-style `for`
     pub(crate) is_range: bool,
-    /// The iterable expression (parsed as Path)
-    pub(crate) iterable: syn::Path,
+    /// The iterable expression (range only, parsed as Path)
+    pub(crate) iterable: Option<syn::Path>,
+    /// The loop condition (C-style only, None for range)
+    pub(crate) cond: Option<Box<syn::Expr>>,
+    /// The post statement (C-style only, e.g., `i++`)
+    pub(crate) post: Option<Box<syn::Expr>>,
     /// The loop body
     pub(crate) body: GoBlock,
 }
 
 pub(crate) enum GoForInit {
-    /// Single variable: `for i := range slice`
-    Single(Ident),
-    /// Two variables: `for i, v := range slice`
-    Double(Ident, Ident),
+    /// Single variable with optional value: `for i := 0` or `for i := range slice`
+    Single(Ident, Option<Box<syn::Expr>>),
+    /// Two variables with optional value: `for i, v := range slice`
+    Double(Ident, Ident, Option<Box<syn::Expr>>),
 }
 
 /// While loop.
@@ -134,9 +139,9 @@ impl Parse for GoForInit {
         if input.peek(syn::token::Comma) {
             let _: syn::token::Comma = input.parse()?;
             let second: Ident = input.parse()?;
-            Ok(GoForInit::Double(first, second))
+            Ok(GoForInit::Double(first, second, None))
         } else {
-            Ok(GoForInit::Single(first))
+            Ok(GoForInit::Single(first, None))
         }
     }
 }
@@ -145,7 +150,7 @@ impl Parse for GoFor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let _: syn::token::For = input.parse()?;
 
-        // Parse optional init
+        // Parse optional init (either `i := 0` or nothing for C-style loops)
         let init = if input.peek(syn::Ident) {
             let fork = input.fork();
             if let Ok(first_ident) = fork.parse::<syn::Ident>() {
@@ -158,11 +163,11 @@ impl Parse for GoFor {
                         let second_ident = input.parse::<syn::Ident>()?;
                         let _: syn::token::Colon = input.parse()?;
                         let _: syn::token::Eq = input.parse()?;
-                        Some(GoForInit::Double(first_ident, second_ident))
+                        Some(GoForInit::Double(first_ident, second_ident, None))
                     } else {
                         let _: syn::token::Colon = input.parse()?;
                         let _: syn::token::Eq = input.parse()?;
-                        Some(GoForInit::Single(first_ident))
+                        Some(GoForInit::Single(first_ident, None))
                     }
                 }
             } else {
@@ -172,25 +177,76 @@ impl Parse for GoFor {
             None
         };
 
-        // Consume 'range' keyword
-        if input.peek(syn::Ident) {
+        // Detect C-style `for` vs `for` with `range`
+        // C-style: `for i := 0; i < n; i++ { body }`
+        // Range: `for i := 0; range slice { body }`
+        // No-init C-style: `for i < n; i++ { body }`
+        let is_range = if input.peek(syn::Ident) {
             let fork = input.fork();
             if let Ok(range_kw) = fork.parse::<syn::Ident>() {
                 if range_kw.to_string() == "range" {
                     let _: syn::Ident = input.parse()?;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else if input.peek(syn::token::Semi) {
+            // C-style loop: no range keyword, semicolons separate init/cond/post
+            false
+        } else {
+            true // default to range if no init and no semi
+        };
+
+        if is_range {
+            // Range loop: `for init { range iterable } { body }`
+            let iterable: syn::Path = input.parse()?;
+            let body: GoBlock = input.parse()?;
+            Ok(GoFor {
+                init,
+                is_range: true,
+                iterable: Some(iterable),
+                cond: None,
+                post: None,
+                body,
+            })
+        } else {
+            // C-style loop: `for init; cond; post { body }`
+            // Parse init (already done above), then `; cond; post`
+            let mut cond: Option<Box<syn::Expr>> = None;
+            let mut post: Option<Box<syn::Expr>> = None;
+
+            // Optional condition (after first `;`)
+            if input.peek(syn::token::Semi) {
+                let _: syn::token::Semi = input.parse()?;
+                // Condition can be: nothing (infinite loop), an expression, or another semi
+                if !input.peek(syn::token::Semi) && !input.peek(syn::token::Brace) {
+                    let expr: syn::Expr = input.parse()?;
+                    cond = Some(Box::new(expr));
+                }
+                // If condition is empty, consume second semi
+                if input.peek(syn::token::Semi) {
+                    let _: syn::token::Semi = input.parse()?;
+                    // Post statement
+                    if !input.peek(syn::token::Brace) {
+                        let expr: syn::Expr = input.parse()?;
+                        post = Some(Box::new(expr));
+                    }
                 }
             }
+
+            let body: GoBlock = input.parse()?;
+            Ok(GoFor {
+                init,
+                is_range: false,
+                iterable: None,
+                cond,
+                post,
+                body,
+            })
         }
-
-        let iterable: syn::Path = input.parse()?;
-        let body: GoBlock = input.parse()?;
-
-        Ok(GoFor {
-            init,
-            is_range: true,
-            iterable,
-            body,
-        })
     }
 }
 

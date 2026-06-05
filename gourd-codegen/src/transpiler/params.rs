@@ -62,10 +62,15 @@ impl Parse for GoFnInputs {
 
             let fork = input.fork();
             let is_slice_like = fork.peek(syn::token::Bracket);
+            // Check for `map` keyword in parameter type position
+            let is_map_like = {
+                let f = fork.fork();
+                f.parse::<Ident>().ok().map(|id| id.to_string() == "map").unwrap_or(false)
+            };
 
             // Parse type in normal path if not already set by group loop
             if ty_from_ident.is_none() {
-                if !is_slice_like && fork.peek(syn::Ident) {
+                if !is_slice_like && !is_map_like && fork.peek(syn::Ident) {
                     ty_from_ident = Some(input.parse()?);
                 } else if !is_slice_like && fork.peek(syn::token::Colon) {
                     let _colon: syn::token::Colon = input.parse()?;
@@ -88,6 +93,50 @@ impl Parse for GoFnInputs {
                 args.push(GoParam { id: id.clone(), ty: None, slice_elem: Some(elem_type.clone()), variadic: is_variadic });
                 for param_id in group_ids {
                     args.push(GoParam { id: param_id, ty: None, slice_elem: Some(elem_type.clone()), variadic: is_variadic });
+                }
+            } else if is_map_like {
+                // Parse `map[K]V` parameter type
+                let _: Ident = input.parse()?; // consume `map`
+                let k_content;
+                let _bracket = syn::bracketed!(k_content in input);
+                let key_type: syn::Type = k_content.parse().unwrap_or_else(|_| {
+                    syn::Type::Path(syn::TypePath {
+                        path: syn::Path::from(syn::Ident::new("string", proc_macro2::Span::call_site())),
+                        qself: None,
+                    })
+                });
+                let val_type: syn::Type = if input.peek(syn::Ident) {
+                    input.parse().unwrap_or_else(|_| {
+                        syn::Type::Path(syn::TypePath {
+                            path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                            qself: None,
+                        })
+                    })
+                } else {
+                    syn::Type::Path(syn::TypePath {
+                        path: syn::Path::from(syn::Ident::new("int", proc_macro2::Span::call_site())),
+                        qself: None,
+                    })
+                };
+                let mut map_path = syn::Path::from(syn::Ident::new("__go_map", proc_macro2::Span::call_site()));
+                map_path.segments.clear();
+                map_path.segments.push(syn::PathSegment {
+                    ident: syn::Ident::new("__go_map", proc_macro2::Span::call_site()),
+                    arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                        colon2_token: None,
+                        lt_token: Token![<](proc_macro2::Span::call_site()),
+                        args: syn::punctuated::Punctuated::from_iter([
+                            syn::GenericArgument::Type(key_type),
+                            syn::GenericArgument::Type(val_type),
+                        ]),
+                        gt_token: Token![>](proc_macro2::Span::call_site()),
+                    }),
+                });
+                let map_type: Box<syn::Type> = Box::new(syn::Type::Path(syn::TypePath { path: map_path, qself: None }));
+                let map_ty_clone = map_type.clone();
+                args.push(GoParam { id: id.clone(), ty: Some(map_type), slice_elem: None, variadic: is_variadic });
+                for param_id in group_ids {
+                    args.push(GoParam { id: param_id, ty: Some(map_ty_clone.clone()), slice_elem: None, variadic: is_variadic });
                 }
             } else {
                 let ty = if let Some(ty) = ty_from_ident.clone() {

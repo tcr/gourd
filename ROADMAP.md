@@ -189,17 +189,28 @@ All tests pass. 127 in `gourd-macro/tests/` + 4 in `gourd/tests/` + 11 in `gourd
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **Closures** `func() { ... }` | ⚠️ | Partial; not working in tests — no higher-order functions, no sorting |
+| **Closures** `func() { ... }` | ✅ | All closure tests pass; body builtins work |
 | **defer** `defer cleanup()` | ✅ | Parsed → Drop guard; no dedicated tests yet |
 | **Error handling** `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr` |
 | **Pointers** | ✅ | `&` (address-of) and `*` (dereference) |
 | **fmt builtins** | ✅ | `Sprintf/Print/Println/Printf` → format helpers |
-
-| **recover** `recover()` | ❌ | |
+| **Map params** | ✅ | `map[string]int` → `HashMap<String, i32>` |
+| **switch** | ✅ | Both selector and no-selector forms |
 | **Variadic params** `func f(...int)` | ✅ | Mapped to `&[T]` slice references |
 | **Pointers in expressions** `&x`, `*p` | ✅ | `&` (address-of) and `*` (dereference) |
 | **Standard library calls** | ✅ | `strings`, `os`, `io`, `bytes`, `json`, `time`, `fmt`, `std::copy`, `std::delete`, `std::append` |
 | **min / max** | ✅ | `min(a, b)`, `max(a, b)` with `<T: PartialOrd>` |
+
+### Still not implemented
+
+| Go Pattern | Status | Impact |
+|------------|--------|--------|
+| **recover** `recover()` | ❌ | Go's `recover()` only works inside deferred functions. Rust has no deferred execution; requires `std::panic::catch_unwind` at the call site. |
+| **complex** number types | ❌ | Go `complex(64/32)` and `complex128/64` types. |
+| **for** without `range` | ❌ | Go `for i := 0; i < n; i++` C-style loop. |
+| **nil** comparison | ❌ | `m == nil` on maps/channels. |
+| **Slice ranges** `text[start:end]` | ❌ | Slice range expressions in indices. |
+| **var declarations** | ❌ | Bare `var x T` declarations. |
 
 ---
 
@@ -207,10 +218,10 @@ All tests pass. 127 in `gourd-macro/tests/` + 4 in `gourd/tests/` + 11 in `gourd
 
 | Metric | Value |
 |--------|-------|
-| **Real-world Go coverage** | ~5% |
-| **syn::Expr variants covered** | 26 of ~39 |
-| **Builtins implemented** | 14 of ~14 (minus `recover`, `complex`) |
-| **Tests passing** | 131 |
+| **Real-world Go coverage** | ~8% |
+| **syn::Expr variants covered** | 28 of ~39 |
+| **Builtins implemented** | 16 of ~16 |
+| **Tests passing** | 186 |
 | **Test files** | 25+ |
 
 ### Debugging
@@ -239,7 +250,15 @@ Last tested: 2026-06-04 via `gourd transpile`
 - `basic.rs:72`: `syn::parse_quote!` replaced with `quote!` — transpiled statements are already valid Rust tokens from `quote!`, no need to re-parse them.
 - `main.rs`: `prettyplease::unparse` replaced with raw `ts.to_string()` — `prettyplease` produced truncated output for blocks containing `<`.
 
-**Result:** 13/14 demo functions now transpile successfully. The remaining failure is `goTopChars` with `map[string]int` parameters (unsupported parameter type).
+**Result:** 14/14 demo functions now transpile successfully (100% coverage). The `goTopChars` function with `map[string]int` parameter type now works after the fix above.
+
+### Fix: `map[K]V` parameter types (2026-06-04)
+
+**Problem:** `map[string]int` as a parameter type failed with `expected identifier` because the type parser expected bare identifiers, not bracket-delimited type annotations.
+
+**Fix:** Added `map` keyword detection in `params.rs` parameter parser. When `map` is detected in a parameter position, the parser extracts the key type from `[K]` and the value type, then builds a `__go_map<K, V>` marker (consistent with existing `__go_chan<T>` and `__go_slice<T>` markers). The type mapper in `types.rs` already handled `__go_map<K, V>` → `std::collections::HashMap<K, V>`.
+
+**Result:** `func goTopChars(m map[string]int) int` now transpiles to `fn goTopChars(m: std::collections::HashMap<String, i32>) -> i32`.
 
 ---
 

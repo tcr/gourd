@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ExprBlock, ExprForLoop, ExprIf, ExprLoop, ExprRange, ExprReturn, ExprTuple, ExprWhile};
+use syn::{ExprBlock, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprRange, ExprReturn, ExprTuple, ExprWhile};
 
 pub fn transpile_let(input: &syn::ExprLet) -> TokenStream {
     let pat = &input.pat;
@@ -60,6 +60,58 @@ pub fn transpile_range(input: &ExprRange) -> TokenStream {
         (None, Some(e))        => quote! { #limits #e },
         (None, None)           => quote! { #limits },
     }
+}
+
+fn transpile_pattern(pat: &syn::Pat) -> TokenStream {
+    match pat {
+        syn::Pat::Wild(_) => quote! { _ },
+        syn::Pat::Ident(ident) => quote! { #ident },
+        syn::Pat::Path(path) => quote! { #path },
+        syn::Pat::Lit(lit) => {
+            let lit = &lit.lit;
+            quote! { #lit }
+        }
+        syn::Pat::Reference(r) => {
+            let inner = transpile_pattern(&r.pat);
+            quote! { &#inner }
+        }
+        syn::Pat::Tuple(tuple) => {
+            let elems: Vec<_> = tuple.elems.iter().map(transpile_pattern).collect();
+            quote! { ( #(#elems),* ) }
+        }
+        syn::Pat::TupleStruct(ts) => {
+            let path = &ts.path;
+            let elems: Vec<_> = ts.elems.iter().map(transpile_pattern).collect();
+            quote! { #path ( #(#elems),* ) }
+        }
+        syn::Pat::Struct(s) => {
+            let path = &s.path;
+            let fields: Vec<_> = s.fields.iter().map(|f| {
+                let name = &f.member;
+                let pat = transpile_pattern(&f.pat);
+                quote! { #name: #pat }
+            }).collect();
+            quote! { #path { #(#fields),* } }
+        }
+        _ => super::dispatch::emit_todo("unsupported match pattern")
+    }
+}
+
+pub fn transpile_match(input: &ExprMatch) -> TokenStream {
+    let expr = super::dispatch::go_to_rust(&input.expr);
+    // Arm bodies are already processed by transpile_switch, so pass through
+    // as raw tokens to avoid double-wrapping (e.g., String::from(String::from(...)))
+    let arms: Vec<_> = input.arms.iter().map(|arm| {
+        let pat = transpile_pattern(&arm.pat);
+        let guard = arm.guard.as_ref().map(|(_, g)| {
+            let g = super::dispatch::go_to_rust(g);
+            quote! { if #g }
+        });
+        let body: TokenStream = quote! { #&*arm.body };
+        let comma = if arm.comma.is_some() { quote! { , } } else { quote! {} };
+        quote! { #pat #guard => #body #comma }
+    }).collect();
+    quote! { match #expr { #(#arms)* } }
 }
 
 pub fn transpile_if(input: &ExprIf) -> TokenStream {

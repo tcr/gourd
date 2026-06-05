@@ -1,6 +1,6 @@
 //! Return statement parsing: single/multi-return, make(), append(), slice returns, type assertions.
 
-use super::ast::{GoStmt};
+use super::ast::{GoStmt, Switch};
 use super::types::{go_to_rust_slice_arg, map_go_type_str, split_top_level_comma, split_top_level_items};
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -10,14 +10,40 @@ use syn::parse_quote;
 use syn::token;
 use syn::{Expr, Ident};
 
+
 /// Parse `return` — handles single, multi-return, slice returns, make(), and append().
 pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> syn::Result<bool> {
     input.parse::<syn::token::Return>()?;
+    eprintln!("DEBUG: parsed return keyword");
+
+    // Check for `return switch ...` - handle switch statement after return
+    let switch_fork = input.fork();
+    if switch_fork.peek(syn::Ident) {
+        let kw_fork = switch_fork.fork();
+        if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
+            let kw_str = kw.to_string();
+            if kw_str == "switch" {
+                eprintln!("DEBUG: found switch after return, parsing switch");
+                // Reposition to switch_fork and parse switch from there
+                input.advance_to(&switch_fork);
+                // Now parse the switch statement (which includes the 'switch' keyword)
+                let switch: Switch = input.parse()?;
+                let switch_result = super::free_fn::transpile_switch(&switch);
+                stmts.push(GoStmt::SwitchReturn(switch_result));
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+        }
+    }
 
     // Check for channel receive: `return <-ch`
+    eprintln!("DEBUG: checking for channel receive");
     if input.cursor().punct().is_some() {
         if let Some((p, _)) = input.cursor().punct() {
             if p.as_char() == '<' && p.spacing() == proc_macro2::Spacing::Joint {
+                eprintln!("DEBUG: found channel receive");
                 let _p1: proc_macro2::Punct = input.parse()?;
                 let _p2: proc_macro2::Punct = input.parse()?;
                 let ch_ident: Ident = input.parse()?;
@@ -30,6 +56,7 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
             }
         }
     }
+    eprintln!("DEBUG: not channel receive, checking for expression");
 
     // Check for `return make(...)`
     let make_fork = input.fork();
@@ -269,51 +296,97 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
             return Ok(true);
         }
 
-        let expr_fork = after_ret.fork();
-        if expr_fork.parse::<Expr>().is_ok() {
-            input.advance_to(&after_ret);
-            let first = input.parse::<Expr>()?;
-            let multi_fork = input.fork();
-            if multi_fork.peek(token::Comma) {
-                let mut multi_exprs: Vec<Expr> = vec![first];
-                input.parse::<token::Comma>()?;
-                loop {
-                    if input.peek(syn::token::Brace) {
-                        break;
+    }
+
+    // Check for type assertion: `return x.(T)` - fall through to existing code
+    let after_ret = input.fork();
+    if !after_ret.is_empty() {
+        let check_str = after_ret.cursor().token_stream().to_string();
+        let is_type_assertion = check_str.contains(".(");
+
+        if is_type_assertion {
+            // Parse type assertion: `return x.(T)`
+            let receiver_fork = after_ret.fork();
+            if receiver_fork.parse::<Expr>().is_ok() {
+                input.advance_to(&receiver_fork);
+                let receiver = input.parse::<Expr>()?;
+
+                let _dot: token::Dot = input.parse()?;
+
+                // Parse parenthesized type(s): `(T)` or `(T1, T2)`
+                let content;
+                let _paren = syn::parenthesized!(content in input);
+
+                let mut types: Vec<syn::Type> = Vec::new();
+                if let Ok(ty) = content.parse::<syn::Type>() {
+                    types.push(ty);
+                }
+                while content.peek(token::Comma) {
+                    let _: token::Comma = content.parse()?;
+                    if let Ok(ty) = content.parse::<syn::Type>() {
+                        types.push(ty);
                     }
-                    let local_fork = input.fork();
-                    if local_fork.peek(syn::Ident) {
-                        let kw_fork = local_fork.fork();
-                        if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
-                            let kw_str = kw.to_string();
-                            if matches!(kw_str.as_str(),
-                                "if" | "for" | "return" | "switch" | "case" | "default") {
-                                break;
-                            }
-                        }
+                }
+
+                if types.is_empty() {
+                    stmts.push(GoStmt::Expr(receiver));
+                } else {
+                    for ty in types.into_iter().rev() {
+                        stmts.push(GoStmt::GoTypeAssert(receiver.clone(), ty));
                     }
-                    let next_fork = input.fork();
-                    if next_fork.parse::<Expr>().is_ok() {
-                        let expr = input.parse::<Expr>()?;
-                        multi_exprs.push(expr);
-                        if input.peek(token::Comma) {
-                            input.parse::<token::Comma>()?;
-                        } else {
+                }
+                if input.peek(token::Semi) {
+                    let _semi: token::Semi = input.parse()?;
+                }
+                return Ok(true);
+            }
+        }
+    }
+
+    let expr_fork = after_ret.fork();
+    if expr_fork.parse::<Expr>().is_ok() {
+        input.advance_to(&after_ret);
+        let first = input.parse::<Expr>()?;
+        let multi_fork = input.fork();
+        if multi_fork.peek(token::Comma) {
+            let mut multi_exprs: Vec<Expr> = vec![first];
+            input.parse::<token::Comma>()?;
+            loop {
+                if input.peek(syn::token::Brace) {
+                    break;
+                }
+                let local_fork = input.fork();
+                if local_fork.peek(syn::Ident) {
+                    let kw_fork = local_fork.fork();
+                    if let Ok(kw) = kw_fork.parse::<syn::Ident>() {
+                        let kw_str = kw.to_string();
+                        if matches!(kw_str.as_str(),
+                            "if" | "for" | "return" | "case" | "default") {
                             break;
                         }
+                    }
+                }
+                let next_fork = input.fork();
+                if next_fork.parse::<Expr>().is_ok() {
+                    let expr = input.parse::<Expr>()?;
+                    multi_exprs.push(expr);
+                    if input.peek(token::Comma) {
+                        input.parse::<token::Comma>()?;
                     } else {
                         break;
                     }
+                } else {
+                    break;
                 }
-                stmts.push(GoStmt::GoReturn(multi_exprs));
-            } else {
-                stmts.push(GoStmt::Expr(parse_quote! { return #first }));
             }
-            if input.peek(token::Semi) {
-                let _semi: token::Semi = input.parse()?;
-            }
-            return Ok(true);
+            stmts.push(GoStmt::GoReturn(multi_exprs));
+        } else {
+            stmts.push(GoStmt::Expr(parse_quote! { return #first }));
         }
+        if input.peek(token::Semi) {
+            let _semi: token::Semi = input.parse()?;
+        }
+        return Ok(true);
     }
 
     stmts.push(GoStmt::Expr(parse_quote! { return }));

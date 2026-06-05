@@ -1,5 +1,6 @@
 //! Switch statement parsing: `Parse` impl for `Switch`.
 
+use quote::quote;
 pub(crate) use super::ast::{GoStmt, Switch, SwitchCase};
 use syn::ext::IdentExt;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream};
@@ -8,12 +9,17 @@ use syn::{Expr, Ident};
 impl Parse for Switch {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let _switch_kw: Ident = input.call(Ident::parse_any)?;
+        eprintln!("DEBUG: switch parser - after switch keyword, checking for selector");
 
         // Parse optional selector expression (stop at `{` boundary)
         let selector = if input.peek(syn::token::Brace) {
+            eprintln!("DEBUG: switch parser - selector is None (no selector)");
             None
         } else {
+            eprintln!("DEBUG: switch parser - parsing selector as Path");
             let path: syn::Path = input.parse()?;
+            let path_str = quote! { #path }.to_string();
+            eprintln!("DEBUG: switch parser - selector path: {}", path_str);
             Some(syn::Expr::Path(syn::ExprPath {
                 attrs: Vec::new(),
                 qself: None,
@@ -23,15 +29,19 @@ impl Parse for Switch {
 
         let brace_content;
         let _brace = syn::braced!(brace_content in input);
+        eprintln!("DEBUG: switch parser - parsed brace content, is_empty={}", brace_content.is_empty());
 
         let mut cases = Vec::new();
         let mut default_stmts = Vec::new();
 
+        eprintln!("DEBUG: switch parser - starting case parsing loop");
         while !brace_content.is_empty() {
             let fork = brace_content.fork();
+            eprintln!("DEBUG: switch parser - checking for case keyword");
             if fork.peek(syn::Ident) {
                 if let Ok(kw) = fork.parse::<syn::Ident>() {
                     let kw_str = kw.to_string();
+                    eprintln!("DEBUG: switch parser - parsed keyword: {}", kw_str);
                     if kw_str == "case" {
                         brace_content.parse::<syn::Ident>()?;
 

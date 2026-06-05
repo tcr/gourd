@@ -125,7 +125,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             let body_block: Box<syn::ExprBlock> = syn::parse_quote!({ #(#body);* });
 
             match (&for_stmt.init, &for_stmt.is_range) {
-                (Some(GoForInit::Double(i, v)), true) => {
+                (Some(GoForInit::Double(i, v, _)), true) => {
                     let i_ident = i.clone();
                     let v_ident = v.clone();
                     let iterable = &for_stmt.iterable;
@@ -133,7 +133,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                         for ( #i_ident, #v_ident ) in #iterable.iter().copied().enumerate() #body_block
                     }
                 }
-                (Some(GoForInit::Single(i)), true) => {
+                (Some(GoForInit::Single(i, _)), true) => {
                     let i_ident = i.clone();
                     let iterable = &for_stmt.iterable;
                     quote! {
@@ -146,12 +146,68 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                         for _ in 0.. #iterable.len() #body_block
                     }
                 }
-                _ => {
-                    dispatch::emit_todo("unsupported for form")
+                (None, false) => {
+                    // C-style: `for { body }` (infinite loop)
+                    quote! { loop #body_block }
+                }
+                (init, false) => {
+                    // C-style: `for init; cond; post { body }`
+                    let cond = for_stmt.cond.as_ref()
+                        .map(|e| dispatch::go_to_rust(e.as_ref()))
+                        .unwrap_or_default();
+                    let post = for_stmt.post.as_ref()
+                        .map(|e| dispatch::go_to_rust(e.as_ref()))
+                        .unwrap_or_default();
+                    match init {
+                        Some(GoForInit::Double(ident1, ident2, _)) => {
+                            // Two init vars: `let ident1 = (); let ident2 = ();`
+                            let init_stmt = quote! { let #ident1 = (); let #ident2 = (); };
+                            if !cond.is_empty() && !post.is_empty() {
+                                quote! {
+                                    { #init_stmt loop { if !#cond { break; } #(#body);* ; #post ; } }
+                                }
+                            } else if !cond.is_empty() {
+                                quote! {
+                                    { #init_stmt while #cond { #(#body);* } }
+                                }
+                            } else {
+                                quote! {
+                                    { #init_stmt loop #body_block }
+                                }
+                            }
+                        }
+                        Some(GoForInit::Single(ident, init_val)) => {
+                            let init_stmt = match init_val {
+                                Some(val) => {
+                                    let init_val_rust = dispatch::go_to_rust(val.as_ref());
+                                    quote! { let #ident = #init_val_rust; }
+                                }
+                                None => quote! { let #ident = (); },
+                            };
+                            if !cond.is_empty() && !post.is_empty() {
+                                // C-style for with both cond and post: use `loop` with `while`-like guard
+                                quote! {
+                                    { #init_stmt loop { if !#cond { break; } #(#body);* ; #post } }
+                                }
+                            } else if !cond.is_empty() {
+                                quote! {
+                                    { #init_stmt while #cond { #(#body);* } }
+                                }
+                            } else {
+                                quote! {
+                                    { #init_stmt loop #body_block }
+                                }
+                            }
+                        }
+                        None => quote! { loop #body_block },
+                    }
                 }
             }
         }
         GoStmt::RawStmt(tokens) => {
+            tokens.clone()
+        }
+        GoStmt::SwitchReturn(tokens) => {
             tokens.clone()
         }
     }
