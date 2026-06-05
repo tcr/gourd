@@ -106,6 +106,10 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                         result.extend(go_to_rust_select(subtree(&trees, i, false)));
                         i = skip_declaration(&trees, i);
                     }
+                    "import" => {
+                        result.extend(go_to_rust_import(subtree(&trees, i, false)));
+                        i = skip_declaration(&trees, i);
+                    }
                     _ => {
                         // Unknown top-level token — skip it
                         i += 1;
@@ -234,6 +238,31 @@ fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
     let mut depth: i32 = 0;
     for (i, tree) in trees[start..].iter().enumerate() {
         match tree {
+            proc_macro2::TokenTree::Ident(ident) => {
+                // At depth 0, if we're at an `import` keyword, skip past
+                // both the import keyword and the package name identifier.
+                if depth == 0 && ident.to_string() == "import" {
+                    // Skip past import + one identifier (the package name)
+                    // Then find the next declaration boundary
+                    for (j, tree) in trees[start + i + 1..].iter().enumerate() {
+                        match tree {
+                            proc_macro2::TokenTree::Ident(_) => {
+                                return start + i + 1 + j + 1; // skip past package name
+                            }
+                            proc_macro2::TokenTree::Group(g)
+                                if g.delimiter() == proc_macro2::Delimiter::Brace => {
+                                return start + i + 1 + j;
+                            }
+                            proc_macro2::TokenTree::Punct(p)
+                                if p.as_char() == '(' || p.as_char() == '{' => {
+                                return start + i + 1 + j;
+                            }
+                            _ => {}
+                        }
+                    }
+                    return start + i + 2;
+                }
+            }
             proc_macro2::TokenTree::Group(g) => match g.delimiter() {
                 proc_macro2::Delimiter::Brace => {
                     // At depth 0, a brace group means the function body.
@@ -282,6 +311,37 @@ fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
         }
     }
     start + 1
+}
+
+/// Transpile a Go import statement: `import <package>`.
+///
+/// Maps Go package names to Rust module paths in `gourd::packages`:
+/// - `import strings` → `use gourd::packages::strings::*;`
+/// - `import os` → `use gourd::packages::os::*;`
+/// - `import time` → `use gourd::packages::time::*;`
+fn go_to_rust_import(input: TokenStream) -> TokenStream {
+    let trees: Vec<proc_macro2::TokenTree> = input.into_iter().collect();
+    // The subtree after "import" should be a single package name identifier.
+    // `import strings` → [Ident("import"), Ident("strings")]
+    if trees.len() >= 2 {
+        if let proc_macro2::TokenTree::Ident(pkg) = &trees[1] {
+            let pkg_name = pkg.to_string();
+            return match pkg_name.as_str() {
+                "strings" => quote! { use gourd::packages::strings::*; },
+                "os" => quote! { use gourd::packages::os::*; },
+                "time" => quote! { use gourd::packages::time::*; },
+                // Unknown package — emit a compile_error
+                other => quote! {
+                    compile_error!(concat!(
+                        "Unknown Go package for `import`: ", #other,
+                        ". Supported packages: strings, os, time."
+                    ));
+                },
+            };
+        }
+    }
+    // Fallback — no package name found
+    quote! {}
 }
 
 /// Transpile a Go channel literal: `chan T` or `chan T{n}`.

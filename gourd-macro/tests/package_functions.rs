@@ -1,92 +1,82 @@
 //! Tests for Go standard library package function transpilation.
 //!
-//! These test the transpiler's ability to generate calls to the package
-//! emulation functions via `::gourd::prelude::*`.
+//! Each `go!` block groups an `import` statement with its related test
+//! functions, demonstrating how `import` generates targeted `use` imports
+//! scoped to the functions that need them.
+//!
+//! ```go
+//! import strings  // → use gourd::packages::strings::*;
+//! import time     // → use gourd::packages::time::*;
+//! import os       // → use gourd::packages::os::*;
+//! ```
 
 use gourd_macro::go;
 
-// ─── Strings operations ───────────────────────────────────────────────────
+// ─── Strings package: import + test functions ─────────────────────────────
 
-// Test: strings.Replace
 go! {
+    import strings
+
     func goReplace() string {
         return strings.Replace("hello world world", "world", "rust", 2)
     }
-}
 
-// Test: strings.ReplaceAll
-go! {
     func goReplaceAll() string {
         return strings.ReplaceAll("aaa", "a", "b")
     }
-}
 
-// Test: strings.HasPrefix
-go! {
     func goHasPrefix() bool {
         return strings.HasPrefix("hello world", "hello")
     }
-}
 
-// Test: strings.HasSuffix
-go! {
     func goHasSuffix() bool {
         return strings.HasSuffix("hello world", "world")
     }
-}
 
-// Test: strings.Contains
-go! {
     func goContains() bool {
         return strings.Contains("hello world", "world")
     }
-}
 
-// Test: strings.Join
-go! {
     func goJoin() string {
         return strings.Join(["a", "b", "c"], ",")
     }
-}
 
-// Test: strings.Split
-go! {
     func goSplit() []string {
         return strings.Split("a,b,c", ",")
     }
-}
 
-// Test: strings.Index
-go! {
     func goIndex() int {
         return strings.Index("hello world", "world")
     }
-}
 
-// Test: strings.Trim
-go! {
     func goTrim() string {
         return strings.Trim("  hello  ", " ")
     }
-}
 
-// Test: strings.ToUpper
-go! {
     func goToUpper() string {
         return strings.ToUpper("hello")
     }
 }
 
-// ─── Time operations ──────────────────────────────────────────────────────
+// ─── Time package: import + test functions ────────────────────────────────
 
-// Test: time.Now
 go! {
+    import time
+
     func goTimeNow() int64 {
         return time.Now()
     }
 }
 
-// Tests
+// ─── OS package: import only (demo) ───────────────────────────────────────
+// Note: os.Open expects &str but the transpiler generates String for literals.
+// The import os syntax works; os function compatibility is a separate concern.
+
+go! {
+    import os
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_strings_replace() {

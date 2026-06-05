@@ -17,13 +17,13 @@
 //! | `error` | `GoError`, `make_error`, `check_error`, `recover` |
 //! | `any` | `Any` — Go's `interface{}` |
 //! | `std` | `len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max` |
-//! | `os_ops` | `os_open`, `os_read_file`, `os_write_file`, `os_mkdir`, etc. |
-//! | `strings` | `strings_replace`, `strings_replace_all`, `has_prefix`, `has_suffix`, etc. |
+//! | `os_impl` | `os_open`, `os_read_file`, `os_write_file`, `os_mkdir`, etc. |
+//! | `strings_impl` | `strings_replace`, `strings_replace_all`, `has_prefix`, `has_suffix`, etc. |
 //! | `strings_ops` | `index`, `join`, `split`, `trim`, `contains`, etc. |
 //! | `io_ops` | `io_copy`, `io_read_all` |
 //! | `bytes_ops` | `bytes_contains`, `bytes_has_prefix`, `bytes_has_suffix`, etc. |
 //! | `json_ops` | `json_marshal`, `json_unmarshal` |
-//! | `time_ops` | `time_now`, `time_since`, `time_sleep`, `time_until` |
+//! | `time_impl` | `time_now`, `time_since`, `time_sleep`, `time_until` |
 //! | `byte_ops` | `byte_of`, `rune_of`, `string_to_bytes`, `bytes_to_string` |
 //!
 //! # Root-level types (not in prelude)
