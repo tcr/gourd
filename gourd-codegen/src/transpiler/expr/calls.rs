@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, ExprField, ExprIndex, ExprMacro, ExprMethodCall};
+use syn::{Expr, ExprField, ExprIndex, ExprMacro, ExprMethodCall, ExprRange};
 
 use super::dispatch::emit_todo;
 
@@ -323,6 +323,10 @@ pub fn go_to_rust_macro(input: &ExprMacro) -> TokenStream {
 
 pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     let seq = super::dispatch::go_to_rust(&input.expr);
+    // Handle slice ranges: Go `a[1:3]` → Rust `a[1..3]`
+    if let Expr::Range(range) = &*input.index {
+        return transpile_slice_range(&seq, range);
+    }
     let seq_str = quote! { #seq }.to_string();
     let idx = super::dispatch::go_to_rust(&input.index);
     // Delegate HashMap reads to prelude: `::gourd::prelude::map_get(m, k)`.
@@ -339,6 +343,41 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     // cast it to usize automatically.
     let idx = quote! { #idx as usize };
     quote! { #seq[ #idx ] }
+}
+
+/// Transpile a Go slice range expression `a[start:end]` to Rust slice `a[start..end]`.
+///
+/// Go slice ranges:
+///   `a[1:3]` → `a[1..3]` (from 1 to 3, exclusive)
+///   `a[:3]` → `a[..3]` (from start to 3, exclusive)
+///   `a[1:]` → `a[1..]` (from 1 to end)
+///   `a[:]` → `a[..]` (copy of entire slice)
+fn transpile_slice_range(seq: &TokenStream, range: &ExprRange) -> TokenStream {
+    let from = range.start.as_ref().map(|e| super::dispatch::go_to_rust(e));
+    let end = range.end.as_ref().map(|e| super::dispatch::go_to_rust(e));
+    let limits = match range.limits {
+        syn::RangeLimits::HalfOpen(_) => quote! { .. },
+        syn::RangeLimits::Closed(_)   => quote! { ..= },
+    };
+    match (from.as_ref(), end.as_ref()) {
+        (Some(f), Some(e)) => {
+            let f = quote! { #f as usize };
+            let e = quote! { #e as usize };
+            quote! { &#seq[#f #limits #e] }
+        }
+        (Some(e), None) => {
+            let e = quote! { #e as usize };
+            quote! { &#seq[#e #limits] }
+        }
+        (None, Some(e)) => {
+            let e = quote! { #e as usize };
+            quote! { &#seq[ #limits #e] }
+        }
+        (None, None) => {
+            // Full slice a[:] → copy of entire slice
+            quote! { &#seq[..] }
+        }
+    }
 }
 
 pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {

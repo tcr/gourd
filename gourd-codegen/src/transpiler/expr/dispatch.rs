@@ -95,3 +95,58 @@ mod test_expr_parse {
         }
     }
 }
+
+#[cfg(test)]
+mod test_index_parse {
+    use syn::Expr;
+    use quote::quote;
+
+    /// Test that syn parses `a[1..3]` (Rust slice range) as Expr::Index
+    /// with an Expr::Range inside — this is what the Go→Rust preprocessor
+    /// produces after converting `a[1:3]` → `a[1..3]`.
+    #[test]
+    fn test_parse_index_range() {
+        let expr: Expr = syn::parse_str("a[1..3]").unwrap();
+        println!("a[1..3] parsed as: {}", quote! { #expr });
+        match &expr {
+            Expr::Index(idx) => {
+                println!("Index expr: seq={}, index={}",
+                    quote! { #idx.expr },
+                    quote! { #idx.index });
+                println!("index type: {:?}", std::mem::discriminant(&*idx.index));
+                // The index should be an Expr::Range
+                assert!(matches!(*idx.index, Expr::Range(_)));
+            }
+            other => panic!("Expected Index, got {:?}", quote! { #other }),
+        }
+    }
+
+    #[test]
+    fn test_parse_index_single() {
+        let expr: Expr = syn::parse_str("a[1]").unwrap();
+        match &expr {
+            Expr::Index(idx) => {
+                println!("a[1]: seq={}, index={}",
+                    quote! { #idx.expr },
+                    quote! { #idx.index });
+            }
+            other => println!("Not Index: {:?}", quote! { #other }),
+        }
+    }
+
+    /// Test that syn parses `a[..]` (Rust full slice) as Expr::Index
+    /// — this is what the Go→Rust preprocessor produces after `a[:]` → `a[..]`.
+    #[test]
+    fn test_parse_full_slice() {
+        let expr: Expr = syn::parse_str("a[..]").unwrap();
+        match &expr {
+            Expr::Index(idx) => {
+                println!("a[..]: seq={}, index={}",
+                    quote! { #idx.expr },
+                    quote! { #idx.index });
+                assert!(matches!(*idx.index, Expr::Range(_)));
+            }
+            other => panic!("Expected Index, got {:?}", quote! { #other }),
+        }
+    }
+}
