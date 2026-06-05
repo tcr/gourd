@@ -80,3 +80,28 @@ pub fn std_append<T: Clone>(mut slice: Vec<T>, items: &[T]) -> Vec<T> {
     slice.extend_from_slice(items);
     slice
 }
+
+/// Go map read: `m[key]` — returns the value or default for missing keys.
+/// This is the prelude helper for Go-style `count[word]` lookups on HashMaps.
+pub fn map_get<K: Hash + Eq + Clone, V: Default + Clone>(map: &HashMap<K, V>, key: K) -> V {
+    map.get(&key).cloned().unwrap_or_default()
+}
+
+/// Go map write: `m[key] = value` — returns a mutable reference to the map entry,
+/// inserting a default value if the key does not exist.
+///
+/// This is the prelude helper for Go-style `count[word] = count[word] + 1`
+/// assignments on HashMaps. The caller dereferences it:
+/// `*::gourd::prelude::map_set_mut(count, word) = ...`
+pub fn map_set_mut<'a, K: Hash + Eq + Clone, V: Default + Clone>(
+    map: &'a mut HashMap<K, V>,
+    key: K,
+) -> &'a mut V {
+    map.entry(key).or_insert_with(V::default)
+}
+
+/// Go map write with value: `m[key] = val` — inserts a key-value pair.
+/// This handles the full assignment in one call.
+pub fn map_set_val<K: Hash + Eq + Clone, V: Clone>(map: &mut HashMap<K, V>, key: K, val: V) {
+    map.insert(key, val);
+}

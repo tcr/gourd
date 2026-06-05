@@ -54,6 +54,29 @@ pub fn transpile_cast(input: &ExprCast) -> TokenStream {
 }
 
 pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
+    // Detect map index assignment from verbatim token stream: `count[word] = value`.
+    // The Go parser captures map assignments as verbatim text like `count[word].expr`.
+    let token_vec: Vec<_> = quote!(#input.left).into_iter().collect();
+    let has_bracket = token_vec.iter().any(|t| {
+        if let proc_macro2::TokenTree::Group(g) = t {
+            g.delimiter() == proc_macro2::Delimiter::Bracket
+        } else {
+            false
+        }
+    });
+    if has_bracket {
+        // Extract map variable name (first token) and key (bracket content).
+        if let Some(proc_macro2::TokenTree::Ident(map_name)) = token_vec.first() {
+            let map_var = quote! { #map_name };
+            if let Some(bracket) = token_vec.iter().find_map(|t| {
+                if let proc_macro2::TokenTree::Group(g) = t {
+                    Some(g.stream())
+                } else { None }
+            }) {
+                return quote! { *::gourd::prelude::map_set_mut( #map_var, #bracket ) = #input.right };
+            }
+        }
+    }
     let lhs = super::dispatch::go_to_rust(&input.left);
     let rhs = super::dispatch::go_to_rust(&input.right);
     quote! { #lhs = #rhs }

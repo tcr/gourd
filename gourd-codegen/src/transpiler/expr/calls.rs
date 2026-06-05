@@ -323,12 +323,16 @@ pub fn go_to_rust_macro(input: &ExprMacro) -> TokenStream {
 
 pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     let seq = super::dispatch::go_to_rust(&input.expr);
+    let seq_str = quote! { #seq }.to_string();
     let idx = super::dispatch::go_to_rust(&input.index);
-    // Check if the index is a string literal — for maps, use .get() instead of direct indexing
+    // Delegate HashMap reads to prelude: `::gourd::prelude::map_get(m, k)`.
+    if seq_str.contains("HashMap") || seq_str.contains("hash_map") {
+        return quote! { ::gourd::prelude::map_get( #seq, #idx ) };
+    }
+    // Check if the index is a string literal — for maps, use .get() instead.
     if let Expr::Lit(lit) = &*input.index
         && matches!(&lit.lit, syn::Lit::Str(_))
     {
-        // Map lookup: m["key"] → m.get(&"key").unwrap()
         return quote! { #seq.get(& #idx).unwrap() };
     }
     // Index expressions need usize for Rust slices; if the index is i32 (Go int),
