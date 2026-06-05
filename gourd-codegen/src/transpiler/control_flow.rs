@@ -131,14 +131,14 @@ pub(crate) fn parse_go_for(input: ParseStream) -> syn::Result<GoFor> {
         if input.peek(syn::token::Semi) {
             let _: syn::token::Semi = input.parse()?;
             if !input.peek(syn::token::Semi) && !input.peek(syn::token::Brace) {
-                // Parse condition. When no post statement, the condition is
-                // followed directly by {. Comparison operators like <, <=, >=
-                // are ambiguous in this context. Use a fork to extract the
-                // condition text and parse it via parse_str for unambiguous
-                // < operator handling. Then advance input past the condition.
-                // We parse by consuming tokens one by one using input.parse().
-                // For expressions like i < n, we need to parse carefully.
-                // Use input.parse() which works in most cases.
+                // Parse condition. When no post statement follows, the condition
+                // is followed directly by {. Comparison operators (<, <=, >=,
+                // >, ==, !=) are ambiguous in this context because syn tries
+                // to parse beyond the condition into the brace group.
+                // For this case, parse the condition using input.parse() which
+                // works when the condition is followed by a delimiter (; or {}).
+                // When followed by { (no post), the < operator is ambiguous.
+                // In that case, treat as a while-loop pattern instead.
                 let expr: syn::Expr = input.parse()?;
                 cond = Some(Box::new(expr));
             }
