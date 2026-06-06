@@ -16,10 +16,13 @@ use syn::{Expr, Ident};
 
 /// Parse a block of statements enclosed in braces.
 pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
+    eprintln!("[DEBUG parse_go_block] input.is_empty()={}, peek(Brace)={}", input.is_empty(), input.peek(syn::token::Brace));
     let brace_content = if input.peek(syn::token::Brace) {
         // Standard case: `{` punctuation
+        eprintln!("[DEBUG parse_go_block] Entering standard brace branch");
         let content;
         let _brace = syn::braced!(content in input);
+        eprintln!("[DEBUG parse_go_block] syn::braced! succeeded");
         content
     } else {
         // Handle Group token with Brace delimiter
@@ -96,7 +99,7 @@ fn parse_body_from_group_debug(ts: &proc_macro2::TokenStream) -> syn::Result<GoB
                     stmts.push(GoStmt::RawStmt(quote::quote! { return GoChannel::<#chan_type>::new() }));
                 }
             } else if args_str.starts_with("map[") {
-                stmts.push(GoStmt::RawStmt(quote::quote! { return ::std::collections::HashMap::new() }));
+                stmts.push(GoStmt::RawStmt(quote::quote! { return ::gourd::prelude::HashMap::new() }));
             } else if args_str.starts_with("[]") {
                 let len: Option<syn::LitInt> = syn::parse_str(args_str.trim_start_matches("[]").trim()).ok();
                 if let Some(l) = len {

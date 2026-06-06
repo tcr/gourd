@@ -67,8 +67,8 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                         result.extend(go_to_rust_interface(subtree(&trees, i, false)));
                         i = skip_declaration(&trees, i);
                     }
-                    "struct" => {
-                        result.extend(go_to_rust_struct(subtree(&trees, i, false)));
+                    "type" | "struct" => {
+                        result.extend(go_to_rust_struct(subtree(&trees, i, true)));
                         i = skip_declaration(&trees, i);
                     }
                     "switch" => {
@@ -143,7 +143,7 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
                 // stop — this is a new top-level declaration.
                 if depth == 0 && collected {
                     let name = ident.to_string();
-                    if matches!(name.as_str(), "func" | "fn" | "struct" | "interface" | "chan" | "select") {
+                    if matches!(name.as_str(), "func" | "fn" | "interface" | "chan" | "select" | "type") {
                         return result;
                     }
                 }
@@ -258,7 +258,13 @@ fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
                             }
                             proc_macro2::TokenTree::Punct(p)
                                 if p.as_char() == '(' || p.as_char() == '{' => {
+                                // Skip past the delimiter — don't advance further
                                 return start + i + 1 + j;
+                            }
+                            proc_macro2::TokenTree::Group(g)
+                                if g.delimiter() == proc_macro2::Delimiter::Parenthesis => {
+                                // Skip past the paren group (e.g., import list)
+                                return start + i + 1 + j + 1;
                             }
                             _ => {}
                         }

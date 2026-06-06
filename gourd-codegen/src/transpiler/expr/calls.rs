@@ -10,6 +10,47 @@ use super::dispatch::emit_todo;
 pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
 
+    // Determine if this is a builtin call that shouldn't get .clone()
+    // on its arguments
+    let is_builtin = if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+    {
+        matches!(name.to_string().as_str(),
+            "len" | "cap" | "append" | "make" | "new" | "panic" | "copy"
+            | "delete" | "recover" | "complex" | "imag" | "real"
+            | "complex128" | "complex64" | "make_slice" | "make_map"
+            | "string" | "byte" | "rune" | "int" | "int8" | "int16" | "int32" | "int64"
+            | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr"
+            | "bool"
+        )
+    } else {
+        false
+    };
+
+    // For simple identifier arguments in non-builtin calls, add .clone()
+    // to avoid ownership moves. In Go, passing a string to a function
+    // doesn't take ownership — strings are cheap slice headers. In Rust,
+    // String parameters take ownership, so we clone identifiers to
+    // preserve Go semantics.
+    let args: Vec<_> = if is_builtin {
+        args
+    } else {
+        args.iter().map(|arg| {
+            let ts = quote! { #arg };
+            let s = ts.to_string();
+            // Check if it's a simple identifier (no dots, brackets, etc.)
+            let is_simple = !s.contains('.') && !s.contains('[')
+                && !s.contains('(') && !s.contains(')')
+                && !s.contains('+') && !s.contains('-')
+                && s.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false);
+            if is_simple {
+                quote! { #arg .clone() }
+            } else {
+                quote! { #arg }
+            }
+        }).collect()
+    };
+
     // Handle Go builtin functions that are now stdlib: copy, delete
     if let Expr::Path(path) = &*input.func {
         if let Some(_func_name) = try_parse_std_copy(path) {
@@ -29,6 +70,43 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     {
         let arg = args[0].clone();
         return quote! { #arg.len() as i32 };
+    }
+    // Go builtin `append(slice, val)` → prelude::append
+    if let Expr::Path(path) = &*input.func
+        && let Some(name) = path.path.get_ident()
+        && name.to_string() == "append"
+    {
+        let slice = &args[0];
+        if args.len() == 1 {
+            return quote! { #slice.clone() };
+        }
+        let rest = &args[1..];
+        // Append now accepts owned values (val: T where T: Clone).
+        // For numeric literals, pass directly.
+        // For identifiers, clone to get owned.
+        // For complex expressions, pass directly (the expression is already owned).
+        let refs = rest.iter().map(|a| {
+            let ts = quote! { #a };
+            let s = ts.to_string();
+            // Check if it's a numeric literal (starts with digit)
+            let is_numeric_literal = s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
+            if is_numeric_literal {
+                quote! { #a }
+            } else {
+                // Check if it's a simple identifier (no special chars)
+                let is_simple = !s.contains('[') && !s.contains('(') && !s.contains(')')
+                    && !s.contains('+') && !s.contains('-') && !s.contains('*') && !s.contains('/')
+                    && s.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false);
+                if is_simple {
+                    // Clone the identifier to get owned value
+                    quote! { #a .clone() }
+                } else {
+                    // Complex expression: pass directly (already owned)
+                    quote! { #a }
+                }
+            }
+        });
+        return quote! { ::gourd::prelude::append( #slice , #(#refs),* ) };
     }
     // Go type conversion calls: int(), int8(), ..., string(), bool(), byte(), rune(), ...
     if let Expr::Path(path) = &*input.func
@@ -54,28 +132,32 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                     _ => unreachable!(),
                 };
                 let rust_cast: syn::Ident = syn::parse_str(rust_cast_str).unwrap();
-                return quote! { (#(#args),* as #rust_cast) };
+                return quote! { ((#(#args),*) as #rust_cast) };
             }
             "float32" => {
-                return quote! { (#(#args),* as f32) };
+                return quote! { ((#(#args),*) as f32) };
             }
             "float64" => {
-                return quote! { (#(#args),* as f64) };
+                return quote! { ((#(#args),*) as f64) };
             }
             "bool" => {
-                return quote! { (#(#args),* as bool) };
+                return quote! { ((#(#args),*) as bool) };
             }
             "string" => {
                 let arg = args[0].clone();
+                let arg_str = quote! { #arg }.to_string();
                 // string(bytes) → from_utf8(...)
-                // string(rune) → String::from(char to string)
-                return quote! { std::str::from_utf8(&#arg).unwrap_or("").to_string() };
+                // string(rune) → char.to_string()
+                if arg_str.contains("char") || arg_str.contains("as char") {
+                    return quote! { #arg.to_string() };
+                }
+                return quote! { ::std::str::from_utf8(&#arg).unwrap_or("").to_string() };
             }
             "byte" => {
                 return quote! { (#(#args),* as u8) };
             }
             "rune" => {
-                return quote! { (#(#args),* as char) };
+                return quote! { (#(#args),* as u8 as char) };
             }
             "min" => {
                 if args.len() == 2 {
@@ -183,7 +265,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     // Go `make` builtin — special handling for chan/map/slice types.
     // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
     // `make(chan T)` → `GoChannel::<T>::new()`
-    // `make(map[K]V)` → `HashMap::new()`
+    // `make(map[K]V)` → `HashMap::default()`
     // `make([]T, len)` → `vec![0; len]`
     if let Expr::Path(path) = &*input.func
         && let Some(name) = path.path.get_ident()
@@ -205,7 +287,15 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 }
             }
             if type_str.contains("map[") {
-                return quote! { ::std::collections::HashMap::new() };
+                // Extract key and value types from map type expression
+                if let Some(bracket_end) = type_str.find(']') {
+                    let key_str = type_str[4..bracket_end].trim();
+                    let val_str = type_str[bracket_end + 1..].trim();
+                    let key_type = super::super::types::map_go_type_str(key_str);
+                    let val_type = super::super::types::map_go_type_str(val_str);
+                    return quote! { ::gourd::prelude::HashMap::<#key_type, #val_type>::default() };
+                }
+                return quote! { ::gourd::prelude::HashMap::default() };
             }
             if type_str.starts_with("[]") {
                 let type_default: TokenStream = quote! { #type_tokens::default() };
@@ -233,7 +323,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             "HasSuffix" => return quote! { ::gourd::prelude::has_suffix( #(#args),* ) },
             "Contains" => return quote! { ::gourd::prelude::contains_str( #(#args),* ) },
             "Split" => return quote! { ::gourd::prelude::split( #(#args),* ) },
-            "Join" => return quote! { ::gourd::prelude::join( #(#args),* ) },
+            "Join" => {
+                let refs: Vec<_> = args.iter().map(|a| quote! { & #a }).collect();
+                return quote! { ::gourd::prelude::join( #(#refs),* ) };
+            }
             "Index" => return quote! { ::gourd::prelude::index_str( #(#args),* ) },
             "LastIndex" => return quote! { ::gourd::prelude::last_index_str( #(#args),* ) },
             "Trim" => return quote! { ::gourd::prelude::trim( #(#args),* ) },
@@ -329,15 +422,38 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     }
     let seq_str = quote! { #seq }.to_string();
     let idx = super::dispatch::go_to_rust(&input.index);
-    // Delegate HashMap reads to prelude: `::gourd::prelude::map_get(m, k)`.
+    // Delegate HashMap reads to prelude: `::gourd::prelude::map_get_ref(&m, &k)`.
     if seq_str.contains("HashMap") || seq_str.contains("hash_map") {
-        return quote! { ::gourd::prelude::map_get( #seq, #idx ) };
+        return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx) };
     }
     // Check if the index is a string literal — for maps, use .get() instead.
     if let Expr::Lit(lit) = &*input.index
         && matches!(&lit.lit, syn::Lit::Str(_))
     {
         return quote! { #seq.get(& #idx).unwrap() };
+    }
+    // Detect string-typed keys (variables holding String values): Go map access.
+    let idx_str = quote! { #idx }.to_string();
+    if idx_str.contains("String") || idx_str.contains("from(") {
+        return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
+    }
+    // Heuristic: if the index is NOT a number literal or range (i.e., it's a variable or expression),
+    // check if the sequence name suggests it might be a map (contains common map variable names).
+    let is_num_or_range = matches!(&*input.index, Expr::Lit(lit) if matches!(&lit.lit, syn::Lit::Int(_) | syn::Lit::Float(_)))
+        || matches!(&*input.index, Expr::Range(_));
+    if !is_num_or_range {
+        // Check if the sequence looks like a map variable by name
+        let seq_lower = seq_str.to_lowercase();
+        let idx_lower = idx_str.to_lowercase();
+        let is_map_named = seq_lower.contains("map") || seq_lower.contains("count")
+            || seq_lower.contains("freq") || seq_lower.contains("dict")
+            || seq_lower.contains("hash") || seq_lower.contains("result");
+        let is_key_named = idx_lower.contains("key") || idx_lower.contains("word")
+            || idx_lower.contains("item") || idx_lower.contains("tag")
+            || idx_lower.contains("name") || idx_lower.contains("label");
+        if is_map_named || is_key_named {
+            return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
+        }
     }
     // Index expressions need usize for Rust slices; if the index is i32 (Go int),
     // cast it to usize automatically.
@@ -406,8 +522,8 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                         "Join" => {
                             let elems = &args[0];
                             let rest = &args[1..];
-                            // elems is already a vec![...] from transpile_array
-                            quote! { ::gourd::prelude::join( #elems, #(#rest),* ) }
+                            // join takes Vec<String> and String by value
+                            quote! { ::gourd::prelude::join( #elems , #(#rest),* ) }
                         },
                         "Index" => quote! { ::gourd::prelude::index_str( #(#args),* ) },
                         "LastIndex" => quote! { ::gourd::prelude::last_index_str( #(#args),* ) },
@@ -468,6 +584,70 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                         "Until" => quote! { ::gourd::prelude::time_until( #(#args),* ) },
                         "Sleep" => quote! { ::gourd::prelude::time_sleep( #(#args),* ) },
                         _ => emit_todo(&format!("time.{method_name}()")),
+                    };
+                }
+                "fmt" => {
+                    // Build fmt args as string values
+                    // For Print/Println, ALL args are displayed (no format string)
+                    let display_args: Vec<_> = args.iter().map(|a| {
+                        let a_str = quote! { #a }.to_string().to_lowercase();
+                        // Check if this is a HashMap-typed expression (function returns HashMap)
+                        let is_map = a_str.contains("hashmap")
+                            || a_str.contains("wordfreq")
+                            || a_str.contains("topn")
+                            || a_str.contains("wordfreqtopn");
+                        if is_map {
+                            quote! { ::gourd::prelude::display_map(#a.clone()) }
+                        } else {
+                            quote! { #a .to_string() }
+                        }
+                    }).collect();
+                    return match method_name.to_string().as_str() {
+                        "Sprintf" => {
+                            // First arg is format string, rest are args
+                            let format_arg = &args[0];
+                            // Build display args from arguments AFTER the format string
+                            let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
+                                let a_str = quote! { #a }.to_string().to_lowercase();
+                                let is_map = a_str.contains("hashmap")
+                                    || a_str.contains("wordfreq")
+                                    || a_str.contains("topn")
+                                    || a_str.contains("wordfreqtopn");
+                                if is_map {
+                                    quote! { ::gourd::prelude::display_map(#a.clone()) }
+                                } else {
+                                    quote! { #a .to_string() }
+                                }
+                            }).collect();
+                            let arg_vec = quote! { vec![ #(#arg_display),* ] };
+                            quote! { ::gourd::prelude::fmt_sprintf( #format_arg , &#arg_vec ) }
+                        }
+                        "Print" => {
+                            let arg_vec = quote! { vec![ #(#display_args),* ] };
+                            quote! { ::gourd::prelude::fmt_print_vec( &#arg_vec ) }
+                        }
+                        "Println" => {
+                            let arg_vec = quote! { vec![ #(#display_args),* ] };
+                            quote! { ::gourd::prelude::fmt_println_vec( &#arg_vec ) }
+                        }
+                        "Printf" => {
+                            let format_arg = &args[0];
+                            let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
+                                let a_str = quote! { #a }.to_string().to_lowercase();
+                                let is_map = a_str.contains("hashmap")
+                                    || a_str.contains("wordfreq")
+                                    || a_str.contains("topn")
+                                    || a_str.contains("wordfreqtopn");
+                                if is_map {
+                                    quote! { ::gourd::prelude::display_map(#a.clone()) }
+                                } else {
+                                    quote! { #a .to_string() }
+                                }
+                            }).collect();
+                            let arg_vec = quote! { vec![ #(#arg_display),* ] };
+                            quote! { ::gourd::prelude::fmt_printf( #format_arg , &#arg_vec ) }
+                        }
+                        _ => emit_todo(&format!("fmt.{method_name}()")),
                     };
                 }
                 _ => {}

@@ -267,14 +267,12 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
 /// Extract raw arguments from a `make(...)` call string.
 fn extract_make_args(full_str: &str) -> String {
     if let Some(start) = full_str.find('(') {
-        if let Some(end) = full_str.rfind(')') {
-            full_str[start + 1..end].to_string()
-        } else {
-            String::new()
+        let after_paren = &full_str[start + 1..];
+        if let Some(end) = after_paren.find(')') {
+            return after_paren[..end].to_string();
         }
-    } else {
-        String::new()
     }
+    String::new()
 }
 
 /// Normalize token spacing in make arguments.
@@ -368,7 +366,16 @@ fn match_make(normalized: &str) -> TokenStream {
             }
         }
         s if s.starts_with("map[") => {
-            quote! { ::std::collections::HashMap::new() }
+            // Extract key and value types from `map[K]V`
+            if let Some(bracket_end) = s.find(']') {
+                let key_str = s[4..bracket_end].trim();
+                let val_str = s[bracket_end + 1..].trim();
+                let key_type = map_go_type_str(key_str);
+                let val_type = map_go_type_str(val_str);
+                quote! { ::gourd::prelude::HashMap::<#key_type, #val_type>::default() }
+            } else {
+                quote! { ::gourd::prelude::HashMap::default() }
+            }
         }
         s if s.starts_with("[]") => {
             let slice_args: Vec<&str> = s.splitn(2, ',').collect();

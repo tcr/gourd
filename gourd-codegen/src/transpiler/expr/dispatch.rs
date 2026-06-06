@@ -2,17 +2,24 @@
 //!
 //! Routes `syn::Expr` variants to the appropriate `transpile_*` handler.
 
-use proc_macro2::TokenStream;
-use quote::quote;
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, quote_spanned};
 use syn::Expr;
 
 /// Emit a compile-time error for forms we don't support.
-/// Includes the Go source text when available for better diagnostics.
 pub(crate) fn emit_todo(msg: &str) -> TokenStream {
-    quote! { {
-        compile_error!(concat!("TODO: Go transpile — ", #msg, " — check Go code context"));
-        unreachable!()
-    }}
+    emit_todo_with_span(msg, Span::call_site())
+}
+
+/// Emit a compile-time error for forms we don't support, with span information.
+pub(crate) fn emit_todo_with_span(msg: &str, span: Span) -> TokenStream {
+    let msg_span = quote_spanned!(span => TODO: Go transpile - #msg - check Go code context);
+    quote! {
+        {
+            compile_error!(#msg_span);
+            unreachable!()
+        }
+    }
 }
 
 /// Dispatch the AST per expression node.

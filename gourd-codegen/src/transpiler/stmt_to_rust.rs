@@ -166,8 +166,39 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                     let i_ident = i.clone();
                     let v_ident = v.clone();
                     let iterable = &for_stmt.iterable;
-                    quote! {
-                        for ( #i_ident, #v_ident ) in #iterable.iter().copied().enumerate() #body_block
+                    let ident_str = i_ident.to_string();
+                    // Check if first variable is `_` (ignored) — slice iteration
+                    // or a named identifier — map iteration
+                    if ident_str == "_" {
+                        // Slice iteration: `for _, word := range words`
+                        // Use .cloned() for String slices (Clone, not Copy)
+                        quote! {
+                            for #v_ident in #iterable . iter () . cloned () #body_block
+                        }
+                    } else {
+                        // Two-variable range loop: `for i, v := range data`
+                        // For slices/vecs: iterate with index
+                        // For maps: iterate with key-value pairs
+                        // Detect if iterable is a map by checking type or name
+                        let iter_str = quote! { #iterable }.to_string();
+                        let is_map_type = iter_str.contains("HashMap")
+                            || iter_str.contains("hash_map");
+                        // Also check by variable name — common map names
+                        let iter_name = iter_str.trim();
+                        let is_map_named = matches!(iter_name, "counts" | "result" | "map" | "freq" | "freqs" | "hash" | "hash_map" | "counter" | "counters" | "dict" | "wordfreq");
+                        if is_map_type || is_map_named {
+                            // Map iteration: for k, v := range map
+                            quote! {
+                                for ( #i_ident , #v_ident ) in #iterable . iter () { #body_block }
+                            }
+                        } else {
+                            // Slice iteration: for i, v := range slice
+                            quote! {
+                                for #i_ident in 0.. #iterable . len () as i32 {
+                                    let #v_ident = #iterable [#i_ident as usize]; #body_block
+                                }
+                            }
+                        }
                     }
                 }
                 (Some(GoForInit::Single(i, _)), true) => {
@@ -198,10 +229,12 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                     match init {
                         Some(GoForInit::Double(ident1, ident2, _)) => {
                             // Two init vars: `let ident1 = (); let ident2 = ();`
-                            let init_stmt = quote! { let #ident1 = (); let #ident2 = (); };
+                            let init_stmt = quote! { let mut #ident1 = 0; let mut #ident2 = 0; };
                             if !cond.is_empty() && !post.is_empty() {
+                                // Parenthesize #cond to fix operator precedence: in Go `!a < b` means `!(a < b)`,
+                                // but in Rust `!a < b` means `(!a) < b`. Wrap in parens so `!` applies to whole expr.
                                 quote! {
-                                    { #init_stmt loop { if !#cond { break; } #(#body);* ; #post ; } }
+                                    { #init_stmt loop { if !(#cond) { break; } #(#body);* ; #post ; } }
                                 }
                             } else if !cond.is_empty() {
                                 quote! {
@@ -217,14 +250,19 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                             let init_stmt = match init_val {
                                 Some(val) => {
                                     let init_val_rust = dispatch::go_to_rust(val.as_ref());
-                                    quote! { let #ident = #init_val_rust; }
+                                    // When there's a post statement (e.g. `i++`), the init var must be mut
+                                    if !post.is_empty() {
+                                        quote! { let mut #ident = #init_val_rust; }
+                                    } else {
+                                        quote! { let #ident = #init_val_rust; }
+                                    }
                                 }
                                 None => quote! { let #ident = (); },
                             };
                             if !cond.is_empty() && !post.is_empty() {
                                 // C-style for with both cond and post: use `loop` with `while`-like guard
                                 quote! {
-                                    { #init_stmt loop { if !#cond { break; } #(#body);* ; #post } }
+                                    { #init_stmt loop { if !(#cond) { break; } #(#body);* ; #post } }
                                 }
                             } else if !cond.is_empty() {
                                 quote! {
@@ -246,6 +284,9 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         }
         GoStmt::SwitchReturn(tokens) => {
             tokens.clone()
+        }
+        GoStmt::GoShortDecl(ident, val) => {
+            quote! { let #ident = #val; }
         }
     }
 }
@@ -270,7 +311,7 @@ fn go_go_make(raw_args: &str) -> TokenStream {
             quote! { GoChannel::<#chan_type>::new() }
         }
     } else if normalized.starts_with("map[") {
-        quote! { ::std::collections::HashMap::new() }
+        quote! { ::gourd::prelude::HashMap::new() }
     } else if normalized.starts_with("[]") {
         let slice_args: Vec<&str> = normalized.splitn(2, ',').collect();
         let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
@@ -296,15 +337,15 @@ fn go_stmt_to_rust_map(
 ) -> TokenStream {
     if entries.is_empty() {
         if ident.is_empty() {
-            return quote! { std::collections::HashMap::default() };
+            return quote! { ::gourd::prelude::HashMap::default() };
         }
         let name: syn::Ident = syn::parse_str(ident).unwrap();
         if let (Some(kt), Some(vt)) = (key_type, val_type) {
             let kt = map_go_types(kt);
             let vt = map_go_types(vt);
-            return quote! { let #name = std::collections::HashMap::<#kt, #vt>::default(); };
+            return quote! { let #name = ::gourd::prelude::HashMap::<#kt, #vt>::default(); };
         }
-        return quote! { let #name = std::collections::HashMap::default(); };
+        return quote! { let #name = ::gourd::prelude::HashMap::default() };
     }
 
     let insertions: Vec<_> = entries.iter().map(|(k, v)| {
@@ -318,7 +359,7 @@ fn go_stmt_to_rust_map(
         let vt = map_go_types(vt);
         quote! {
             {
-                let mut m = std::collections::HashMap::<#kt, #vt>::new();
+                let mut m = ::gourd::prelude::HashMap::<#kt, #vt>::new();
                 #(#insertions)*
                 m
             }
@@ -326,7 +367,7 @@ fn go_stmt_to_rust_map(
     } else {
         quote! {
             {
-                let mut m = std::collections::HashMap::new();
+                let mut m = ::gourd::prelude::HashMap::new();
                 #(#insertions)*
                 m
             }

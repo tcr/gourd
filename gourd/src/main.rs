@@ -109,11 +109,6 @@ fn run_and_execute(input: &str, cargo_args: &[String]) {
     let rust = transpile_go_text(&source);
     let rust_code = format_rust_output(&rust);
 
-    if rust_code.contains("compile_error") {
-        eprintln!("transpilation failed — check output above");
-        std::process::exit(1);
-    }
-
     // Create temp Cargo project
     let temp_dir = tempfile::tempdir().unwrap_or_else(|e| {
         eprintln!("failed to create temp dir: {}", e);

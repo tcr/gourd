@@ -18,15 +18,36 @@ pub fn validate_verify_block(code: &str) -> Validation {
     std::fs::create_dir_all(&src).ok();
     std::fs::write(
         tmp.path().join("Cargo.toml"),
-        "[package]\nname = \"gourd-test\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        "[package]\nname = \"gourd-test\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\ngourd = { path = \"../../gourd\" }\n",
     )
     .ok();
 
+    // Resolve the absolute path to the gourd crate.
+    // CARGO_MANIFEST_DIR for gourd-check is gourd-check/.
+    // The workspace root is its parent.
+    let gourd_path = {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().to_string_lossy().to_string());
+        let manifest_path = std::path::Path::new(&manifest_dir);
+        // Go up one level from gourd-check/ to workspace root, then add gourd/
+        manifest_path.parent()
+            .map(|p| p.join("gourd"))
+            .unwrap_or_else(|| manifest_path.join("gourd"))
+    };
+
     // Wrap in a minimal Rust file so cargo check can run it
-    let wrapped = format!("fn main() {{}}\n\n{}\n", code);
+    // Include prelude imports so HashMap and other prelude types resolve
+    let wrapped = format!("use gourd::prelude::*;\nfn main() {{}}\n\n{}\n", code);
 
     let main_rs = src.join("main.rs");
     std::fs::write(&main_rs, &wrapped).ok();
+
+    // Write Cargo.toml with gourd dependency using absolute path
+    let cargo_toml = format!(
+        "[package]\nname = \"gourd-test\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\ngourd = {{ path = \"{}\" }}\n",
+        gourd_path.display()
+    );
+    std::fs::write(tmp.path().join("Cargo.toml"), &cargo_toml).ok();
 
     match run_cargo_check(tmp.path(), &wrapped) {
         Ok(()) => Validation::Ok,

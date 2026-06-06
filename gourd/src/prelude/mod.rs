@@ -92,10 +92,10 @@ pub use error::{GoError, make_error, check_error, recover};
 pub use any::Any;
 
 // Standard library builtins
-pub use std::{len, cap, append, make_slice, make_map, copy, min, max, std_copy, std_delete, std_append, map_get, map_set_mut, map_set_val};
+pub use std::{len, cap, append, make_slice, make_map, copy, min, max, std_copy, std_delete, std_append, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, display_map, HashMap};
 
 // Random
 pub use rand::GoRand;
 
 // Formatting
-pub use fmt_ops::{fmt_sprintf, fmt_print, fmt_println, fmt_printf};
+pub use fmt_ops::{fmt_sprintf, fmt_print, fmt_println, fmt_printf, fmt_print_vec, fmt_println_vec};

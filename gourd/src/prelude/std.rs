@@ -3,7 +3,7 @@
 //! Provides `len`, `cap`, `append`, `make_slice`, `make_map`, `copy`, `min`, `max`
 //! and helper functions.
 
-use std::collections::HashMap;
+pub use std::collections::HashMap;
 use std::hash::Hash;
 
 /// Returns the length of a slice-like type as i32 (Go `len()`).
@@ -16,15 +16,15 @@ pub fn cap<T: AsRef<[u8]>>(vec: &Vec<T>) -> i32 {
     vec.capacity() as i32
 }
 
-/// Appends a value to a slice, returning a new slice (Go `append(slice, val)`).
-pub fn append<T: Clone + Default>(mut slice: Vec<T>, val: T) -> Vec<T> {
+/// Appends a value to a slice (Go `append(slice, val)`).
+pub fn append<T: Clone>(mut slice: Vec<T>, val: T) -> Vec<T> {
     slice.push(val);
     slice
 }
 
 /// Creates a new slice of given length with a default value (Go `make([]T, n)`).
-pub fn make_slice<T: Clone + Default>(len: i32, val: T) -> Vec<T> {
-    vec![val; len as usize]
+pub fn make_slice<T: Clone + Default>(len: i32, val: &T) -> Vec<T> {
+    vec![val.clone(); len as usize]
 }
 
 /// Creates a new empty map (Go `make(map[K]V)`).
@@ -87,6 +87,11 @@ pub fn map_get<K: Hash + Eq + Clone, V: Default + Clone>(map: &HashMap<K, V>, ke
     map.get(&key).cloned().unwrap_or_default()
 }
 
+/// Map get with borrowed key: for use when iterating over HashMaps where keys are references.
+pub fn map_get_ref<K: Hash + Eq + Clone, V: Default + Clone>(map: &HashMap<K, V>, key: &K) -> V {
+    map.get(key).cloned().unwrap_or_default()
+}
+
 /// Go map write: `m[key] = value` — returns a mutable reference to the map entry,
 /// inserting a default value if the key does not exist.
 ///
@@ -100,8 +105,33 @@ pub fn map_set_mut<'a, K: Hash + Eq + Clone, V: Default + Clone>(
     map.entry(key).or_insert_with(V::default)
 }
 
+/// Map set with borrowed key: for use when iterating over HashMaps where keys are references.
+pub fn map_set_mut_ref<'a, K: Hash + Eq + Clone, V: Default + Clone>(
+    map: &'a mut HashMap<K, V>,
+    key: &K,
+) -> &'a mut V {
+    map.entry(key.clone()).or_insert_with(V::default)
+}
+
 /// Go map write with value: `m[key] = val` — inserts a key-value pair.
 /// This handles the full assignment in one call.
 pub fn map_set_val<K: Hash + Eq + Clone, V: Clone>(map: &mut HashMap<K, V>, key: K, val: V) {
     map.insert(key, val);
+}
+
+/// Helper for fmt functions to display HashMap<String, i32> values.
+pub fn display_map(m: HashMap<String, i32>) -> String {
+    let mut result = String::from("{");
+    let mut first = true;
+    for (k, v) in m.iter() {
+        if !first {
+            result.push_str(", ");
+        }
+        result.push_str(k);
+        result.push(':');
+        result.push_str(&v.to_string());
+        first = false;
+    }
+    result.push('}');
+    result
 }

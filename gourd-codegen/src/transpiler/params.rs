@@ -420,15 +420,25 @@ impl Parse for GoFn {
 
 impl Parse for GoStruct {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let _struct: Ident = input.call(Ident::parse_any)?;
-        let ident: Ident = input.parse()?;
+        let _struct: Ident = input.call(Ident::parse_any)?;  // "type" or "struct"
+        let ident: Ident = input.parse()?;  // struct name
+
+        // Handle "type Name struct { ... }" — skip the "struct" keyword
+        if input.peek(syn::Ident) || input.peek(syn::token::Struct) {
+            let fork = input.fork();
+            if let Ok(kw @ syn::Ident { .. }) = fork.call(syn::ext::IdentExt::parse_any) {
+                if kw.to_string() == "struct" {
+                    let _: syn::Ident = input.call(syn::ext::IdentExt::parse_any)?;
+                }
+            }
+        }
 
         // The struct body may be a brace-group (from Go source tokenization)
         // or an actual brace punctuation (from Rust tokenization).
         // Handle both cases.
         let mut fields = Vec::new();
         if input.peek(syn::token::Brace) {
-            // Actual brace punctuation
+            // Actual brace punctuation or brace group
             let content;
             syn::braced!(content in input);
             while !content.is_empty() {

@@ -38,7 +38,7 @@ fn test_triple_return() {
 // Test string-keyed map literal
 #[verify_rust_output({fn goMapSize(_a: String) -> i32 {
     let m = {
-        let mut m = std::collections::HashMap::new();
+        let mut m = ::gourd::prelude::HashMap::new();
         m.insert(::std::string::String::from("a"), 1);
         m.insert(::std::string::String::from("b"), 2);
         m.insert(::std::string::String::from("c"), 3);
@@ -63,7 +63,7 @@ fn test_map_literal() {
 // Test map length
 #[verify_rust_output({fn goEmptyMap() -> i32 {
     let m = {
-        let mut m = std::collections::HashMap::new();
+        let mut m = ::gourd::prelude::HashMap::new();
         m.insert(::std::string::String::from("x"), 0);
         m
     };

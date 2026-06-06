@@ -226,7 +226,7 @@ fn test_fn_no_return() {
 // ── String conversion builtin ────────────────────────────────────────────
 
 #[verify_rust_output({fn goStr(bytes: &[u8]) -> String {
-        return std::str::from_utf8(&bytes).unwrap_or("").to_string()
+        return ::std::str::from_utf8(&bytes).unwrap_or("").to_string()
     }})]
 go! {
     func goStr(bytes []byte) string {

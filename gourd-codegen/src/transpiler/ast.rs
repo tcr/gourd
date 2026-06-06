@@ -28,6 +28,7 @@ pub(crate) enum GoStmt {
     Defer(TokenStream), // `defer func() { ... }` - runs at end of scope
     GoIfErr(TokenStream, Vec<GoStmt>), // `if err != nil { ... }` error handling
     GoImport(GoImport), // `import "strings"` — go package import declaration
+    GoShortDecl(Ident, TokenStream), // Go `:=` short declaration (non-closure)
 }
 
 /// Go import declaration: `import "strings"`, `import s "strings"`, `import . "fmt"`, `import _ "os"`.

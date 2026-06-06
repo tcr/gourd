@@ -41,7 +41,7 @@ pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
                     if output.tys.is_empty() {
                         quote! {} // No return
                     } else {
-                        let mapped: Vec<_> = output.tys.iter().map(map_go_types).collect();
+                        let mapped: Vec<_> = output.tys.iter().map(|t| map_go_types(t)).collect();
                         match mapped.len() {
                             1 => {
                                 let m = &mapped[0];
