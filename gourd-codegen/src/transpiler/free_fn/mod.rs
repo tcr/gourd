@@ -11,7 +11,7 @@ mod switch;
 mod util;
 
 // Re-export the public API
-pub use basic::{go_to_rust_fn, go_to_rust_struct};
+pub use basic::{go_to_rust_fn, go_to_rust_struct, go_to_rust_fn_hir};
 pub use closure::go_to_rust_closure;
 pub use interface::go_to_rust_interface;
 pub use select::{go_to_rust_select, go_to_rust_select_ast};
