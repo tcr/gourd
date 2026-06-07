@@ -42,6 +42,9 @@ enum Commands {
     Run {
         /// Input source: file path, inline Go code, or `-` for stdin
         input: String,
+        /// Output path for the built binary (optional — if provided, copies the binary before cleaning up)
+        #[arg(short, long, help = "Output path for the built binary (e.g., ./myapp)")]
+        output: Option<PathBuf>,
         #[arg(short, long, help = "Pass additional cargo args (e.g., --features)")]
         cargo_args: Vec<String>,
     },
@@ -54,8 +57,8 @@ fn main() {
         Commands::Transpile { input } => {
             run_transpile(input);
         }
-        Commands::Run { input, cargo_args } => {
-            run_and_execute(&input, &cargo_args);
+        Commands::Run { input, output, cargo_args } => {
+            run_and_execute(&input, &output, &cargo_args);
         }
     }
 }
@@ -102,7 +105,7 @@ fn run_transpile(input: String) {
 }
 
 /// Transpile Go code, build in a temp Cargo project, and run it.
-fn run_and_execute(input: &str, cargo_args: &[String]) {
+fn run_and_execute(input: &str, cargo_output: &Option<PathBuf>, cargo_args: &[String]) {
     let source = read_source(input);
 
     // Transpile Go to Rust
@@ -174,13 +177,30 @@ num-traits = "0.2"
        .arg(&manifest_path)
        .args(cargo_args);
 
-    let status = cmd.status().unwrap_or_else(|e| {
-        eprintln!("failed to run cargo: {}", e);
-        std::process::exit(1);
-    });
+    let target_dir = temp_dir.path().join("target/debug/gourd-run");
 
-    if !status.success() {
-        std::process::exit(1);
+    // If --output was given, build then copy the binary; otherwise run it directly.
+    if let Some(output_path) = &cargo_output {
+        let build_status = cmd.status().unwrap_or_else(|e| {
+            eprintln!("failed to run cargo: {}", e);
+            std::process::exit(1);
+        });
+        if !build_status.success() {
+            std::process::exit(1);
+        }
+        std::fs::copy(&target_dir, output_path).unwrap_or_else(|e| {
+            eprintln!("failed to copy binary to '{}': {}", output_path.display(), e);
+            std::process::exit(1);
+        });
+        println!("binary written to {}", output_path.display());
+    } else {
+        let status = cmd.status().unwrap_or_else(|e| {
+            eprintln!("failed to run cargo: {}", e);
+            std::process::exit(1);
+        });
+        if !status.success() {
+            std::process::exit(1);
+        }
     }
 }
 
