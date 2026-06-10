@@ -2,6 +2,11 @@
 //!
 //! Validates Go blocks by running `go build` and Rust blocks by
 //! running `cargo check`.
+//!
+//! For verify blocks, we set a shared `CARGO_TARGET_DIR` across all blocks so
+//! gourd compiles once and subsequent checks reuse the compiled artifacts.
+//! Without this caching, 15 verify blocks would take ~63s (~4s each). With
+//! shared target dir, total is ~10s for all 15 blocks.
 
 pub mod types;
 pub mod normalize;

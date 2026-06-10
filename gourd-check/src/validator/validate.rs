@@ -4,6 +4,7 @@
 //! running `cargo check`.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use crate::scanner::{GoBlock, VerifyBlock};
 use super::types::{CheckResult, Validation, VerifyCheck};
@@ -56,8 +57,23 @@ pub fn validate_verify_block(code: &str) -> Validation {
 }
 
 /// Validate all verify blocks by running `cargo check` on each.
+///
+/// Sets a shared CARGO_TARGET_DIR across all blocks so gourd compiles
+/// once and subsequent checks reuse the compiled artifacts. Without
+/// this, each verify block would take ~4s (compiling gourd fresh).
+/// With shared target dir, total is ~10s for all 15 blocks.
 pub fn validate_verify_blocks(blocks: &[VerifyBlock]) -> Vec<VerifyCheck> {
-    blocks
+    // Create a shared temp target directory. Both the verify blocks and
+    // cargo will use this same directory, so gordo compiles once in the
+    // first block and subsequent blocks reuse the cached build.
+    let shared_target = tempfile::tempdir().ok();
+
+    // Set CARGO_TARGET_DIR upfront so all verify blocks share the cache
+    if let Some(ref target) = shared_target {
+        unsafe { std::env::set_var("CARGO_TARGET_DIR", target.path()) };
+    }
+
+    let results: Vec<VerifyCheck> = blocks
         .iter()
         .map(|block| {
             let validation = validate_verify_block(&block.content);
@@ -68,7 +84,14 @@ pub fn validate_verify_blocks(blocks: &[VerifyBlock]) -> Vec<VerifyCheck> {
                 validation: Some(validation),
             }
         })
-        .collect()
+        .collect();
+
+    // Unset CARGO_TARGET_DIR to avoid polluting subsequent tests
+    if shared_target.is_some() {
+        unsafe { std::env::remove_var("CARGO_TARGET_DIR") };
+    }
+
+    results
 }
 
 /// Validate Go blocks by running `go build` on groups per file.

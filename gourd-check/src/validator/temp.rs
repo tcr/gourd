@@ -83,10 +83,15 @@ pub fn run_cargo_check(dir: &Path, code: &str) -> io::Result<()> {
     let main_rs = dir.join("src").join("main.rs");
     std::fs::write(&main_rs, code)?;
 
-    let output = Command::new("cargo")
-        .args(["check", "-q"])
-        .current_dir(dir)
-        .output()?;
+    let mut cmd = Command::new("cargo");
+    cmd.args(["check", "-q"]);
+
+    // Respect shared CARGO_TARGET_DIR if set (for caching across verify blocks)
+    if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        cmd.arg("--target-dir").arg(target_dir);
+    }
+
+    let output = cmd.current_dir(dir).output()?;
 
     if output.status.success() {
         Ok(())
