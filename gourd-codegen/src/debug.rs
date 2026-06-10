@@ -17,3 +17,11 @@ macro_rules! debug_println {
         }
     };
 }
+
+/// Print the heuristic module summary if GOURD_DEBUG is set.
+pub fn print_heuristic_summary() {
+    if enabled() {
+        // Re-export from heuristics module
+        eprintln!("{}", crate::transpiler::heuristics::heuristic_summary());
+    }
+}

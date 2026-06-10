@@ -46,11 +46,34 @@ const MAP_ITERATION_EXACT_NAMES: &[&str] = &[
     "hash_map", "counter", "counters", "dict", "wordfreq",
 ];
 
+/// Common type-name substrings that indicate a map collection.
+const MAP_TYPE_KEYWORDS: &[&str] = &[
+    "HashMap",
+    "hash_map",
+];
+
+/// Common type-name substrings that indicate a string index.
+const STRING_INDEX_KEYWORDS: &[&str] = &[
+    "String",
+    "from(",
+];
+
 /// Check whether a collection variable name suggests it holds a map.
 /// This is the core "map detection" heuristic used across multiple files.
 pub fn collection_name_suggests_map(name: &str) -> bool {
     let lower = name.to_lowercase();
     MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Check whether a name indicates a map collection type (HashMap, hash_map).
+/// This is the type-based component used alongside name-based heuristics.
+pub fn collection_is_map_type(name: &str) -> bool {
+    MAP_TYPE_KEYWORDS.iter().any(|k| name.contains(k))
+}
+
+/// Check whether an index indicates a string-typed key (String, from() pattern).
+pub fn index_is_string_type(name: &str) -> bool {
+    STRING_INDEX_KEYWORDS.iter().any(|k| name.contains(k))
 }
 
 /// Check whether an index variable name suggests it holds a map key.
@@ -65,12 +88,11 @@ pub fn index_name_suggests_key(name: &str) -> bool {
 /// Returns `true` if the names suggest map access, meaning the transpiler
 /// should use a special `map_get_ref` helper instead of standard Rust indexing.
 pub fn heuristic_should_use_map_get_ref(collection: &str, index: &str) -> bool {
-    // Explicit HashMap type in the name always uses map_get_ref (this is type-based, not heuristic)
-    if collection.contains("HashMap") || collection.contains("hash_map") {
+    // Type-based check (consolidated from inline duplicates)
+    if collection_is_map_type(collection) {
         return true;
     }
-    // String-typed index implies map access (type-based)
-    if index.contains("String") || index.contains("from(") {
+    if index_is_string_type(index) {
         return true;
     }
     // Heuristic: variable names suggest map
@@ -146,8 +168,8 @@ pub fn heuristic_addition_is_numeric(lhs: &str, rhs: &str) -> bool {
         return true;
     }
 
-    // Exact name match on either side.
-    NUMERIC_NAMES.contains(&lhs) || NUMERIC_NAMES.contains(&rhs)
+    // Exact name match on either side — use is_numeric_name for consistency.
+    is_numeric_name(lhs) || is_numeric_name(rhs)
 }
 
 // ============================================================================

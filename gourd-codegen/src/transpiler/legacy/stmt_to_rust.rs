@@ -183,14 +183,9 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                         // Two-variable range loop: `for i, v := range data`
                         // For slices/vecs: iterate with index
                         // For maps: iterate with key-value pairs
-                        // Detect if iterable is a map by checking type or name
+                        // Consolidated map detection: type-based + name-based heuristics.
                         let iter_str = quote! { #iterable }.to_string();
-                        let is_map_type = iter_str.contains("HashMap")
-                            || iter_str.contains("hash_map");
-                        // Also check by variable name — common map names
-                        let iter_name = iter_str.trim();
-                        let is_map_named = heuristics::heuristic_is_map_iteration_name(iter_name);
-                        if is_map_type || is_map_named {
+                        if heuristics::heuristic_should_use_map_get_ref(&iter_str, "") {
                             // Map iteration: for k, v := range map
                             quote! {
                                 for ( #i_ident , #v_ident ) in #iterable . iter () { #body_block }

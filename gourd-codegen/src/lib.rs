@@ -55,6 +55,8 @@ pub fn transpile_go_text(input: &str) -> proc_macro2::TokenStream {
 
 
 pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    // Print heuristic module summary when GOURD_DEBUG is set.
+    debug::print_heuristic_summary();
     // Collect all top-level declarations from the token stream.
     // Go blocks may contain multiple structs, interfaces, and functions.
     let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();

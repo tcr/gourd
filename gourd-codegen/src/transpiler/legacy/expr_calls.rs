@@ -422,27 +422,19 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     }
     let seq_str = quote! { #seq }.to_string();
     let idx = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.index);
-    // Delegate HashMap reads to prelude: `::gourd::prelude::map_get_ref(&m, &k)`.
-    if seq_str.contains("HashMap") || seq_str.contains("hash_map") {
-        return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx) };
-    }
     // Check if the index is a string literal — for maps, use .get() instead.
     if let Expr::Lit(lit) = &*input.index
         && matches!(&lit.lit, syn::Lit::Str(_))
     {
         return quote! { #seq.get(& #idx).unwrap() };
     }
-    // Detect string-typed keys (variables holding String values): Go map access.
+    // Consolidated map detection: type-based + name-based heuristics.
     let idx_str = quote! { #idx }.to_string();
-    if idx_str.contains("String") || idx_str.contains("from(") {
-        return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
-    }
     // Heuristic: if the index is NOT a number literal or range (i.e., it's a variable or expression),
     // check if the sequence name suggests it might be a map (contains common map variable names).
     let is_num_or_range = matches!(&*input.index, Expr::Lit(lit) if matches!(&lit.lit, syn::Lit::Int(_) | syn::Lit::Float(_)))
         || matches!(&*input.index, Expr::Range(_));
     if !is_num_or_range {
-        // Heuristic: variable names suggest map access → use map_get_ref helper
         if heuristics::heuristic_should_use_map_get_ref(&seq_str, &idx_str) {
             return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
         }

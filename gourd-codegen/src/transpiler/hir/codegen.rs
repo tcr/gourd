@@ -357,18 +357,8 @@ fn hir_index_to_rust(collection: &HirExpr, index: &HirExpr) -> TokenStream {
     let index_tokens = hir_expr_to_rust(index);
     let collection_str = quote::quote!(#collection_tokens).to_string();
     let index_str = quote::quote!(#index_tokens).to_string();
-
-    // Detect map access by collection name containing "HashMap"
-    if collection_str.contains("HashMap") || collection_str.contains("hash_map") {
-        return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
-    }
-
-    // Detect map access by index being a string type
-    if collection_str.contains("from(") {
-        // Map access via variable name heuristic (previous logic moved below)
-    }
-
-    // Heuristic: variable names suggest map access → use map_get_ref helper
+    
+    // Use consolidated heuristic for map detection (type-based + name-based)
     if heuristics::heuristic_should_use_map_get_ref(&collection_str, &index_str) {
         return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
     }
@@ -792,17 +782,48 @@ pub fn hir_stmt_to_rust(stmt: &HirStatement, strip_returns: bool) -> TokenStream
         HirStatement::ForRange { index_name, value_name, iterable, body } => {
             let iterable_tokens = hir_expr_to_rust(iterable);
             let body_tokens = hir_block_to_rust(body, strip_returns);
+            // Heuristic: check if iterable name suggests map iteration
+            let is_map_iter = {
+                // Try to get the variable/collection name from the iterable
+                let iter_name: Option<String> = match &iterable.kind {
+                    HirExprKind::Identifier(id) => Some(id.to_string()),
+                    HirExprKind::Path(p) => {
+                        // Extract last path segment from the underlying syn::Path
+                        p.0.segments.last().map(|s| s.ident.to_string())
+                    }
+                    _ => {
+                        // For non-simple expressions, extract name from generated tokens
+                        Some(hir_expr_to_rust(iterable).to_string())
+                    }
+                };
+                iter_name.map_or(false, |name| heuristics::heuristic_is_map_iteration(&name))
+            };
             match (index_name, value_name.to_string().as_str()) {
                 (Some(i), "_") => {
-                    quote! { for #i in 0..#iterable_tokens.len() #body_tokens ; }
+                    // Index-only iteration. If map heuristic, use entry iteration; otherwise range.
+                    if is_map_iter {
+                        quote! { for #i in #iterable_tokens.iter() #body_tokens ; }
+                    } else {
+                        quote! { for #i in 0..#iterable_tokens.len() #body_tokens ; }
+                    }
                 }
                 (Some(i), _) => {
+                    // Index + value iteration. If map heuristic, use .iter().enumerate(); otherwise index-based.
                     let index_var = quote! { #i };
                     let value_var = quote! { #value_name };
-                    quote! { for #index_var in 0.. #iterable_tokens . len () as i32 { let #value_var = #iterable_tokens [#index_var as usize]; #body_tokens } ; }
+                    if is_map_iter {
+                        quote! { for (#index_var, #value_var) in #iterable_tokens.iter().enumerate() { #body_tokens } ; }
+                    } else {
+                        quote! { for #index_var in 0.. #iterable_tokens . len () as i32 { let #value_var = #iterable_tokens [#index_var as usize]; #body_tokens } ; }
+                    }
                 }
                 (None, _) => {
-                    quote! { for #value_name in #iterable_tokens.iter().cloned() #body_tokens ; }
+                    // Value-only iteration. If map heuristic, use .iter(); otherwise .iter().cloned().
+                    if is_map_iter {
+                        quote! { for #value_name in #iterable_tokens.iter() #body_tokens ; }
+                    } else {
+                        quote! { for #value_name in #iterable_tokens.iter().cloned() #body_tokens ; }
+                    }
                 }
             }
         }
