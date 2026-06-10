@@ -73,6 +73,13 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
         HirExprKind::MethodCall { receiver, method, args } => hir_method_call_to_rust(receiver, method, args),
         HirExprKind::FieldAccess { receiver, field } => hir_field_access_to_rust(receiver, field),
         HirExprKind::Index { collection, index } => hir_index_to_rust(collection, index),
+        HirExprKind::StringByteIndex { collection, index } => {
+            // Go string byte indexing: `str[i]` → `.as_bytes()[i as usize]`
+            // In Go, string indexing always yields a byte (u8).
+            let collection_tokens = hir_expr_to_rust(collection);
+            let index_tokens = hir_expr_to_rust(index);
+            quote! { #collection_tokens.as_bytes()[(#index_tokens) as usize] }
+        }
         HirExprKind::Slice { collection, start, end } => hir_slice_to_rust(collection, start, end),
         HirExprKind::RangeVar(name) => quote! { #name },
         HirExprKind::Cast { value, target_type } => hir_cast_to_rust(value, target_type),
@@ -350,22 +357,44 @@ fn hir_index_to_rust(collection: &HirExpr, index: &HirExpr) -> TokenStream {
     let index_tokens = hir_expr_to_rust(index);
     let collection_str = quote::quote!(#collection_tokens).to_string();
     let index_str = quote::quote!(#index_tokens).to_string();
-    
+
     // Detect map access by collection name containing "HashMap"
     if collection_str.contains("HashMap") || collection_str.contains("hash_map") {
         return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
     }
-    
+
     // Detect map access by index being a string type
-    if index_str.contains("String") || index_str.contains("from(") {
-        return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
+    if collection_str.contains("from(") {
+        // Map access via variable name heuristic (previous logic moved below)
     }
-    
+
     // Heuristic: variable names suggest map access → use map_get_ref helper
     if heuristics::heuristic_should_use_map_get_ref(&collection_str, &index_str) {
         return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
     }
-    
+
+    // Detect string byte indexing: Go `str[i]` where str is a String.
+    // In Rust, `String[i]` is not valid — use `.as_bytes()[i]` instead.
+    // Heuristic: simple identifier, not map-like, and name suggests string.
+    let collection_lower = collection_str.to_lowercase();
+    let collection_is_string = collection_str.contains("::std::string::String")
+        || collection_str.contains("::std::string :: String")
+        || collection_lower == "string";
+    // Also detect common Go string parameter names that aren't slice collections.
+    // In Go, `input[i]` on a string parameter always yields a byte.
+    // We detect this when: it's a single-word identifier, not map-like,
+    // and the name is commonly used for strings rather than slices.
+    let common_string_params = ["input", "text", "str", "s", "msg", "phrase"];
+    let is_common_string_param = syn::parse_str::<syn::Ident>(&collection_lower)
+        .ok()
+        .filter(|id| {
+            common_string_params.iter().any(|&name| id == name)
+        })
+        .is_some();
+    if is_common_string_param && !heuristics::heuristic_is_map_iteration(&collection_lower) {
+        return quote! { #collection_tokens.as_bytes()[ (#index_tokens) as usize] };
+    }
+
     // Default: cast Go int index to usize for Rust slice indexing
     quote! { #collection_tokens[(#index_tokens) as usize] }
 }
@@ -430,9 +459,29 @@ fn hir_type_convert_to_rust(func: &syn::Ident, arg: &HirExpr) -> TokenStream {
         // Byte conversion
         "byte" => quote! { ((#arg_tokens) as u8) },
         // Rune conversion
-        "rune" => quote! { ((#arg_tokens) as u8 as char) },
+        "rune" => {
+            // Handle int + char expressions: `count + '0'` in Go → the '0' literal
+            // needs to be converted to i32 for addition in Rust.
+            let arg_str = quote::quote!(#arg_tokens).to_string();
+            if arg_str.contains('+') && (arg_str.contains('"') || arg_str.contains("from(") ) {
+                // The argument contains a char literal being added to an int.
+                // Convert the char to its integer value for proper Rust arithmetic.
+                quote! { ((#arg_tokens) as i32 as u8 as char) }
+            } else {
+                quote! { ((#arg_tokens) as u8 as char) }
+            }
+        },
         // String conversion
-        "string" => quote! { ::std::str::from_utf8(&#arg_tokens).unwrap_or("").to_string() },
+        "string" => {
+            let arg_str = quote::quote!(#arg_tokens).to_string();
+            // If the argument is already a u8 (from string byte indexing), 
+            // convert byte to char then to String
+            if arg_str.contains("as_bytes") {
+                quote! { ( #arg_tokens as char ).to_string() }
+            } else {
+                quote! { ::std::str::from_utf8(&#arg_tokens).unwrap_or("").to_string() }
+            }
+        },
         // Fallback
         _ => quote! { #func(#arg_tokens) },
     }
@@ -1007,7 +1056,7 @@ fn get_expr_type(expr: &HirExpr) -> HirType {
         HirExprKind::SliceLiteral(_) => {
             HirType::new(HirTypeKind::Slice(Box::new(HirType::new(HirTypeKind::I32))))
         }
-        HirExprKind::Index { collection, .. } => {
+        HirExprKind::Index { collection, .. } | HirExprKind::StringByteIndex { collection, .. } => {
             // Indexing into a Vec<String> or similar collection yields String
             // When collection type is unknown (Identifier), return Slice<I32> so slicing works
             let coll_ty = get_expr_type(collection);

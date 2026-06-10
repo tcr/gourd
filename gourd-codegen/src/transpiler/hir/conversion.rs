@@ -238,8 +238,9 @@ fn hir_lit_to_hir(lit: &ExprLit) -> HirExpr {
             HirExpr::new(HirExprKind::SliceLiteral(bytes))
         }
         syn::Lit::Char(c) => {
-            // Character literal: `'x'` — convert to string
-            HirExpr::new(HirExprKind::Literal(HirLiteral::StringTy(c.value().to_string())))
+            // Character literal: `'x'` in Go is a rune (int32 = Unicode code point).
+            // Treat as integer for arithmetic: `'0'` → 48, `'a'` → 97, etc.
+            HirExpr::new(HirExprKind::Literal(HirLiteral::Int(c.value() as u64)))
         }
         _ => HirExpr::new(HirExprKind::Unsupported("unknown literal".to_string())),
     }

@@ -28,6 +28,11 @@ pub fn transpile_binary(input: &syn::ExprBinary) -> TokenStream {
             } else if rhs_str.contains("as u8") || rhs_str.contains("as char") {
                 // Type cast expression: don't apply [..]
                 quote! { #lhs + #rhs }
+            } else if rhs_str.starts_with('\'') && rhs_str.len() >= 3 {
+                // Char literal (like '0' or 'A') — treat as numeric addition.
+                // In Go, '0' is a rune (int32 = 48). In Rust, we need to add integers.
+                // Cast the char to i32 before adding.
+                quote! { #lhs + (#rhs as i32) }
             } else {
                 // Simple identifier → pass through unchanged (compiler checks types)
                 // For expressions (slice indexing, method calls), apply string handling.

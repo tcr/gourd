@@ -84,8 +84,8 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         let rest = &args[1..];
         // Append now accepts owned values (val: T where T: Clone).
         // For numeric literals, pass directly.
-        // For identifiers, clone to get owned.
-        // For complex expressions, pass directly (the expression is already owned).
+        // For everything else (identifiers, indexed access, etc.), clone
+        // to get an owned value since slice indexing yields references.
         let refs = rest.iter().map(|a| {
             let ts = quote! { #a };
             let s = ts.to_string();
@@ -94,17 +94,9 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             if is_numeric_literal {
                 quote! { #a }
             } else {
-                // Check if it's a simple identifier (no special chars)
-                let is_simple = !s.contains('[') && !s.contains('(') && !s.contains(')')
-                    && !s.contains('+') && !s.contains('-') && !s.contains('*') && !s.contains('/')
-                    && s.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false);
-                if is_simple {
-                    // Clone the identifier to get owned value
-                    quote! { #a .clone() }
-                } else {
-                    // Complex expression: pass directly (already owned)
-                    quote! { #a }
-                }
+                // For all non-literal expressions, clone to get an owned value.
+                // This handles identifiers, indexed access `items[i]`, etc.
+                quote! { #a .clone() }
             }
         });
         return quote! { ::gourd::prelude::append( #slice , #(#refs),* ) };
@@ -148,6 +140,11 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 let arg = args[0].clone();
                 let arg_str = quote! { #arg }.to_string();
                 // string(bytes) → from_utf8(...)
+                // string(byte_from_string_indexing) → (byte as char).to_string()
+                if arg_str.contains("as_bytes") {
+                    // Go `string(str[i])`: str[i] is a byte (u8), convert to single-char string
+                    return quote! { ( #arg as char ).to_string() };
+                }
                 // string(rune) → char.to_string()
                 if arg_str.contains("char") || arg_str.contains("as char") {
                     return quote! { #arg.to_string() };
@@ -158,7 +155,9 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 return quote! { (#(#args),* as u8) };
             }
             "rune" => {
-                return quote! { (#(#args),* as u8 as char) };
+                // Go rune literal `'0'` was converted to integer 48 in HIR.
+                // Handle: `rune(count + '0')` — cast through u8 to get char.
+                return quote! { ((#(#args),*) as u8 as char) };
             }
             "min" => {
                 if args.len() == 2 {
@@ -448,6 +447,23 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
             return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
         }
     }
+    // Detect string byte indexing: Go `str[i]` where str is a String.
+    // In Rust, `String[i]` is not valid — use `.as_bytes()[i]` instead.
+    let seq_lower = seq_str.to_lowercase();
+    // Make sure it's not a map variable
+    let is_map_named = seq_lower.contains("map") || seq_lower.contains("count")
+        || seq_lower.contains("freq") || seq_lower.contains("dict")
+        || seq_lower.contains("hash") || seq_lower.contains("result");
+    // Check common Go string parameter names via exact identifier match
+    if !is_map_named {
+        if let Ok(id) = syn::parse_str::<syn::Ident>(&seq_lower) {
+            let common_string_params = ["input", "text", "str", "s", "msg", "phrase"];
+            if common_string_params.iter().any(|&name| id == name) {
+                return quote! { #seq.as_bytes()[ #idx as usize] };
+            }
+        }
+    }
+
     // Index expressions need usize for Rust slices; if the index is i32 (Go int),
     // cast it to usize automatically.
     let idx = quote! { #idx as usize };

@@ -87,6 +87,13 @@ pub enum HirExprKind {
         collection: Box<HirExpr>,
         index: Box<HirExpr>,
     },
+    // String byte indexing: Go `str[i]` on a String type → `.as_bytes()[i]`
+    // In Go, string indexing always returns a byte (u8). This variant
+    // captures that intent so the Rust codegen can use `.as_bytes()`.
+    StringByteIndex {
+        collection: Box<HirExpr>,
+        index: Box<HirExpr>,
+    },
 
     // Slicing: `expr[start:end]` (maps to `expr[start..end]` or `expr[start..]`)
     Slice {
