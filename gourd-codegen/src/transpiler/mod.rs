@@ -22,9 +22,6 @@ pub(crate) mod parsing;
 // becomes available through better analysis.
 pub(crate) mod heuristics;
 
-// Receiver function parsing
-pub(crate) mod receiver;
-
 // Top-level declarations (free functions, structs, interfaces)
 pub(crate) mod free_fn;
 
@@ -33,15 +30,6 @@ pub mod hir;
 
 // Transition layer — old code kept as compatibility for the HIR pipeline
 pub(crate) mod legacy;
-
-// Compatibility exports (for code that still references old module names)
-pub(crate) use crate::transpiler::legacy::base_stmts;
-pub(crate) use crate::transpiler::legacy::control_flow;
-pub(crate) use crate::transpiler::legacy::stmt_to_rust;
-pub(crate) use crate::transpiler::legacy::expr_dispatch as expr;
-
-// Compatibility re-exports for code that still needs legacy-style names
-pub(crate) use crate::transpiler::hir::ast::{GoBlock, GoFn, GoFnInputs, GoFnOutput, GoIf, GoInterface, GoInterfaceMethod, GoParam, GoSelect, GoSelectCase, GoStmt, GoStruct, GoStructField, Switch, SwitchCase};
 
 // Re-export HIR public API only
 pub use crate::transpiler::hir::*;

@@ -1,8 +1,8 @@
 # HIR Migration Progress
 
-## Status: Complete ✅
+## Status: Production-Wired, Transition Layer Active ✅
 
-The `go!` proc-macro now routes exclusively through the HIR (High-level Intermediate Representation) transpiler pipeline. All 70 unit tests and ~110 integration tests pass.
+The `go!` proc-macro now routes the vast majority of declarations through the HIR pipeline. One free-function path uses a legacy bridge for statement-level primitives. All tests pass.
 
 ---
 
@@ -10,177 +10,167 @@ The `go!` proc-macro now routes exclusively through the HIR (High-level Intermed
 
 ```
 go! { ... }                    ← User writes Go
-  → transpile_go_text           ← Entry point (gourd-codegen/src/lib.rs)
-    → go_to_rust_fn_hir         ← Free function routing
-    → go_to_rust_struct_hir     ← Struct routing
-    → go_to_rust_interface_hir  ← Interface routing
-    → go_to_rust_receiver_fn    ← Receiver function routing
-    → go_to_rust_select_hir     ← Select routing
-    → go_to_rust_switch_hir     ← Switch routing
-    → go_to_rust_closure_hir    ← Closure routing
+  → transpile_go                ← Entry point (gourd-codegen/src/lib.rs)
+    → go_to_rust_interface_hir  ← Interface routing → HIR
+    → go_to_rust_struct_hir     ← Struct routing → HIR
+    → go_to_rust_switch_hir     ← Switch routing → HIR
+    → go_to_rust_select_hir     ← Select routing → HIR
+    → go_to_rust_receiver_fn_hir ← Receiver routing → HIR
+    → go_to_rust_closure_hir    ← Closure routing → HIR
+    → go_to_rust_fn()           ← Free function → Legacy bridge ⚠️
+    → inline GoChannel          ← Channel → standalone emitter
+    → inline import use         ← Import → standalone emitter
+
       ↓
-    [HIR Module]                ← gourd-codegen/src/transpiler/hir/
-      ├── ast.rs                ← Go AST types (GoFn, GoStruct, GoFor, GoIf, etc.)
-      ├── conversion.rs         ← Go AST → HIR AST conversion
-      ├── codegen.rs            ← HIR AST → Rust tokens (main transpilation engine)
-      ├── types.rs              ← Type name mapping & Go type resolution
-      ├── statement.rs          ← Block parsing & statement handling
-      ├── expression.rs         ← Expression-level handling
-      ├── mod.rs                ← Public API re-exports
-      └── params.rs             ← Function parameter parsing (GoFnInputs, GoFnOutput)
+  [HIR Module]                  ← gourd-codegen/src/transpiler/hir/
+    ├── ast.rs                  ← Go AST types (GoFn, GoStruct, GoFor, etc.)
+    ├── conversion.rs           ← Go AST → HIR conversion
+    ├── codegen.rs              ← HIR → Rust tokens (main transpilation engine)
+    ├── types.rs                ← Type name mapping & Go type resolution
+    ├── statement.rs            ← Block parsing & statement handling
+    ├── expression.rs           ← Expression-level handling
+    └── mod.rs                  ← Public API re-exports
+
       ↓
-    [Transition Layer]          ← ~2,500 lines of low-level primitives
-      ├── stmt_to_rust.rs       ← Bridges GoStmt → Rust tokens
-      ├── expr/dispatch.rs      ← Routes 29 expression variants to handlers
-      ├── expr/calls.rs         ← Method calls, field access, indices
-      ├── expr/closures.rs      ← Go anonymous functions (legacy fallback)
-      ├── expr/control_flow.rs  ← If, while, for body handlers
-      ├── expr/literals.rs      ← Lit, Path, Paren, Array, Verbatim
-      ├── expr/operators.rs     ← Binary, Unary, Cast, Assign, Break, Continue
-      ├── expr/structs.rs       ← Struct literal transpilation
-      ├── stmts.rs              ← Block parsing (431 lines)
-      ├── base_stmts.rs         ← Local declarations, assignments (426 lines)
-      ├── control_flow.rs       ← If/while/for block parsing (317 lines)
-      └── return_stmts.rs       ← Returns, make, append, type assertions (410 lines)
+  [Legacy Transition Layer]     ← gourd-codegen/src/transpiler/legacy/
+    ├── stmt_to_rust.rs         ← Bridges GoStmt → Rust tokens (625 lines)
+    ├── expr/dispatch.rs        ← Routes 29 expression variants (361 lines)
+    ├── expr/calls.rs           ← Method calls, field access, indices (302 lines)
+    ├── expr/closures.rs        ← Go anonymous functions (248 lines)
+    ├── expr/control_flow.rs    ← If, while, for handlers (226 lines)
+    ├── expr/literals.rs        ← Lit, Path, Paren, Array, Verbatim (142 lines)
+    ├── expr/operators.rs       ← Binary, Unary, Cast, Assign (159 lines)
+    ├── expr/structs.rs         ← Struct literal transpilation (148 lines)
+    ├── stmts.rs                ← Block parsing (431 lines)
+    ├── base_stmts.rs           ← Local declarations, assignments (426 lines)
+    └── control_flow.rs         ← If/while/for block parsing (317 lines)
 ```
 
-### Key Design Decision: HIR is now the primary path, legacy is the transition layer
+### Key Design: HIR is the primary path, legacy is the transition layer
 
-The "legacy" modules were not replaced — they were migrated into HIR as transition layer primitives. The HIR path calls these modules via `stmt_to_rust` for low-level expression/statement translation. This is a **module rename**, not a deletion — the HIR module now owns the transpilation pipeline while the legacy modules provide the expression-level primitives.
+The "legacy" modules are not replaced — they were migrated into HIR as a
+**transition layer**. The HIR path calls these modules via `stmt_to_rust`
+for low-level expression/statement translation. This is a module rename,
+not a deletion — the HIR module owns the transpilation pipeline while
+the legacy modules provide expression-level primitives.
+
+The only gap: `free_fn/basic.rs:go_to_rust_fn()` routes free functions
+to legacy `stmt_to_rust` for statement-level handling. Everything else
+flow exclusively through HIR.
 
 ---
 
-## Deleted Code (1,116 lines of truly unused code)
+## Deleted Code (1,194 lines of dead code)
 
 | File | Lines Removed | Reason |
 |------|--------------|--------|
-| `free_fn/mod.rs` | 29 | Replaced with HIR routing in `lib.rs` |
-| `free_fn/basic.rs` | 893 | Replaced with HIR handlers |
-| `funcs/mod.rs` | 13 | Replaced with HIR routing in `lib.rs` |
-| `funcs/basic.rs` | 181 | Replaced with HIR handlers |
-| `free_fn/closure.rs` | ~70 | Unreachable after HIR closure path |
-| `free_fn/interface.rs` | ~50 | Unreachable after HIR interface path |
-| `free_fn/select.rs` | ~120 | Unreachable after HIR select path |
-| `free_fn/switch.rs` | ~80 | Unreachable after HIR switch path |
-| `free_fn/util.rs` | ~80 | Unreachable after HIR util path |
+| `funcs/mod.rs` | 11 | Entire module dead — receiver path uses HIR |
+| `funcs/basic.rs` | 108 | `go_to_rust_receiver_fn()` replaced by HIR |
+| `funcs/receiver.rs` | 75 | `replace_receiver()` never called from entry |
+| `free_fn/closure.rs` | 434 | `go_to_rust_closure()` replaced by HIR version |
+| `free_fn/switch.rs` | 125 | `go_to_rust_switch()` replaced by HIR version |
+| `free_fn/select.rs` | 4 | Re-export stub, HIR version used |
+| `free_fn/util.rs` | 26 | `to_snake_case` only used by dead non-HIR path |
+| `free_fn/basic.rs` (dead HIR) | 212 | `go_to_rust_fn_hir`, `go_to_rust_struct_hir` + tests — shadowed by HIR codegen |
+| `ast.rs` (root) | 3 | Orphan re-export, not declared in mod.rs |
+| `expr.rs` (root) | 11 | Orphan re-export, not declared in mod.rs |
+| `receiver.rs` (root) | 155 | Only consumed by deleted `funcs/receiver.rs` |
+| `switch.rs` (root) | 4 | Orphan re-export, not declared in mod.rs |
+
+---
+
+## Current Module Layout
+
+```
+gourd-codegen/src/transpiler/
+├── mod.rs           — Module declarations & HIR re-exports
+├── types.rs         — Go type name mapping (340 lines)
+├── slice_map.rs     — Map/slice literal parsing
+├── params.rs        — Function parameter parsing
+├── parsing.rs       — Re-exports from HIR ast + params
+├── heuristics.rs    — Variable-name heuristic detection
+├── free_fn/
+│   ├── mod.rs       — Re-exports go_to_rust_fn, go_to_rust_struct
+│   └── basic.rs     ← Live bridge (legacy statement handling)
+├── hir/             — High-level intermediate representation (primary path)
+│   ├── ast.rs       — Go AST types (1,305 lines)
+│   ├── conversion.rs — Go→HIR conversion (2,616 lines)
+│   ├── codegen.rs   — HIR→Rust tokens + public API (2,102 lines)
+│   ├── types.rs     — HIR type definitions (1,317 lines)
+│   ├── statement.rs — Statement-level transpilation
+│   ├── expression.rs — Expression-level handling
+│   └── mod.rs       — Public HIR API
+└── legacy/          — Transition layer (expression/statement primitives)
+    ├── mod.rs       — Module declarations
+    ├── expr_dispatch.rs  — go_to_rust(), go_to_rust_pattern() dispatch
+    ├── expr_literals.rs  — Lit, Path, Paren, Array, Verbatim
+    ├── expr_operators.rs — Binary, Unary, Cast, Assign, Break, Continue
+    ├── expr_calls.rs     — Call, MethodCall, Field, Index, Macro
+    ├── expr_closures.rs  — Closure handling
+    ├── expr_control_flow.rs — Let, Tuple, Return, Loop, ForLoop, While, Range, If, Block, Match
+    ├── expr_structs.rs   — Struct literals
+    ├── stmt_to_rust.rs   — Statement-to-Rust bridge
+    ├── stmts.rs          — Statement block parsing
+    ├── base_stmts.rs     — Fallback statement parser
+    └── control_flow.rs   — Go control flow parsing (if, for, while)
+```
+
+## Active Entry Points from `lib.rs:transpile_go()`
+
+| Declaration | Route | Path |
+|-------------|-------|------|
+| `interface` | → `go_to_rust_interface_hir()` | HIR ✅ |
+| `type` / `struct` | → `go_to_rust_struct_hir()` | HIR ✅ |
+| `switch` | → `go_to_rust_switch_hir()` | HIR ✅ |
+| `select` | → `go_to_rust_select_hir()` | HIR ✅ |
+| `func (recv Type) name()` | → `go_to_rust_receiver_fn_hir()` | HIR ✅ |
+| `func(params)` (closure) | → `go_to_rust_closure_hir()` | HIR ✅ |
+| `chan T` | → inline `GoChannel::<T>::new()` | standalone ✅ |
+| `import "pkg"` | → inline `use gourd::...` | standalone ✅ |
+| **free function** (`func name()` w/o receiver group) | → `go_to_rust_fn()` | **Legacy bridge** ⚠️ |
+
+---
+
+## Line Counts (After Cleanup)
+
+| Category | Lines | Description |
+|----------|-------|-------------|
+| **HIR modules** (live) | ~5,974 | `hir/` — actively used by entry point & internals |
+| **Legacy transition layer** (live) | ~3,746 | `legacy/` — called by HIR internals for low-level primitives |
+| **Legacy bridge** (live) | ~190 | `free_fn/basic.rs:go_to_rust_fn()` — free function entry point |
+| **Supporting utilities** (live) | ~800 | `types.rs`, `slice_map.rs`, `params.rs`, `parsing.rs`, `heuristics.rs` |
+| **Total transpiler crate** | ~12,922 | After removing 1,194 lines of dead code (from ~14,116) |
 
 ---
 
 ## Test Results
 
-### Unit Tests (gourd-codegen) — 69 passing, 0 failed
+### Unit Tests (gourd-codegen) — 62 passing, 0 failed
 All HIR module unit tests pass: type parsing, conversion, statement handling, expression routing, codegen.
 
-### Integration Tests (gourd-macro) — ~110 passing across 26 test files
+### Integration Tests (gourd-macro) — ~110+ passing across 26 test files
+All test files pass. No regressions from HIR migration or cleanup.
 
-| Test File | Tests | Status |
-|-----------|-------|--------|
-| `append_builtin.rs` | 4 | ✅ Pass |
-| `channel_ops.rs` | 3 | ✅ Pass |
-| `closure_builtin_test.rs` | 2 | ✅ Pass |
-| `continue_stmt.rs` | 1 | ✅ Pass |
-| `for_range_test.rs` | 5 | ✅ Pass |
-| `go_fn.rs` | 9 | ✅ Pass |
-| `go_variadic.rs` | 3 | ✅ Pass |
-| `interface_tests.rs` | 10 | ✅ Pass |
-| `make_builtin.rs` | 4 | ✅ Pass |
-| `min_max_test.rs` | 4 | ✅ Pass |
-| `multi_case_switch.rs` | 3 | ✅ Pass |
-| `multi_return_test.rs` | 7 | ✅ Pass |
-| `new_builtin.rs` | 2 | ✅ Pass |
-| `package_functions.rs` | 1 | ✅ Pass |
-| `panic_builtin.rs` | 4 | ✅ Pass |
-| `prelude_map_ops.rs` | 11 | ✅ Pass |
-| `receiver_tests.rs` | 4 | ✅ Pass |
-| `select_builtin.rs` | 3 | ✅ Pass |
-| `shorthand_query.rs` | 1 | ✅ Pass |
-| `struct_literals.rs` | 3 | ✅ Pass |
-| `switch_extended.rs` | 3 | ✅ Pass |
-| `switch_minimal.rs` | 3 | ✅ Pass |
-| `transpile_go_fn.rs` | 3 | ✅ Pass |
-| `type_assertion.rs` | 3 | ✅ Pass |
-
-**Zero failures. All tests compile, run, and pass.**
-
----
-
-## Key Changes Made During Migration
-
-### HIR `codegen.rs` — Major restructuring (265 lines changed)
-
-| Change | Description |
-|--------|-------------|
-| **Return handling** | Added `strip_returns: bool` parameter to `hir_block_to_rust`. Control-flow bodies (If, While, ForRange, ForLoop) pass `false` to preserve explicit returns. Block expressions, match arms, switch cases pass `true` to strip them for expression evaluation. |
-| **Trailing semicolons** | Added explicit trailing semicolons to all statements in multi-statement blocks (`If`, `While`, `ForRange`, `ForLoop`). Fixes Go-to-Rust translation artifacts where semicolons were missing. |
-| **Panic macro syntax** | Changed from `panic!("{}", msg)` to `panic!(msg)`. Added zero-argument `panic()` handling that emits `panic!("panic()")` as fallback. |
-| **Closure param handling** | Store `SliceRef` directly without round-tripping through Rust text. Prevents nested references (`&&[i32]`) in closure parameters. |
-| **Closure body handling** | Single-expression bodies now properly wrapped with braces `{ }` when needed. Previously caused double-brace nesting (`{{ expr }}`) due to multi-statement handler output. |
-| **Loop expressions** | Added trailing semicolons to `Loop` block generation for multi-statement bodies. |
-| **For range handling** | Added trailing semicolons to `ForRange` and `ForLoop` statement generation. |
-
-### HIR `conversion.rs` — Processing fixes (263 lines changed)
-
-| Change | Description |
-|--------|-------------|
-| **Select routing** | `GoStmt::Select` now routes through dedicated `go_select_to_hir` and `hir_select_to_rust_from_hir` handlers. Emits `gourd::GoSelect::<T>::new() ... .run()` instead of broken `HirExprKind::Select` match expressions. |
-| **Slice param conversion** | Closure parameters now map `HirTypeKind::Slice` → `SliceRef` directly, preventing nested references in nested function/closure parameters. |
-| **Map literal preprocessing** | `preprocess_go_slice_literals` now handles `[K]V{...}` forms for map literals in short declarations. |
-| **Channel type parsing** | Added `"GoChannel < "` prefix handling in `parse_go_type_inner` for angle-bracketed channel types. Added `Vec < T >` spacing handling for bracketed generic types. |
-| **Select unit test** | Updated `test_go_stmt_select` to match new routing behavior (RawStmt output instead of Expr). |
-
-### Other key changes
-
-| File | Change |
-|------|--------|
-| `hir/ast.rs` | Updated GoStruct parsing to extract field types correctly via `GoAstField::parse`. Added `GoBlock::parse` implementation. |
-| `hir/types.rs` | Added angle-bracketed type prefix handling (`"GoChannel < "`, `Vec < T >`). |
-| `transpiler/expr/closures.rs` | Legacy closure path now converts Go slice params (`[]int`) to Rust references (`&[i32]`). |
-| `transpiler/free_fn/basic.rs` | Fixed `hir_stmt_to_rust` call to pass `strip_returns: true`. |
-| `transpiler/slice_map.rs` | Enhanced map entry parsing for key/value type extraction. |
-| `gourd-macro/tests/go_fn.rs` | Updated expected output to match HIR transpilation format (single semicolons). |
-| `gourd-macro/tests/make_builtin.rs` | Fixed test for `make([]int, 5)` to return borrowed slice correctly. |
-
----
-
-## Transition Layer Details
-
-The remaining ~2,500 lines are transition layer modules that the HIR path delegates to:
-
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `stmt_to_rust.rs` | 625 | Bridges GoStmt AST → Rust tokens. The main glue between HIR high-level parsing and expression handlers. |
-| `expr/dispatch.rs` | 361 | Routes 29 expression variants to handlers. Called from `stmt_to_rust`. |
-| `expr/calls.rs` | 302 | Method calls, field access, indices. Called from `stmt_to_rust`. |
-| `expr/closures.rs` | 248 | Go anonymous functions. Called from `stmt_to_rust`, used by legacy `base_stmts`. |
-| `expr/control_flow.rs` | 226 | If, while, for body handlers. Called from `stmt_to_rust`, `control_flow`. |
-| `expr/literals.rs` | 142 | Lit, Path, Paren, Array, Verbatim. Called from `stmt_to_rust`. |
-| `expr/operators.rs` | 159 | Binary, Unary, Cast, Assign, Break, Continue. Called from `stmt_to_rust`. |
-| `expr/structs.rs` | 148 | Struct literal transpilation. Called from `stmt_to_rust`. |
-| `hir/hir_helpers.rs` | 73 | HIR-specific helper utilities. |
-| `stmts.rs` | 431 | Block parsing entry point. Used by `stmt_to_rust`. |
-| `base_stmts.rs` | 426 | Local declarations, assignments. Used by `stmt_to_rust` and `hir/statement.rs:171`. |
-| `control_flow.rs` | 317 | If/while/for block parsing. Used by `stmt_to_rust` and `expr/dispatch`. |
-| `return_stmts.rs` | 410 | Returns, make, append, type assertions. Used by `stmt_to_rust`. |
-
-These modules implement the low-level expression and statement translation primitives that HIR's higher-level parsing calls into. They cannot be deleted without rewriting these primitives into HIR itself — which would require a massive rewrite of ~2,500 lines.
+### Build
+- 0 errors
+- 73 warnings (down from 97 — mostly unused imports in legacy transition layer)
 
 ---
 
 ## Ready for Next Phase
 
-The migration is structurally complete. All Go declarations flow through HIR. The remaining "legacy" modules are transition layer primitives that handle low-level expression/statement translation.
+The migration is structurally complete. All Go declarations flow through HIR except free functions, which use a legacy bridge for statement-level primitives.
 
-**The path forward is clear:**
-1. ✅ HIR routing complete (all 26 test files pass)
-2. ✅ Dead code removed (1,116 lines of unreachable free_fn/funcs code)
-3. ✅ Build errors fixed (all compilation issues resolved)
-4. ✅ Unit tests pass (69 passing)
-5. ✅ Integration tests pass (~110 passing across 26 files)
+**Accomplished:**
+1. ✅ HIR routing for all declaration types except free functions
+2. ✅ All 26 test files pass
+3. ✅ ~1,194 lines of truly dead code removed
+4. ✅ Build errors resolved (0 errors)
+5. ✅ Unit tests pass (62 passing)
 
-**The remaining work is practical code changes and improvements** (not migration):
-- Adding missing Go features to HIR
-- Improving transpilation quality for existing features
-- Addressing user-reported bugs or missing functionality
-- Code cleanup and optimization within the transition layer
+**Remaining work:**
+- **Option A**: Migrate `free_fn/basic.rs:go_to_rust_fn()` to use HIR's `go_stmt_to_rust` → eliminates last legacy entry point
+- **Option B**: Gradually migrate legacy transition layer into HIR internals (most practical — requires rewriting ~3,746 lines of expression/statement handlers)
+- **Option C**: Address 73 compiler warnings (mostly unused imports in legacy modules)
 
-The migration is done. We're ready to move on to practical improvements.
+The transition layer provides the low-level expression and statement translation primitives. They cannot be deleted without rewriting these into HIR itself.
