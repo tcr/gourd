@@ -5,10 +5,10 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Expr, ExprField, ExprIndex, ExprMacro, ExprMethodCall, ExprRange};
 
-use super::dispatch::emit_todo;
+use crate::transpiler::legacy::expr_dispatch::emit_todo;
 
 pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
-    let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
+    let args: Vec<_> = input.args.iter().map(crate::transpiler::legacy::expr_dispatch::go_to_rust).collect();
 
     // Determine if this is a builtin call that shouldn't get .clone()
     // on its arguments
@@ -236,7 +236,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 quote! { #arg }
             } else {
                 // Non-string args: use the transpiled expression
-                let transpiled = super::dispatch::go_to_rust(arg);
+                let transpiled = crate::transpiler::legacy::expr_dispatch::go_to_rust(arg);
                 quote! { #transpiled }
             }
         }).collect();
@@ -251,14 +251,14 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         if append_args.is_empty() {
             return emit_todo("append() requires at least one argument");
         }
-        let slice = super::dispatch::go_to_rust(&append_args[0]);
+        let slice = crate::transpiler::legacy::expr_dispatch::go_to_rust(&append_args[0]);
         if append_args.len() == 1 {
             // append(slice) — no-op, just return the slice
             return quote! { #slice };
         }
         // append(slice, items...) — pass items as a slice
         let items: Vec<_> = append_args[1..].iter()
-            .map(|arg| super::dispatch::go_to_rust(arg))
+            .map(|arg| crate::transpiler::legacy::expr_dispatch::go_to_rust(arg))
             .collect();
         return quote! { ::gourd::prelude::std_append( #slice, &[ #(#items),* ] ) };
     }
@@ -274,7 +274,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         let make_args: Vec<_> = input.args.iter().collect();
         if make_args.len() >= 2 {
             let type_expr = &make_args[0];
-            let type_tokens = super::dispatch::go_to_rust(type_expr);
+            let type_tokens = crate::transpiler::legacy::expr_dispatch::go_to_rust(type_expr);
             let type_str = quote! { #type_expr }.to_string();
 
             // Determine if this is a channel, map, or slice type.
@@ -282,7 +282,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 if make_args.len() == 2 {
                     return quote! { GoChannel::<#type_tokens>::new() };
                 } else {
-                    let cap = super::dispatch::go_to_rust(&make_args[1]);
+                    let cap = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[1]);
                     return quote! { GoChannel::<#type_tokens>::with_capacity(#cap) };
                 }
             }
@@ -300,10 +300,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             if type_str.starts_with("[]") {
                 let type_default: TokenStream = quote! { #type_tokens::default() };
                 if make_args.len() == 2 {
-                    let len = super::dispatch::go_to_rust(&make_args[1]);
+                    let len = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[1]);
                     return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
                 } else {
-                    let len = super::dispatch::go_to_rust(&make_args[1]);
+                    let len = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[1]);
                     return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
                 }
             }
@@ -404,7 +404,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         }
     }
     // Default: regular function call
-    let func = super::dispatch::go_to_rust(&input.func);
+    let func = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.func);
     quote! { #func( #(#args),* ) }
 }
 
@@ -415,13 +415,13 @@ pub fn go_to_rust_macro(input: &ExprMacro) -> TokenStream {
 }
 
 pub fn transpile_index(input: &ExprIndex) -> TokenStream {
-    let seq = super::dispatch::go_to_rust(&input.expr);
+    let seq = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.expr);
     // Handle slice ranges: Go `a[1:3]` → Rust `a[1..3]`
     if let Expr::Range(range) = &*input.index {
         return transpile_slice_range(&seq, range);
     }
     let seq_str = quote! { #seq }.to_string();
-    let idx = super::dispatch::go_to_rust(&input.index);
+    let idx = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.index);
     // Delegate HashMap reads to prelude: `::gourd::prelude::map_get_ref(&m, &k)`.
     if seq_str.contains("HashMap") || seq_str.contains("hash_map") {
         return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx) };
@@ -469,8 +469,8 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
 ///   `a[1:]` → `a[1..]` (from 1 to end)
 ///   `a[:]` → `a[..]` (copy of entire slice)
 fn transpile_slice_range(seq: &TokenStream, range: &ExprRange) -> TokenStream {
-    let from = range.start.as_ref().map(|e| super::dispatch::go_to_rust(e));
-    let end = range.end.as_ref().map(|e| super::dispatch::go_to_rust(e));
+    let from = range.start.as_ref().map(|e| crate::transpiler::legacy::expr_dispatch::go_to_rust(e));
+    let end = range.end.as_ref().map(|e| crate::transpiler::legacy::expr_dispatch::go_to_rust(e));
     let limits = match range.limits {
         syn::RangeLimits::HalfOpen(_) => quote! { .. },
         syn::RangeLimits::Closed(_)   => quote! { ..= },
@@ -497,9 +497,9 @@ fn transpile_slice_range(seq: &TokenStream, range: &ExprRange) -> TokenStream {
 }
 
 pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
-    let receiver = super::dispatch::go_to_rust(&input.receiver);
+    let receiver = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.receiver);
     let method_name = &input.method;
-    let args: Vec<_> = input.args.iter().map(super::dispatch::go_to_rust).collect();
+    let args: Vec<_> = input.args.iter().map(crate::transpiler::legacy::expr_dispatch::go_to_rust).collect();
     if method_name.to_string() == "get" {
         if let Some(first) = args.first() {
             let rest: Vec<_> = args.iter().skip(1).cloned().collect();
@@ -662,7 +662,7 @@ pub fn transpile_field(input: &ExprField) -> TokenStream {
     if let Some(rust_fn) = try_parse_fmt_field(&input.base, &input.member) {
         return rust_fn;
     }
-    let base = super::dispatch::go_to_rust(&input.base);
+    let base = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.base);
     let field = &input.member;
     quote! { #base.#field }
 }

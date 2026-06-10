@@ -1,8 +1,8 @@
 //! Go statement to Rust token conversion (the `go_stmt_to_rust` bridge).
 
-pub(crate) use super::ast::{GoForInit, GoStmt};
-use super::expr::{dispatch, go_to_rust};
-use super::types::map_go_types;
+pub(crate) use crate::transpiler::hir::ast::{GoForInit, GoSelect, GoStmt, Switch};
+use crate::transpiler::legacy::expr_dispatch::go_to_rust;
+use crate::transpiler::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse_quote;
@@ -69,7 +69,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             if exprs.is_empty() {
                 quote! { return }
             } else if exprs.len() == 1 {
-                let e = &exprs[0];
+                let e = go_to_rust(&exprs[0]);
                 quote! { return #e }
             } else {
                 let rust_exprs: Vec<_> = exprs.iter().map(go_to_rust).collect();
@@ -77,10 +77,13 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
             }
         }
         GoStmt::Switch(switch) => {
-            super::free_fn::transpile_switch(switch)
+            // Use HIR pipeline for switch transpilation
+            crate::transpiler::hir::switch_to_rust(switch)
         }
         GoStmt::Select(select) => {
-            super::free_fn::go_to_rust_select_ast(select)
+            // Convert Go AST select directly to HIR, then to Rust — avoid round-trip
+            let hir_select = crate::transpiler::hir::go_select_to_hir(&select);
+            crate::transpiler::hir::hir_select_to_rust_from_hir(&hir_select)
         }
         GoStmt::Continue => {
             quote! { continue }
@@ -221,10 +224,10 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                 (init, false) => {
                     // C-style: `for init; cond; post { body }`
                     let cond = for_stmt.cond.as_ref()
-                        .map(|e| dispatch::go_to_rust(e.as_ref()))
+                        .map(|e| crate::transpiler::legacy::expr_dispatch::go_to_rust(e.as_ref()))
                         .unwrap_or_default();
                     let post = for_stmt.post.as_ref()
-                        .map(|e| dispatch::go_to_rust(e.as_ref()))
+                        .map(|e| crate::transpiler::legacy::expr_dispatch::go_to_rust(e.as_ref()))
                         .unwrap_or_default();
                     match init {
                         Some(GoForInit::Double(ident1, ident2, _)) => {
@@ -249,7 +252,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                         Some(GoForInit::Single(ident, init_val)) => {
                             let init_stmt = match init_val {
                                 Some(val) => {
-                                    let init_val_rust = dispatch::go_to_rust(val.as_ref());
+                                    let init_val_rust = crate::transpiler::legacy::expr_dispatch::go_to_rust(val.as_ref());
                                     // When there's a post statement (e.g. `i++`), the init var must be mut
                                     if !post.is_empty() {
                                         quote! { let mut #ident = #init_val_rust; }
@@ -302,7 +305,7 @@ fn go_go_make(raw_args: &str) -> TokenStream {
     if normalized.starts_with("chan ") {
         let chan_args: Vec<&str> = args_str.splitn(2, ',').collect();
         let chan_type_str = chan_args[0].trim().trim_start_matches("chan ").trim();
-        let chan_type = super::types::map_go_type_str(chan_type_str);
+        let chan_type = crate::transpiler::types::map_go_type_str(chan_type_str);
         if chan_args.len() == 2 {
             let cap_str = chan_args[1].trim();
             let cap: TokenStream = parse_quote! { #cap_str };
@@ -315,7 +318,7 @@ fn go_go_make(raw_args: &str) -> TokenStream {
     } else if normalized.starts_with("[]") {
         let slice_args: Vec<&str> = normalized.splitn(2, ',').collect();
         let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
-        let slice_type = super::types::map_go_type_str(slice_type_str);
+        let slice_type = crate::transpiler::types::map_go_type_str(slice_type_str);
         if slice_args.len() == 2 {
             let len_str = slice_args[1].trim();
             let len: TokenStream = parse_quote! { #len_str };
@@ -379,5 +382,25 @@ fn go_stmt_to_rust_map(
     } else {
         let name: syn::Ident = syn::parse_str(ident).unwrap();
         quote! { let #name = #block; }
+    }
+}
+
+/// Transpile Go body tokens (body without outer braces) to a Rust block.
+/// This is used by the HIR receiver function handler to properly transpile
+/// Go-style statements in method bodies.
+pub(crate) fn transpile_go_body(body_tokens: TokenStream) -> Option<proc_macro2::Group> {
+    use crate::transpiler::legacy::stmts::parse_body_from_group;
+    
+    match parse_body_from_group(&body_tokens) {
+        Ok(block) => {
+            let stmts: Vec<_> = block.stmts.iter()
+                .map(|s| go_stmt_to_rust(s))
+                .collect();
+            Some(proc_macro2::Group::new(
+                proc_macro2::Delimiter::Brace,
+                quote! { #(#stmts);* }.into(),
+            ))
+        }
+        Err(_) => None,
     }
 }

@@ -4,11 +4,11 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{BinOp, ExprAssign, ExprBreak, ExprCast, ExprContinue, ExprUnary, UnOp};
 
-use super::dispatch::emit_todo;
+use crate::transpiler::legacy::expr_dispatch::emit_todo;
 
 pub fn transpile_binary(input: &syn::ExprBinary) -> TokenStream {
-    let lhs = super::dispatch::go_to_rust(&input.left);
-    let rhs = super::dispatch::go_to_rust(&input.right);
+    let lhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.left);
+    let rhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.right);
     let lhs_str = quote! { #lhs }.to_string();
     let rhs_str = quote! { #rhs }.to_string();
     match input.op {
@@ -115,7 +115,7 @@ pub fn transpile_binary(input: &syn::ExprBinary) -> TokenStream {
 }
 
 pub fn transpile_unary(input: &ExprUnary) -> TokenStream {
-    let inner = super::dispatch::go_to_rust(&input.expr);
+    let inner = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.expr);
     match &input.op {
         // In Go, `!` has lower precedence than comparison operators.
         // In Rust, `!` has HIGHER precedence. So `!a < b` in Go means
@@ -128,7 +128,7 @@ pub fn transpile_unary(input: &ExprUnary) -> TokenStream {
 }
 
 pub fn transpile_cast(input: &ExprCast) -> TokenStream {
-    let expr = super::dispatch::go_to_rust(&input.expr);
+    let expr = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.expr);
     let ty = &input.ty;
     quote! { #expr as #ty }
 }
@@ -148,8 +148,8 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
                         || map_name.contains("hash") || map_name.contains("result");
                     // Check if the index is a simple path (identifier) — suggests HashMap iteration key
                     let idx_is_simple_path = matches!(&*idx.index, syn::Expr::Path(_));
-                    let key = super::dispatch::go_to_rust(&idx.index);
-                    let rhs = super::dispatch::go_to_rust(&input.right);
+                    let key = crate::transpiler::legacy::expr_dispatch::go_to_rust(&idx.index);
+                    let rhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.right);
                     // Use map_set_mut_ref when iterating over a map (key is already a reference)
                     // Pass key directly; map_set_mut_ref expects &K
                     if is_map_named && idx_is_simple_path {
@@ -171,14 +171,14 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
             }
         }
     }
-    let lhs = super::dispatch::go_to_rust(&input.left);
-    let rhs = super::dispatch::go_to_rust(&input.right);
+    let lhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.left);
+    let rhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.right);
     quote! { #lhs = #rhs }
 }
 
 pub fn transpile_break(input: &ExprBreak) -> TokenStream {
     let label = input.label.as_ref().map(|l| quote! { #l });
-    let expr = input.expr.as_ref().map(|e| super::dispatch::go_to_rust(e));
+    let expr = input.expr.as_ref().map(|e| crate::transpiler::legacy::expr_dispatch::go_to_rust(e));
     match expr {
         Some(e) => quote! { break #label #e },
         None => quote! { break #label },

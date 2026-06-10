@@ -1,0 +1,11 @@
+--- a/gourd-codegen/src/transpiler/hir/conversion.rs
++++ b/gourd-codegen/src/transpiler/hir/conversion.rs
+@@ -2483,7 +2483,9 @@ mod test_std_parsing {
+ 
+     #[test]
+     fn test_parse_quote_std_call() {
+-        let method_name = "copy";
++        let method_name: syn::Ident = syn::parse_str("copy").unwrap();
+         let args_ts: TokenStream = "(dst, src)".parse().unwrap();
+         let full_expr: Expr = syn::parse2(quote! { std :: #method_name #args_ts }).unwrap();
+         match &full_expr {

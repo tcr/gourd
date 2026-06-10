@@ -1,0 +1,24 @@
+
+#[cfg(test)]
+mod std_parsing_test2 {
+    use super::*;
+    use proc_macro2::TokenStream;
+
+    #[test]
+    fn test_std_copy_paren_expr_type() {
+        // Test with actual parentheses like in the test file
+        let code = "std::copy(dst, src)";
+        match syn::parse_str::<Expr>(code) {
+            Ok(expr) => {
+                match &expr {
+                    Expr::Call(_) => println!("→ Expr::Call (with parens)"),
+                    Expr::MethodCall(_) => println!("→ Expr::MethodCall (with parens)"),
+                    _ => println!("→ Other (with parens)"),
+                }
+            }
+            Err(e) => {
+                println!("Parse error: {:?}", e);
+            }
+        }
+    }
+}

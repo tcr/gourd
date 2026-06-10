@@ -2,9 +2,9 @@
 //! Handles: `let` declarations, Go short declarations (`id := expr`),
 //! standard expressions, and `make(...)` calls.
 
-pub(crate) use super::ast::GoStmt;
-use super::expr::go_to_rust;
-use super::types::map_go_type_str;
+pub(crate) use crate::transpiler::hir::ast::GoStmt;
+use crate::transpiler::hir::{go_ast_expr_to_hir, hir_expr_to_rust};
+use crate::transpiler::types::map_go_type_str;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::discouraged::Speculative;
@@ -45,7 +45,7 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                         let ident = input.parse::<syn::Ident>()?;
                         let ident_str = ident.to_string();
                         input.parse::<syn::token::Eq>()?;
-                        return super::slice_map::parse_go_map_decl(input, ident_str, stmts);
+                        return crate::transpiler::slice_map::parse_go_map_decl(input, ident_str, stmts);
                     }
                 }
             }
@@ -70,7 +70,7 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
             if let Ok(first_tt) = map_fork.parse::<proc_macro2::TokenTree>() {
                 if let proc_macro2::TokenTree::Ident(map_kw) = &first_tt {
                     if *map_kw == "map" {
-                        return super::slice_map::parse_go_map_decl(input, ident.to_string(), stmts);
+                        return crate::transpiler::slice_map::parse_go_map_decl(input, ident.to_string(), stmts);
                     }
                 }
             }
@@ -139,7 +139,7 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                         }
                         ts
                     };
-                    let closure_expr = super::free_fn::go_to_rust_closure(closure_tokens);
+                    let closure_expr = crate::transpiler::hir::go_to_rust_closure_hir(closure_tokens);
                     stmts.push(GoStmt::GoLocal(ident, closure_expr));
                     if input.peek(token::Semi) {
                         let _semi: token::Semi = input.parse()?;
@@ -163,6 +163,35 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                     let _semi: token::Semi = input.parse()?;
                 }
                 return Ok(());
+            }
+
+            // Check for std::copy, std::delete, std::append method calls
+            let std_fork = input.fork();
+            // Try to parse the path as `std.copy`
+            if let Ok(path) = std_fork.parse::<syn::Path>() {
+                if path.segments.len() == 2 {
+                    let pkg = path.segments[0].ident.to_string();
+                    let func = path.segments[1].ident.to_string();
+                    if pkg == "std" && matches!(func.as_str(), "copy" | "delete" | "append") {
+                        // Consume the path from main input
+                        let _consumed_path: syn::Path = input.parse()?;
+                        // Now parse the argument list
+                        if input.peek(syn::token::Paren) {
+                            let args_group: proc_macro2::Group = input.parse()?;
+                            // Convert using HIR pipeline - use the original tokens
+                            let args_tokens: proc_macro2::TokenStream = args_group.stream();
+                            // Build the call expression by parsing from tokens
+                            let call_tokens: TokenStream = quote! { #path (#args_tokens) };
+                            let full_expr: Expr = syn::parse2(call_tokens).unwrap();
+                            let val_rust = hir_expr_to_rust(&go_ast_expr_to_hir(&full_expr));
+                            stmts.push(GoStmt::GoLocal(ident, val_rust));
+                            if input.peek(token::Semi) {
+                                let _semi: token::Semi = input.parse()?;
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
             }
 
             // Check for slice literal `[]T{...}` in short declarations
@@ -196,7 +225,7 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
                             break;
                         }
                     }
-                    let rust_elems: Vec<_> = elems.iter().map(|e| go_to_rust(e)).collect();
+                    let rust_elems: Vec<_> = elems.iter().map(|e| hir_expr_to_rust(&go_ast_expr_to_hir(e))).collect();
                     let slice_rust: TokenStream = parse_quote! { vec![ #(#rust_elems),* ] };
                     stmts.push(GoStmt::GoLocal(ident, slice_rust));
                     if input.peek(token::Semi) {
@@ -207,7 +236,7 @@ pub(crate) fn parse_base_stmt(input: syn::parse::ParseStream, stmts: &mut Vec<Go
             }
 
             let val: Expr = input.parse()?;
-            let val_rust = go_to_rust(&val);
+            let val_rust = hir_expr_to_rust(&go_ast_expr_to_hir(&val));
             stmts.push(GoStmt::GoLocal(ident, val_rust));
             if input.peek(token::Semi) {
                 let _semi: token::Semi = input.parse()?;

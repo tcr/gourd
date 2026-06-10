@@ -119,6 +119,7 @@ pub enum HirExprKind {
     // Closure expression
     Closure {
         params: Vec<(syn::Ident, Option<Box<HirType>>)>,
+        returns: Vec<Box<HirType>>,
         body: HirBlock,
     },
 
@@ -139,10 +140,18 @@ pub enum HirExprKind {
         dst: Box<HirExpr>,
         src: Box<HirExpr>,
     },
+    /// Standard library function call with reference wrapping: `std::copy(dst, src)` → `std_copy(&mut dst, &src)`
+    StdCall {
+        func_name: String,
+        args: Vec<HirExpr>,
+    },
     /// Full path expression: `::gourd::prelude::fields` or `strings.Join`
     Path(HirPath),
     /// Macro invocation: `vec![...]`, `format!(...)`
     Macro(proc_macro2::TokenStream),
+    /// Go `new(Foo)` builtin → `Foo::default()`
+    New(Box<HirExpr>),
+
     /// Unsupported/placeholder — represents a Go construct that the HIR
     /// does not yet support. Used during development for gradual integration.
     Unsupported(String),
@@ -150,6 +159,11 @@ pub enum HirExprKind {
     SliceLiteral(Vec<HirExpr>),
     /// Map literal: `map[K]V{key1: val1, key2: val2, ...}`
     Map(Vec<(Box<HirExpr>, Box<HirExpr>)>),
+    /// Struct literal: `StructName{field1: val1, field2: val2}`
+    StructLit {
+        name: syn::Path,
+        fields: Vec<(syn::Ident, Box<HirExpr>)>,
+    },
     /// Channel send: `ch <- value`
     ChannelSend {
         channel: Box<HirExpr>,
@@ -168,15 +182,27 @@ pub enum HirExprKind {
     /// Match expression: `match selector { arm1, arm2, ... }`
     Match {
         selector: Box<HirExpr>,
-        arms: Vec<(Box<HirExpr>, HirBlock)>,
+        arms: Vec<(Vec<Box<HirExpr>>, HirBlock)>,
         default_body: Option<HirBlock>,
+    },
+    /// min/max calls: `min(a, b)` → `std::cmp::min(a, b)`, `max(a, b)` → `std::cmp::max(a, b)`
+    MinMax {
+        kind: String,  // "min" or "max"
+        values: Vec<Box<HirExpr>>,
+    },
+    /// panic("message") → panic!("message")
+    Panic(String),
+    /// delete(map, key) → HashMap::remove(key)
+    Delete {
+        map: Box<HirExpr>,
+        key: Box<HirExpr>,
     },
 }
 
 /// A HIR literal value.
 #[derive(Debug, Clone)]
 pub enum HirLiteral {
-    Int(i64),
+    Int(u64),
     Float(f64),
     Bool(bool),
     StringTy(String),
@@ -219,6 +245,9 @@ pub enum HirBinaryOp {
     ModAssign,
     AndAssign,
     OrAssign,
+    XorAssign,
+    LshAssign,
+    RshAssign,
 }
 
 /// Unary operators in HIR.
@@ -286,7 +315,7 @@ impl HirLiteral {
     }
 
     /// Get the integer value if this is an int literal.
-    pub fn as_int(&self) -> Option<i64> {
+    pub fn as_int(&self) -> Option<u64> {
         match self {
             HirLiteral::Int(n) => Some(*n),
             _ => None,

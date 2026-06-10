@@ -211,13 +211,23 @@ fn parse_block(trees: &[TokenTree]) -> GoBlock {
 
 /// Convert a Go closure to Rust closure tokens.
 pub(crate) fn closure_to_rust(closure: &GoClosure) -> TokenStream {
-    use super::super::types::map_go_types;
-    use super::dispatch::go_to_rust;
+    use crate::transpiler::types::map_go_types;
+    use crate::transpiler::legacy::expr_dispatch::go_to_rust;
 
-    // Build closure parameters
+    // Build closure parameters — convert slice types to &[T] for params
     let rust_params: Vec<TokenStream> = closure.params.iter().map(|p| {
         let id = &p.id;
-        let ty = map_go_types(&p.ty);
+        let mut ty = map_go_types(&p.ty);
+        // Convert Go []T → Rust &[T] for closure params
+        if let syn::Type::Slice(slice) = &ty {
+            let elem = map_go_types(&slice.elem);
+            ty = syn::Type::Reference(syn::TypeReference {
+                and_token: Default::default(),
+                lifetime: None,
+                mutability: None,
+                elem: Box::new(elem),
+            });
+        }
         quote! { #id: #ty }
     }).collect();
 

@@ -6,21 +6,21 @@ use gourd_macro::go;
 
 // Test: append a single item
 go! {
-    func goAppendItem() Vec<i32> {
+    func goAppendItem() []int {
         return append([]int{1, 2, 3}, 4)
     }
 }
 
 // Test: append multiple items
 go! {
-    func goAppendMultiple() Vec<i32> {
+    func goAppendMultiple() []int {
         return append([]int{1}, 2, 3, 4)
     }
 }
 
 // Test: append with no items (no-op)
 go! {
-    func goAppendNoop() Vec<i32> {
+    func goAppendNoop() []int {
         return append([]int{1, 2})
     }
 }

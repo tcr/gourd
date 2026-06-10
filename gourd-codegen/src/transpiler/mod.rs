@@ -1,22 +1,42 @@
-pub mod ast;
-pub mod base_stmts;
-pub mod control_flow;
-pub mod expr;
-pub mod hir;
-pub mod free_fn;
-pub mod funcs;
-pub mod params;
-pub mod parsing;
-pub mod receiver;
-pub mod return_stmts;
-pub mod stmt_to_rust;
-pub mod stmts;
-pub mod slice_map;
-pub mod switch;
-pub mod types;
+//! Go → Rust transpiler module.
+//!
+//! This module contains the core transpilation logic:
+//! - `hir/` — High-level intermediate representation (preferred path)
+//! - `legacy/` — Legacy transition layer for low-level primitives
+//! - Supporting utilities: types, slice_map, parsing, free_fn
 
-// Re-export the public API
-#[allow(unused_imports)]
-pub use free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_fn_hir, go_to_rust_struct, go_to_rust_switch};
-#[allow(unused_imports)]
-pub use funcs::go_to_rust_receiver_fn;
+// Type mapping utilities (used by legacy transpilation primitives)
+pub(crate) mod types;
+
+// Function parameter parsing
+pub(crate) mod params;
+
+// Map/slice literal parsing (used by legacy transpilation primitives)
+pub(crate) mod slice_map;
+
+// Statement parsing and type declarations
+pub(crate) mod parsing;
+
+// Receiver function parsing
+pub(crate) mod receiver;
+
+// Top-level declarations (free functions, structs, interfaces)
+pub(crate) mod free_fn;
+
+// HIR module (preferred path for new code)
+pub mod hir;
+
+// Transition layer — old code kept as compatibility for the HIR pipeline
+pub(crate) mod legacy;
+
+// Compatibility exports (for code that still references old module names)
+pub(crate) use crate::transpiler::legacy::base_stmts;
+pub(crate) use crate::transpiler::legacy::control_flow;
+pub(crate) use crate::transpiler::legacy::stmt_to_rust;
+pub(crate) use crate::transpiler::legacy::expr_dispatch as expr;
+
+// Compatibility re-exports for code that still needs legacy-style names
+pub(crate) use crate::transpiler::hir::ast::{GoBlock, GoFn, GoFnInputs, GoFnOutput, GoIf, GoInterface, GoInterfaceMethod, GoParam, GoSelect, GoSelectCase, GoStmt, GoStruct, GoStructField, Switch, SwitchCase};
+
+// Re-export HIR public API only
+pub use crate::transpiler::hir::*;

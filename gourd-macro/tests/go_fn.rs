@@ -8,7 +8,7 @@ use gourd_macro::{go, verify_rust_output};
 })]
 go! {
     func goAdd() int {
-        return 42
+        return 42;
     }
 }
 
@@ -20,7 +20,7 @@ go! {
 })]
 go! {
     func goSum(a int, b int) int {
-        return a + b
+        return a + b;
     }
 }
 
@@ -28,9 +28,7 @@ go! {
 // ── Control flow: if statements ──────────────────────────────────────
 
 #[verify_rust_output({fn goAbs(n: i32) -> i32 {
-        let mut ret = n; ;
-        if n < 0 { ret = -ret } ;
-        return ret
+        let mut ret = n ; ; if n < 0 { ret = - ret } ; return ret
     }})]
 go! {
     func goAbs(n int) int {
@@ -277,7 +275,7 @@ fn test_error_signature_check() {
 // ── Slice literals inside go! function bodies ────────────────────
 
 #[verify_rust_output({fn goSliceLiteral() -> Vec<i32> {
-        return vec![1, 2, 3]
+        return vec ! [ 1 , 2 , 3 ]
     }})]
 go! {
     func goSliceLiteral() []int {

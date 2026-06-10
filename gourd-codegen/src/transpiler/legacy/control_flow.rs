@@ -1,7 +1,7 @@
 //! Control flow parsing: `if`, `for`, `while`.
 
-use super::ast::{GoBlock, GoFor, GoForInit, GoIf, GoStmt, GoWhile};
-use super::base_stmts::parse_base_stmt;
+use crate::transpiler::hir::ast::{GoBlock, GoFor, GoForInit, GoIf, GoStmt, GoWhile};
+use crate::transpiler::legacy::base_stmts::parse_base_stmt;
 use syn::ext::IdentExt;
 use syn::parse::{ParseStream, discouraged::Speculative};
 use syn::{parse_quote, Expr};

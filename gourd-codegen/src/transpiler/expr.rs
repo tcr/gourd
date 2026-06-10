@@ -1,25 +1,11 @@
-//! Expression-level Go → Rust transpilation.
+//! Expression-level Go → Rust transpilation (legacy transition).
 //!
-//! Converts `syn::Expr` AST nodes into `TokenStream` fragments via
-//! recursive descent. Each `Expr` variant has a corresponding
-//! `transpile_*` handler.
-//!
-//! Module layout:
-//! - `dispatch.rs` — `go_to_rust()`, `go_to_rust_pattern()`, `emit_todo()`
-//! - `literals.rs` — `Lit`, `Path`, `Paren`, `Array`, `Verbatim`
-//! - `operators.rs` — `Binary`, `Unary`, `Cast`, `Assign`, `Break`
-//! - `calls.rs` — `Call`, `MethodCall`, `Field`, `Index`, `Macro`
-//! - `control_flow.rs` — `Let`, `Tuple`, `Return`, `Loop`, `ForLoop`,
-//!   `While`, `Range`, `If`, `Block`
-//! - `closures.rs` — Go anonymous functions (`func(...) { ... }`) → Rust closures
+//! Re-exports from legacy module for compatibility.
 
-pub mod calls;
-pub mod closures;
-pub mod control_flow;
-pub mod dispatch;
-pub mod literals;
-pub mod operators;
-pub mod structs;
-
-// Re-export the public entry points
-pub use dispatch::{go_to_rust, go_to_rust_pattern};
+pub(crate) use super::legacy::expr_dispatch::{go_to_rust, go_to_rust_pattern};
+pub(crate) use super::legacy::expr_calls;
+pub(crate) use super::legacy::expr_closures;
+pub(crate) use super::legacy::expr_control_flow;
+pub(crate) use super::legacy::expr_literals;
+pub(crate) use super::legacy::expr_operators;
+pub(crate) use super::legacy::expr_structs;

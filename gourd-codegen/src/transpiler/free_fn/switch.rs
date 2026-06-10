@@ -3,7 +3,9 @@
 //! Converts Go switch statements to Rust `match` expressions or
 //! if-else chains (when no selector is present).
 
-use super::super::parsing::{go_stmt_to_rust, Switch};
+use crate::transpiler::legacy::stmt_to_rust::go_stmt_to_rust;
+use crate::transpiler::legacy::expr_dispatch::{go_to_rust, go_to_rust_pattern};
+use crate::transpiler::hir::ast::Switch;
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -33,7 +35,7 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
         }
 
         // Case expressions become match patterns (string literals stay as &str)
-        let pattern: Vec<_> = case.exprs.iter().map(|e| crate::transpiler::expr::go_to_rust_pattern(e)).collect();
+        let pattern: Vec<_> = case.exprs.iter().map(|e| go_to_rust_pattern(e)).collect();
         let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
 
         // Single or multi-expression case
@@ -62,7 +64,7 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
         // Handle the first case as the initial `if` (no `else` prefix)
         if !switch.cases.is_empty() {
             let first_case = &switch.cases[0];
-            let first_conds: Vec<_> = first_case.exprs.iter().map(|e| crate::transpiler::expr::go_to_rust(e)).collect();
+            let first_conds: Vec<_> = first_case.exprs.iter().map(|e| go_to_rust(e)).collect();
             let first_body: Vec<_> = first_case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
             let mut chain = quote! { if #(#first_conds)&&* { #(#first_body);* } };
 
@@ -71,7 +73,7 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
                 if case.exprs.is_empty() {
                     continue;
                 }
-                let conds: Vec<_> = case.exprs.iter().map(|e| crate::transpiler::expr::go_to_rust(e)).collect();
+                let conds: Vec<_> = case.exprs.iter().map(|e| go_to_rust(e)).collect();
                 let body: Vec<_> = case.stmts.iter().map(|s| go_stmt_to_rust(s)).collect();
                 chain.extend(quote! { else if #(#conds)&&* { #(#body);* } });
             }
@@ -98,7 +100,7 @@ pub fn transpile_switch(switch: &Switch) -> TokenStream {
     } else {
         // Build selector
         let selector = switch.selector.as_ref()
-            .map(|s| crate::transpiler::expr::go_to_rust(s))
+            .map(|s| go_to_rust(s))
             .unwrap_or_else(|| quote! { () });
 
         crate::debug_println!("DEBUG: transpile_switch - arms before quote:");

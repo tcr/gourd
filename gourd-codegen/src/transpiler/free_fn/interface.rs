@@ -2,9 +2,11 @@
 //!
 //! Converts Go interface declarations to Rust trait declarations.
 
-use super::super::parsing::{GoInterface};
+use crate::transpiler::parsing::GoInterface;
 use super::super::types::map_go_types;
 use super::util::to_snake_case;
+use crate::transpiler::hir::types::parse_go_interface;
+use crate::transpiler::hir::HirTypeKind;
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -70,5 +72,24 @@ pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
             }
         }
         Err(e) => e.to_compile_error(),
+    }
+}
+
+/// HIR-based interface transpilation.
+///
+/// Parses the Go interface declaration directly into HIR types, bypassing the Go AST.
+pub fn go_to_rust_interface_hir(input: TokenStream) -> TokenStream {
+    let hir_type = match parse_go_interface(input) {
+        Some(ty) => ty,
+        None => {
+            return quote! { compile_error!("Failed to parse Go interface") };
+        }
+    };
+
+    match &hir_type.kind {
+        HirTypeKind::Interface { name, methods } => {
+            crate::transpiler::hir::codegen::hir_interface_to_rust(name, methods)
+        }
+        _ => quote! { compile_error!("Expected interface type in HIR") },
     }
 }

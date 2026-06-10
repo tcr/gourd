@@ -3,9 +3,11 @@
 //! Converts parsed `ReceiverFn` AST into Rust `impl` block tokens.
 
 use super::receiver::replace_receiver;
-use super::super::expr::go_to_rust;
+use crate::transpiler::legacy::expr_dispatch::go_to_rust;
 use super::super::receiver::{Receiver, ReceiverFn};
 use super::super::types::map_go_types;
+use super::super::hir::types::parse_go_receiver_fn;
+use super::super::hir::codegen::hir_receiver_fn_to_rust;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
@@ -91,5 +93,16 @@ pub fn go_to_rust_receiver_fn(input: TokenStream) -> TokenStream {
         Err(e) => {
             e.to_compile_error()
         }
+    }
+}
+
+/// HIR-based receiver function transpilation.
+///
+/// Parses the Go receiver function declaration directly into HIR types,
+/// bypassing the Go AST. Then generates Rust impl block tokens.
+pub fn go_to_rust_receiver_fn_hir(input: TokenStream) -> TokenStream {
+    match parse_go_receiver_fn(input) {
+        Some(rf) => hir_receiver_fn_to_rust(&rf),
+        None => quote! { compile_error!("Failed to parse Go receiver function") },
     }
 }

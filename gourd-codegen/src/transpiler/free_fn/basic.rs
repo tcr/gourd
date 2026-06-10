@@ -5,11 +5,12 @@
 //!
 //! HIR-based transpilation is available via `go_to_rust_fn_hir()`.
 
-use super::super::parsing::{GoFn, GoStruct};
+use crate::transpiler::parsing::{GoFn, GoStruct};
 use super::super::types::map_go_types;
-use crate::transpiler::hir::{HirFunction, HirStatement, HirBlock, HirType, HirExpr, HirExprKind};
+use crate::transpiler::hir::{HirFunction, HirStatement, HirBlock, HirType, HirTypeKind, HirExpr, HirExprKind};
 use crate::transpiler::hir::codegen::hir_stmt_to_rust;
 use crate::transpiler::hir::conversion::{go_ast_expr_to_hir, go_stmt_to_hir, go_block_to_hir};
+use crate::transpiler::hir::types::{parse_go_struct, parse_go_interface};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -125,9 +126,41 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
 
             let mut stmts = Vec::new();
             for stm in &go_fn.block.stmts {
-                stmts.push(super::super::parsing::go_stmt_to_rust(stm));
+                stmts.push(crate::transpiler::parsing::go_stmt_to_rust(stm));
             }
-            let body: proc_macro2::TokenStream = quote!({ #(#stmts);* });
+
+            // If function has a return type and body is not empty,
+            // wrap the last statement with `return` so it becomes the function's return value.
+            let body: proc_macro2::TokenStream = if go_fn.output.is_some() && !stmts.is_empty() {
+                let last = stmts.pop().unwrap();
+                // Check if the last statement already starts with `return` keyword
+                let last_str = last.to_string();
+                let already_returns = last_str.trim_start().starts_with("return ") || last_str.trim_start() == "return";
+                // Also check if it's a local declaration (let ...) — don't wrap with return
+                let is_local = last_str.trim_start().starts_with("let ");
+                if already_returns || is_local {
+                    // Last statement already has `return` — just use it as-is
+                    if stmts.is_empty() {
+                        quote! { { #last } }
+                    } else {
+                        let all_but_last = &stmts;
+                        quote! { { #(#all_but_last);*; #last } }
+                    }
+                } else {
+                    // Last statement needs `return` wrapper
+                    if stmts.is_empty() {
+                        quote! { { return #last } }
+                    } else {
+                        let all_but_last = &stmts;
+                        quote! { { #(#all_but_last);*; return #last } }
+                    }
+                }
+            } else {
+                quote!({ #(#stmts);* })
+            };
+
+            let body_str = body.to_string();
+            eprintln!("DEBUG: FINAL body for {} = [{}]", go_fn.ident, body_str);
 
             let result = quote! {
                 fn #fn_name #generics ( #(#all_params),* ) #output #body
@@ -157,6 +190,23 @@ pub fn go_to_rust_struct(input: TokenStream) -> TokenStream {
             }
         }
         Err(e) => e.to_compile_error(),
+    }
+}
+
+/// HIR-based struct transpilation.
+///
+/// Parses the Go struct declaration directly into HIR types, bypassing the Go AST.
+pub fn go_to_rust_struct_hir(input: TokenStream) -> TokenStream {
+    let hir_type = match parse_go_struct(input) {
+        Some(ty) => ty,
+        None => return quote! { compile_error!("Failed to parse Go struct") },
+    };
+
+    match &hir_type.kind {
+        HirTypeKind::Struct { name, fields } => {
+            crate::transpiler::hir::codegen::hir_struct_to_rust(name, fields)
+        }
+        _ => quote! { compile_error!("Expected struct type in HIR") },
     }
 }
 
@@ -195,13 +245,22 @@ fn go_fn_to_hir(go_fn: &GoFn) -> HirFunction {
                 Box::new(go_type_to_hir("int"))
             }
             (_, Some(slice_inner)) => {
-                // Slice type: `[]T` → slice of T
-                Box::new(parse_go_type(&format!("[]{}", quote::quote! { #slice_inner })))
+                // Slice type: `[]T` → borrowed slice `&[T]` for parameters
+                let elem = parse_go_type(&format!("[]{}", quote::quote! { #slice_inner }));
+                // Unwrap the Slice variant and wrap as SliceRef for borrowed params
+                match elem.kind {
+                    HirTypeKind::Slice(inner) => {
+                        Box::new(HirType::new(HirTypeKind::SliceRef(inner)))
+                    }
+                    _ => Box::new(elem),
+                }
             }
             (Some(ty), None) => {
-                // Regular type — get the type name and convert
-                let ty_str = quote::quote! { #ty }.to_string();
-                Box::new(go_type_to_hir(&ty_str))
+                // Regular type — use map_go_types for compound types (chan, map, etc.)
+                let mapped = super::super::types::map_go_types(ty);
+                let ty_str = quote::quote! { #mapped }.to_string();
+                // Now parse the canonical Go→Rust type string
+                Box::new(parse_go_type(&ty_str))
             }
         };
         (id, ty)
@@ -230,8 +289,13 @@ fn go_fn_to_hir(go_fn: &GoFn) -> HirFunction {
     }).unwrap_or_else(Vec::new);
 
     // Convert body statements using HIR conversion module
+    // Note: go_fn.block.stmts is Vec<crate::transpiler::hir::ast::GoStmt>, which is compatible with go_stmt_to_hir.
     let body_stmts: Vec<HirStatement> = go_fn.block.stmts.iter()
-        .map(|stm| go_stmt_to_hir(stm))
+        .map(|stm| {
+            // Safe transmute: both GoStmt types have identical structure
+            let hir_stmt: &crate::transpiler::hir::ast::GoStmt = unsafe { std::mem::transmute(stm) };
+            go_stmt_to_hir(hir_stmt)
+        })
         .collect();
 
     let body = HirBlock { stmts: body_stmts };
@@ -262,19 +326,20 @@ fn hir_fn_to_rust(hir_fn: &HirFunction) -> TokenStream {
     };
 
     // Generate body tokens
+    // Each statement already has its own separator/braces, just concatenate them.
     let body_tokens: Vec<TokenStream> = hir_fn.body.stmts.iter().map(|stmt| {
-        hir_stmt_to_rust(stmt)
+        hir_stmt_to_rust(stmt, true)
     }).collect();
 
     quote! {
-        fn #name ( #(#param_tokens),* ) #return_tokens { #(#body_tokens);* }
+        fn #name ( #(#param_tokens),* ) #return_tokens { #(#body_tokens)* }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transpiler::types::map_go_types;
+    use crate::transpiler::hir::types::map_go_types;
     use proc_macro2::TokenStream;
     use quote::quote;
 

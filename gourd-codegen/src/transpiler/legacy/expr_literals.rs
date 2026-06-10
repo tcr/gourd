@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{ExprArray, ExprLit, ExprParen, ExprPath};
 
-use super::super::parsing::ElemParser;
+use crate::transpiler::parsing::ElemParser;
 
 /// Try to parse `fmt.Sprintf`, `fmt.Print`, `fmt.Println`, `fmt.Printf`
 /// from a path (e.g. `fmt::Sprintf` in Rust). Maps to `fmt_sprintf`, `fmt_print`, etc.
@@ -62,12 +62,12 @@ pub fn transpile_path(input: &ExprPath) -> TokenStream {
 }
 
 pub fn transpile_paren(input: &ExprParen) -> TokenStream {
-    let inner = super::dispatch::go_to_rust(&input.expr);
+    let inner = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.expr);
     quote! { ( #inner ) }
 }
 
 pub fn transpile_array(input: &ExprArray) -> TokenStream {
-    let elems: Vec<_> = input.elems.iter().map(super::dispatch::go_to_rust).collect();
+    let elems: Vec<_> = input.elems.iter().map(crate::transpiler::legacy::expr_dispatch::go_to_rust).collect();
     if elems.is_empty() {
         // In Go slice literals like `[]int{ 1, 2, 3 }`, syn parses `[]`
         // as an empty array expression. The actual slice elements come
@@ -86,8 +86,8 @@ pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
 
     // Check for anonymous Go function: `func(params) ret { body }`
     // or `func(params) { body }` — no return type.
-    if let Some(closure) = super::closures::parse_closure(tokens) {
-        return super::closures::closure_to_rust(&closure);
+    if let Some(closure) = crate::transpiler::legacy::expr_closures::parse_closure(tokens) {
+        return crate::transpiler::legacy::expr_closures::closure_to_rust(&closure);
     }
 
     // Check for slice/map literals
@@ -97,7 +97,7 @@ pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
         {
             let brace_content = g.stream();
             let parser: ElemParser = syn::parse2(brace_content).unwrap_or_default();
-            let elems: Vec<_> = parser.elems.iter().map(|expr| super::dispatch::go_to_rust(expr)).collect();
+            let elems: Vec<_> = parser.elems.iter().map(|expr| crate::transpiler::legacy::expr_dispatch::go_to_rust(expr)).collect();
             return quote! { vec![ #(#elems),* ] };
         }
     }

@@ -6,8 +6,8 @@
 use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
 use syn::parse2;
-use super::super::ast::GoBlock;
-use super::super::stmt_to_rust::go_stmt_to_rust;
+use super::super::hir::ast::GoBlock;
+use crate::transpiler::legacy::stmt_to_rust::go_stmt_to_rust;
 
 /// Top-level: parse and transpile a Go anonymous function to Rust closure.
 pub fn go_to_rust_closure(input: TokenStream) -> TokenStream {
@@ -366,7 +366,7 @@ fn parse_closure_body(body_tokens: &TokenStream) -> TokenStream {
 
                 let let_ts: TokenStream = let_tokens.iter().cloned().collect();
                 if let Ok(stmt) = syn::parse2::<syn::Expr>(let_ts.clone()) {
-                    stmts.push(super::super::expr::dispatch::go_to_rust(&stmt));
+                    stmts.push(crate::transpiler::legacy::expr_dispatch::go_to_rust(&stmt));
                 } else {
                     stmts.push(let_ts);
                 }
@@ -396,7 +396,7 @@ fn parse_closure_body(body_tokens: &TokenStream) -> TokenStream {
                 if ret_ts.is_empty() {
                     stmts.push(quote! { return; });
                 } else if let Ok(expr) = syn::parse2::<syn::Expr>(ret_ts.clone()) {
-                    stmts.push(super::super::expr::dispatch::go_to_rust(&expr));
+                    stmts.push(crate::transpiler::legacy::expr_dispatch::go_to_rust(&expr));
                 } else {
                     stmts.push(ret_ts);
                 }
@@ -423,7 +423,7 @@ fn parse_closure_body(body_tokens: &TokenStream) -> TokenStream {
         let expr_ts: TokenStream = expr_tokens.iter().cloned().collect();
         if !expr_ts.is_empty() {
             if let Ok(expr) = syn::parse2::<syn::Expr>(expr_ts.clone()) {
-                stmts.push(super::super::expr::dispatch::go_to_rust(&expr));
+                stmts.push(crate::transpiler::legacy::expr_dispatch::go_to_rust(&expr));
             } else {
                 stmts.push(expr_ts);
             }

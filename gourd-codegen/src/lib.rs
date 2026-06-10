@@ -21,8 +21,12 @@ mod validate;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-pub use transpiler::free_fn::{go_to_rust_closure, go_to_rust_fn, go_to_rust_interface, go_to_rust_select, go_to_rust_struct, go_to_rust_switch, go_to_rust_fn_hir};
-pub use transpiler::funcs::go_to_rust_receiver_fn;
+// All handlers moved to HIR module (deprecated legacy kept as fallbacks)
+use transpiler::hir::{go_to_rust_fn_hir, go_to_rust_struct_hir, go_to_rust_interface_hir, go_to_rust_receiver_fn_hir};
+use transpiler::hir::go_to_rust_closure_hir;
+use transpiler::hir::go_to_rust_select_hir;
+use transpiler::hir::go_to_rust_switch_hir;
+use transpiler::free_fn::{go_to_rust_fn, go_to_rust_struct};
 pub use validate::{validate_go, validate_rust};
 pub use debug::enabled;
 
@@ -64,30 +68,39 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                 let first_name = first_ident.to_string();
                 match first_name.as_str() {
                     "interface" => {
-                        result.extend(go_to_rust_interface(subtree(&trees, i, false)));
+                        let sub = subtree(&trees, i, true);
+                        result.extend(go_to_rust_interface_hir(sub));
                         i = skip_declaration(&trees, i);
                     }
                     "type" | "struct" => {
-                        result.extend(go_to_rust_struct(subtree(&trees, i, true)));
+                        result.extend(go_to_rust_struct_hir(subtree(&trees, i, true)));
                         i = skip_declaration(&trees, i);
                     }
                     "switch" => {
                         // switch is a statement, not a declaration — treat as function body
-                        result.extend(go_to_rust_switch(subtree(&trees, i, false)));
+                        result.extend(go_to_rust_switch_hir(subtree(&trees, i, false)));
                         i = skip_declaration(&trees, i);
                     }
                     "func" | "fn" => {
                         // Check if it's a receiver function, closure, or free function
-                        eprintln!("[transpile_go] func at i={}, next={:?}", i, trees.get(i + 1));
                         if let Some(proc_macro2::TokenTree::Group(g)) = trees.get(i + 1) {
                             if g.delimiter() == proc_macro2::Delimiter::Parenthesis {
                                 // Could be a receiver function OR a closure.
                                 // Receiver: `func (recv Type) name(params) { body }`
-                                // Closure: `func(params) { body }`
-                                if let Some(proc_macro2::TokenTree::Ident(_)) = trees.get(i + 2) {
-                                    result.extend(go_to_rust_receiver_fn(subtree(&trees, i, true)));
+                                // Closure: `func(params) { body }` or `func(params) ret_type { body }`
+                                // Distinguish by checking if there's a second paren group after the identifier:
+                                // Receiver: func (recv) name(params) → has Ident + Paren
+                                // Closure:  func(params) int → has Ident but no second Paren
+                                let has_receiver = if let Some(proc_macro2::TokenTree::Ident(_)) = trees.get(i + 2) {
+                                    // Check if next token (i+3) is a parenthesis group (the params)
+                                    matches!(trees.get(i + 3), Some(proc_macro2::TokenTree::Group(g)) if g.delimiter() == proc_macro2::Delimiter::Parenthesis)
                                 } else {
-                                    result.extend(go_to_rust_closure(subtree(&trees, i, true)));
+                                    false
+                                };
+                                if has_receiver {
+                                    result.extend(go_to_rust_receiver_fn_hir(subtree(&trees, i, true)));
+                                } else {
+                                    result.extend(go_to_rust_closure_hir(subtree(&trees, i, true)));
                                 }
                                 i = skip_declaration(&trees, i);
                             } else {
@@ -95,23 +108,105 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                                 i = skip_declaration(&trees, i);
                             }
                         } else {
+                            // Edge case: `func` with no paren group — use legacy handler
                             let ts = go_to_rust_fn(subtree(&trees, i, true));
-                            eprintln!("[transpile_go] go_to_rust_fn result (non-group): {}", ts);
                             result.extend(ts);
                             i = skip_declaration(&trees, i);
                         }
                     }
                     "chan" => {
-                        result.extend(go_to_rust_channel(subtree(&trees, i, false)));
+                        // Inline channel declaration: `chan T` → `GoChannel::<T>::new()`
+                        let trees_vec: Vec<proc_macro2::TokenTree> = subtree(&trees, i, false).into_iter().collect();
+                        for tree in trees_vec.iter().skip(1) {
+                            match tree {
+                                proc_macro2::TokenTree::Ident(ty_ident) => {
+                                    let type_name = ty_ident.to_string();
+                                    let mapped_type = match type_name.as_str() {
+                                        "int" => quote! { i32 },
+                                        "int8" => quote! { i8 },
+                                        "int16" => quote! { i16 },
+                                        "int32" => quote! { i32 },
+                                        "int64" => quote! { i64 },
+                                        "uint" => quote! { u32 },
+                                        "uint8" => quote! { u8 },
+                                        "uint16" => quote! { u16 },
+                                        "uint32" => quote! { u32 },
+                                        "uint64" => quote! { u64 },
+                                        "uintptr" => quote! { usize },
+                                        "byte" => quote! { u8 },
+                                        "rune" => quote! { char },
+                                        "float32" => quote! { f32 },
+                                        "float64" => quote! { f64 },
+                                        "bool" => quote! { bool },
+                                        "string" => quote! { String },
+                                        "error" => quote! { Box<dyn std::error::Error> },
+                                        other => quote! { #other },
+                                    };
+                                    result.extend(quote! { GoChannel::<#mapped_type>::new() });
+                                    break;
+                                }
+                                proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Bracket => {
+                                    let inner: TokenStream = g.stream();
+                                    let mapped_inner = match inner.to_string().as_str() {
+                                        "int" => quote! { Vec<i32> },
+                                        "string" => quote! { Vec<String> },
+                                        "bool" => quote! { Vec<bool> },
+                                        _ => quote! { Vec<#inner> },
+                                    };
+                                    result.extend(quote! { GoChannel::<#mapped_inner>::new() });
+                                    break;
+                                }
+                                _ => continue,
+                            }
+                        }
                         i = skip_declaration(&trees, i);
                     }
                     "select" => {
-                        result.extend(go_to_rust_select(subtree(&trees, i, false)));
+                        result.extend(go_to_rust_select_hir(subtree(&trees, i, false)));
                         i = skip_declaration(&trees, i);
                     }
                     "import" => {
-                        result.extend(go_to_rust_import(subtree(&trees, i, false)));
-                        i = skip_declaration(&trees, i);
+                        // Check if it's a grouped import: import (...)
+                        let rest = &trees[i + 1..];
+                        let is_grouped = !rest.is_empty()
+                            && matches!(&rest[0], proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
+                        if is_grouped {
+                            // Parse grouped imports: import ("strings", "fmt", ...)
+                            if let proc_macro2::TokenTree::Group(g) = &rest[0] {
+                                for tt in g.stream() {
+                                    if let proc_macro2::TokenTree::Literal(lit) = tt {
+                                        let pkg_name = lit.to_string().trim_matches('"').to_string();
+                                        match pkg_name.as_str() {
+                                            "strings" => result.extend(quote! { use gourd::packages::strings::*; }),
+                                            "os" => result.extend(quote! { use gourd::packages::os::*; }),
+                                            "time" => result.extend(quote! { use gourd::packages::time::*; }),
+                                            "io" => result.extend(quote! { use gourd::packages::io::*; }),
+                                            "bytes" => result.extend(quote! { use gourd::packages::bytes::*; }),
+                                            "json" => result.extend(quote! { use gourd::packages::json::*; }),
+                                            "math" => result.extend(quote! { use gourd::packages::math::*; }),
+                                            "byte" => result.extend(quote! { use gourd::packages::byte::*; }),
+                                            "fmt" => result.extend(quote! { use gourd::prelude::*; }),
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                i = skip_declaration(&trees, i);
+                            }
+                        } else {
+                            // Non-grouped import: `import "fmt"` → inline use statement
+                            if trees.len() > i + 1 {
+                                match &trees[i + 1] {
+                                    proc_macro2::TokenTree::Ident(pkg) => {
+                                        handle_import_package(&pkg.to_string(), &mut result);
+                                    }
+                                    proc_macro2::TokenTree::Literal(lit) => {
+                                        handle_import_package(&lit.to_string().trim_matches('"'), &mut result);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            i = skip_declaration(&trees, i);
+                        }
                     }
                     _ => {
                         // Unknown top-level token — skip it
@@ -228,6 +323,22 @@ fn subtree(trees: &[proc_macro2::TokenTree], start: usize, include_body: bool) -
     result
 }
 
+/// Handle a single import package name, emitting the appropriate `use` statement.
+fn handle_import_package(pkg_name: &str, result: &mut TokenStream) {
+    match pkg_name.trim_matches('"') {
+        "strings" => result.extend(quote! { use gourd::packages::strings::*; }),
+        "os" => result.extend(quote! { use gourd::packages::os::*; }),
+        "time" => result.extend(quote! { use gourd::packages::time::*; }),
+        "io" => result.extend(quote! { use gourd::packages::io::*; }),
+        "bytes" => result.extend(quote! { use gourd::packages::bytes::*; }),
+        "json" => result.extend(quote! { use gourd::packages::json::*; }),
+        "math" => result.extend(quote! { use gourd::packages::math::*; }),
+        "byte" => result.extend(quote! { use gourd::packages::byte::*; }),
+        "fmt" => result.extend(quote! { use gourd::prelude::*; }),
+        _ => {}
+    }
+}
+
 /// Skip past a declaration starting at index `start`.
 /// Returns the index of the first token after the declaration.
 ///
@@ -330,24 +441,38 @@ fn skip_declaration(trees: &[proc_macro2::TokenTree], start: usize) -> usize {
 /// - `import time` → `use gourd::packages::time::*;`
 fn go_to_rust_import(input: TokenStream) -> TokenStream {
     let trees: Vec<proc_macro2::TokenTree> = input.into_iter().collect();
-    // The subtree after "import" should be a single package name identifier.
+    // The subtree after "import" should be a package name.
+    // `import "fmt"` → [Ident("import"), Literal("\"fmt\"")]
     // `import strings` → [Ident("import"), Ident("strings")]
     if trees.len() >= 2 {
-        if let proc_macro2::TokenTree::Ident(pkg) = &trees[1] {
-            let pkg_name = pkg.to_string();
-            return match pkg_name.as_str() {
-                "strings" => quote! { use gourd::packages::strings::*; },
-                "os" => quote! { use gourd::packages::os::*; },
-                "time" => quote! { use gourd::packages::time::*; },
-                // Unknown package — emit a compile_error
-                other => quote! {
-                    compile_error!(concat!(
-                        "Unknown Go package for `import`: ", #other,
-                        ". Supported packages: strings, os, time."
-                    ));
-                },
-            };
-        }
+        let pkg_name = match &trees[1] {
+            proc_macro2::TokenTree::Ident(pkg) => pkg.to_string(),
+            proc_macro2::TokenTree::Literal(lit) => {
+                // String literal: "fmt" → fmt
+                let s = lit.to_string();
+                s.trim_matches('"').to_string()
+            }
+            _ => return quote! {},
+        };
+        let result = match pkg_name.as_str() {
+            "strings" => quote! { use gourd::packages::strings::*; },
+            "os" => quote! { use gourd::packages::os::*; },
+            "time" => quote! { use gourd::packages::time::*; },
+            "io" => quote! { use gourd::packages::io::*; },
+            "bytes" => quote! { use gourd::packages::bytes::*; },
+            "json" => quote! { use gourd::packages::json::*; },
+            "math" => quote! { use gourd::packages::math::*; },
+            "byte" => quote! { use gourd::packages::byte::*; },
+            "fmt" => quote! { use gourd::prelude::*; },
+            // Unknown package — emit a compile_error
+            other => quote! {
+                compile_error!(concat!(
+                    "Unknown Go package for `import`: ", #other,
+                    ". Supported packages: strings, os, time, io, bytes, json, math, byte, fmt."
+                ));
+            },
+        };
+        return result;
     }
     // Fallback — no package name found
     quote! {}
@@ -623,9 +748,12 @@ pub fn normalize_tokens(tokens: &proc_macro2::TokenStream) -> Vec<String> {
 }
 
 fn strip_literal_suffix(s: &str) -> String {
+    // If this is a string literal (starts with "), return it as-is
+    if s.starts_with('"') {
+        return s.to_string();
+    }
     let len = s.len();
     let suffix_start = s.rfind(|c: char| !c.is_ascii_digit() && c != '.' && c != '_' && c != '-')
-        .map(|i| i + 1)
         .unwrap_or(len);
     s[..suffix_start].to_string()
 }
@@ -633,38 +761,11 @@ fn strip_literal_suffix(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transpiler::params::GoStruct;
     use proc_macro2::TokenStream;
     use quote::quote;
 
-    #[test]
-    fn test_struct_transpile() {
-        let input: TokenStream = quote! {
-            struct Bar {
-                value int
-            }
-        };
-        let trees: Vec<proc_macro2::TokenTree> = input.clone().into_iter().collect();
-        for (i, t) in trees.iter().enumerate() {
-            eprintln!("{}: {:?}", i, t);
-        }
-        let result = transpile_go(input.clone());
-        eprintln!("Struct result: {}", result);
-        // Debug: parse with GoStruct directly
-        match syn::parse2::<GoStruct>(input.clone()) {
-            Ok(gs) => {
-                eprintln!("GoStruct: ident={}, fields={}", gs.ident, gs.fields.len());
-                for f in &gs.fields {
-                    eprintln!("  field: {} -> {}", f.name, quote! { #(&f.ty) }.to_string());
-                }
-                // Test go_to_rust_struct directly
-                let rust_output = crate::transpiler::free_fn::go_to_rust_struct(input.clone());
-                eprintln!("go_to_rust_struct output: {}", rust_output);
-
-            }
-            Err(e) => eprintln!("GoStruct parse error: {}", e),
-        }
-    }
+    // Note: Debug test harness removed — GoStruct/go_to_rust_struct legacy types not available
+    // after HIR migration. Use gourd! {} blocks in actual tests to verify transpilation.
 
     #[test]
     fn test_struct_plus_receiver() {
@@ -685,5 +786,38 @@ mod tests {
     fn test_func_hello() {
         let result = transpile_go_text("func hello() int { return 42 }");
         println!("func hello result: '{}'", result);
+    }
+}
+
+#[cfg(test)]
+mod strip_tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_empty_string() {
+        let s = "\"\""; // two quote characters
+        let result = strip_literal_suffix(s);
+        println!("strip empty: len={:?} result={:?} result_len={}", s.len(), result, result.len());
+    }
+
+    #[test]
+    fn test_strip_hello_string() {
+        let s = "\"hello\""; // seven characters
+        let result = strip_literal_suffix(s);
+        println!("strip hello: len={:?} result={:?} result_len={}", s.len(), result, result.len());
+    }
+
+    #[test]
+    fn test_normalize_empty_string() {
+        let ts: proc_macro2::TokenStream = quote::quote! { "" };
+        let normalized = normalize_tokens(&ts);
+        println!("normalize empty string: {:?}", normalized);
+    }
+
+    #[test]
+    fn test_normalize_hello_string() {
+        let ts: proc_macro2::TokenStream = quote::quote! { "hello" };
+        let normalized = normalize_tokens(&ts);
+        println!("normalize hello string: {:?}", normalized);
     }
 }

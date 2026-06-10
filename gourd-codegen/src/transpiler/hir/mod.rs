@@ -41,6 +41,9 @@
 //! The conversion and codegen modules are integrated. See `hir/conversion.rs`
 //! for the Go AST → HIR bridge, and `hir/codegen.rs` for HIR → Rust tokens.
 
+// Go AST types — moved from legacy transpiler/ast.rs
+pub mod ast;
+// Go type name mapping — moved from legacy transpiler/types.rs  
 pub mod types;
 pub mod expression;
 pub mod statement;
@@ -51,8 +54,11 @@ pub mod codegen;
 pub use types::{ HirType, HirTypeKind };
 pub use expression::{ HirExpr, HirExprKind, HirLiteral };
 pub use statement::{ HirStatement, HirBlock };
-pub use conversion::{ go_ast_expr_to_hir, is_simple_identifier, get_identifier_name };
-pub use codegen::{ hir_expr_to_rust, hir_stmt_to_rust };
+pub use conversion::{ go_ast_expr_to_hir, go_select_to_hir, is_simple_identifier, get_identifier_name, go_switch_to_hir };
+pub use codegen::{ hir_expr_to_rust, hir_select_to_rust_from_hir, hir_stmt_to_rust,
+                   go_to_rust_closure_hir, go_to_rust_fn_hir, go_to_rust_interface_hir, go_to_rust_receiver_fn_hir,
+                   go_to_rust_select_hir, go_to_rust_struct_hir, go_to_rust_switch_hir,
+                   switch_to_rust };
 
 /// A complete HIR for a Go function.
 /// This is the top-level unit of HIR for free functions.

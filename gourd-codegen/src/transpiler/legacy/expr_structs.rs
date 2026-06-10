@@ -14,7 +14,7 @@ use syn::{ExprStruct, FieldValue, Member};
 /// already compatible. We just need to recursively transpile field values
 /// and handle the optional rest expression (`..Base`).
 pub fn transpile_struct(input: &ExprStruct) -> TokenStream {
-    let path = super::dispatch::go_to_rust(&syn::Expr::Path(syn::ExprPath {
+    let path = crate::transpiler::legacy::expr_dispatch::go_to_rust(&syn::Expr::Path(syn::ExprPath {
         attrs: vec![],
         qself: None,
         path: input.path.clone(),
@@ -25,7 +25,7 @@ pub fn transpile_struct(input: &ExprStruct) -> TokenStream {
         .map(transpile_field)
         .collect();
     let rest = input.rest.as_ref().map(|rest_expr| {
-        let rest_rust = super::dispatch::go_to_rust(rest_expr);
+        let rest_rust = crate::transpiler::legacy::expr_dispatch::go_to_rust(rest_expr);
         // Always emit a trailing comma before `..rest` to avoid Rust
         // misinterpreting it as a range expression (e.g. `Point{x: 1, ..rest}`
         // is ambiguous — `x: 1,` with trailing comma disambiguates it).
@@ -50,13 +50,13 @@ fn transpile_field(field: &FieldValue) -> TokenStream {
                 return quote! { #ident: #ident };
             }
             // Named field with explicit value: `Field: value`
-            let value = super::dispatch::go_to_rust(&field.expr);
+            let value = crate::transpiler::legacy::expr_dispatch::go_to_rust(&field.expr);
             quote! { #ident: #value }
         }
         Member::Unnamed(_idx) => {
             // Unnamed/positional field: Go allows `Point{1, 2}`
             // Rust doesn't support positional struct literals, so emit compile_error!
-            let value = super::dispatch::go_to_rust(&field.expr);
+            let value = crate::transpiler::legacy::expr_dispatch::go_to_rust(&field.expr);
             quote! { compile_error!("TODO: positional struct fields are not supported; use named fields: Point { x: 1 }") #value }
         }
     }

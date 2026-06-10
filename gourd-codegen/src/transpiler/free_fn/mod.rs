@@ -3,16 +3,18 @@
 //! Converts Go function declarations (`fn name() { ... }`) and struct
 //! declarations (`struct Name { field type }`) into Rust.
 
-mod basic;
-mod closure;
-mod interface;
+// Internal submodules — accessed by lib.rs but not re-exported publicly.
+pub(crate) mod basic;
+pub(crate) mod closure;
+pub(crate) mod interface;
 pub(crate) mod select;
-mod switch;
+pub(crate) mod switch;
 mod util;
 
 // Re-export the public API
-pub use basic::{go_to_rust_fn, go_to_rust_struct, go_to_rust_fn_hir};
+pub use basic::{go_to_rust_fn, go_to_rust_struct, go_to_rust_fn_hir, go_to_rust_struct_hir};
 pub use closure::go_to_rust_closure;
-pub use interface::go_to_rust_interface;
-pub use select::{go_to_rust_select, go_to_rust_select_ast};
-pub use switch::{go_to_rust_switch, transpile_switch};
+pub use interface::{go_to_rust_interface, go_to_rust_interface_hir};
+pub use util::to_snake_case;
+// Re-export types for consumers that need Go AST types.
+// These are public through the transpiler module.

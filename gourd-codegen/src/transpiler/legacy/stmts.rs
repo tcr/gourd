@@ -1,13 +1,13 @@
 //! Statement block parsing: `parse_go_block`, special statements, block parsing.
 
-pub(crate) use super::ast::{GoBlock, GoImport, GoStmt};
-use super::base_stmts::parse_base_stmt;
-use super::control_flow::{parse_go_for, parse_go_if, parse_go_while};
-use super::free_fn::select::parse_select_body;
-use super::return_stmts::parse_go_return;
-use super::slice_map::parse_go_slice_literal;
-use super::switch::Switch;
-use super::types::map_go_type_str;
+pub(crate) use crate::transpiler::hir::ast::{GoBlock, GoImport, GoSelect, GoStmt};
+use crate::transpiler::legacy::base_stmts::parse_base_stmt;
+use crate::transpiler::legacy::control_flow::{parse_go_for, parse_go_if, parse_go_while};
+// GoSelect parsing is now in HIR — uses syn::Parse
+use crate::transpiler::legacy::return_stmts::parse_go_return;
+use crate::transpiler::slice_map::parse_go_slice_literal;
+use crate::transpiler::hir::ast::Switch;
+use crate::transpiler::types::map_go_type_str;
 use proc_macro2::TokenStream;
 use syn::ext::IdentExt;
 use syn::parse::ParseStream;
@@ -16,13 +16,10 @@ use syn::{Expr, Ident};
 
 /// Parse a block of statements enclosed in braces.
 pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
-    eprintln!("[DEBUG parse_go_block] input.is_empty()={}, peek(Brace)={}", input.is_empty(), input.peek(syn::token::Brace));
     let brace_content = if input.peek(syn::token::Brace) {
         // Standard case: `{` punctuation
-        eprintln!("[DEBUG parse_go_block] Entering standard brace branch");
         let content;
         let _brace = syn::braced!(content in input);
-        eprintln!("[DEBUG parse_go_block] syn::braced! succeeded");
         content
     } else {
         // Handle Group token with Brace delimiter
@@ -50,14 +47,13 @@ pub(crate) fn parse_go_block(input: ParseStream) -> syn::Result<GoBlock> {
 }
 
 /// Parse body from a Group's TokenStream.
-fn parse_body_from_group(ts: &proc_macro2::TokenStream) -> syn::Result<GoBlock> {
+pub(crate) fn parse_body_from_group(ts: &proc_macro2::TokenStream) -> syn::Result<GoBlock> {
     let body_str = ts.to_string();
     
 /// Parse body from a Group's TokenStream (debug version).
 #[allow(dead_code)]
 fn parse_body_from_group_debug(ts: &proc_macro2::TokenStream) -> syn::Result<GoBlock> {
-    let body_str = ts.to_string();
-    eprintln!("DEBUG parse_body_from_group_debug: body_str={}", body_str);
+    let _body_str = ts.to_string();
     parse_body_from_group(ts)
 }
 
@@ -330,7 +326,7 @@ pub(crate) fn parse_go_special_stmt(input: ParseStream, stmts: &mut Vec<GoStmt>)
             }
             // 7. Check for select
             if kw_str == "select" {
-                let select_result = parse_select_body(input)?;
+                let select_result: GoSelect = input.parse()?;
                 stmts.push(GoStmt::Select(select_result));
                 if input.peek(token::Semi) {
                     let _semi: token::Semi = input.parse()?;

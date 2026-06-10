@@ -1,24 +1,53 @@
 //! Map and slice literal parsing: map declarations, slice literals, element parsers.
 
-use super::ast::{GoStmt};
+use super::hir::ast::{GoStmt};
 use proc_macro2::TokenTree;
 use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
 use syn::token;
 use syn::Expr;
 
-/// Handle `id := map[K]V{entries}` map literal declaration.
+/// Check if the fork is positioned at an angle bracket.
+pub(crate) fn fork_peeks_angle(fork: syn::parse::ParseBuffer) -> bool {
+    let cursor = fork.cursor();
+    if let Some((p, _rest)) = cursor.punct() {
+        p.as_char() == '<'
+    } else {
+        false
+    }
+}
+
+/// Handle `id := map[K]V{entries}` or `id := map<K,V>{entries}` map literal declaration.
 pub(crate) fn parse_go_map_decl(input: ParseStream, ident_str: String, stmts: &mut Vec<GoStmt>) -> syn::Result<()> {
     let _kw: syn::Ident = input.parse()?; // consume 'map'
 
     let mut key_type: Option<Box<syn::Type>> = None;
+    // Try square bracket style first: map[K]V
     let bracket_fork = input.fork();
     if bracket_fork.peek(syn::token::Bracket) {
         input.advance_to(&bracket_fork);
-        let _ts: TokenTree = input.parse()?;
+        let _ts: TokenTree = input.parse()?; // consume '['
         key_type = input.parse::<syn::Type>().ok().map(Box::new);
         if !input.is_empty() && input.peek(syn::token::Bracket) {
-            let _ts: TokenTree = input.parse()?;
+            let _ts: TokenTree = input.parse()?; // consume ']'
+        }
+    } else if fork_peeks_angle(bracket_fork) {
+        // Angle bracket style: map<K,V>
+        let _: proc_macro2::Punct = input.parse()?; // consume '<'
+        key_type = input.parse::<syn::Type>().ok().map(Box::new);
+        // Parse comma-separated types until '>'
+        while !input.is_empty() && input.peek(syn::token::Comma) {
+            let _ = input.parse::<syn::token::Comma>()?;
+            if !input.peek(syn::token::Brace) {
+                let _ = input.parse::<syn::Type>();
+            }
+        }
+        // Check for '>' closing bracket using fork
+        if !input.is_empty() {
+            let close_fork = input.fork();
+            if fork_peeks_angle(close_fork) {
+                let _: proc_macro2::Punct = input.parse()?; // consume '>'
+            }
         }
     }
 
