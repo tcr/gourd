@@ -266,6 +266,21 @@ fn hir_path_to_hir(path: &syn::ExprPath) -> HirExpr {
 
 /// Convert a Go binary expression to HIR.
 fn hir_binary_to_hir(binary: &ExprBinary) -> HirExpr {
+    // Detect channel send: Go `ch <- value` is tokenized by syn as
+    // `<` (binary less-than) with `-value` (unary negation) on the right.
+    // We need to special-case this so it produces ChannelSend instead of a
+    // comparison.
+    if matches!(binary.op, BinOp::Lt(_)) {
+        if let Expr::Unary(ExprUnary { op: syn::UnOp::Neg(_), expr, .. }) = binary.right.as_ref() {
+            let channel = Box::new(go_ast_expr_to_hir(&binary.left));
+            let value = go_ast_expr_to_hir(expr);
+            return HirExpr::new(HirExprKind::ChannelSend {
+                channel,
+                value: Box::new(value),
+            });
+        }
+    }
+
     let op = hir_binary_op_to_hir(&binary.op);
     let lhs = Box::new(go_ast_expr_to_hir(&binary.left));
     let rhs = Box::new(go_ast_expr_to_hir(&binary.right));
