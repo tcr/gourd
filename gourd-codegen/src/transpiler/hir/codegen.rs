@@ -19,6 +19,7 @@ use super::expression::{ HirExpr, HirExprKind, HirLiteral, HirBinaryOp, HirUnary
 use super::types::{ HirType, HirTypeKind, HirInterfaceMethod, HirReceiverFn, HirSelect, HirSelectCase, HirSwitch, HirFunction, HirStruct };
 use super::statement::{ HirStatement, HirBlock };
 use super::ast::{ GoFn, GoStruct };
+use crate::transpiler::heuristics;
 use syn::Ident;
 
 /// Convert a Go name (camelCase) to Rust snake_case.
@@ -360,16 +361,8 @@ fn hir_index_to_rust(collection: &HirExpr, index: &HirExpr) -> TokenStream {
         return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
     }
     
-    // Heuristic: if collection name suggests map-like variable
-    let collection_lower = collection_str.to_lowercase();
-    let index_lower = index_str.to_lowercase();
-    let is_map_named = collection_lower.contains("map") || collection_lower.contains("count")
-        || collection_lower.contains("freq") || collection_lower.contains("dict")
-        || collection_lower.contains("hash") || collection_lower.contains("result");
-    let is_key_named = index_lower.contains("key") || index_lower.contains("word")
-        || index_lower.contains("item") || index_lower.contains("tag")
-        || index_lower.contains("name") || index_lower.contains("label");
-    if is_map_named || is_key_named {
+    // Heuristic: variable names suggest map access → use map_get_ref helper
+    if heuristics::heuristic_should_use_map_get_ref(&collection_str, &index_str) {
         return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
     }
     
@@ -695,11 +688,8 @@ pub fn hir_stmt_to_rust(stmt: &HirStatement, strip_returns: bool) -> TokenStream
                 let collection_tokens = hir_expr_to_rust(collection);
                 let collection_str = collection_tokens.to_string();
                 let collection_lower = collection_str.to_lowercase();
-                // Detect map by variable name heuristics
-                let is_map_named = collection_lower.contains("map") || collection_lower.contains("count")
-                    || collection_lower.contains("freq") || collection_lower.contains("dict")
-                    || collection_lower.contains("hash") || collection_lower.contains("result");
-                if is_map_named {
+                // Heuristic: collection name suggests map → use map_set_mut_ref
+                if heuristics::heuristic_should_use_map_set(&collection_str) {
                     let idx_tokens = hir_expr_to_rust(index);
                     let val_tokens = hir_expr_to_rust(value);
                     return quote! { *::gourd::prelude::map_set_mut_ref( &mut #collection_tokens, &#idx_tokens ) = #val_tokens };

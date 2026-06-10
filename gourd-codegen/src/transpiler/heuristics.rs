@@ -1,0 +1,191 @@
+//! Heuristic detection functions for Go → Rust transpilation.
+//!
+//! These functions make best-effort guesses about variable intent when
+//! type information is unavailable. They are **inherently unreliable** —
+//! they work for the test cases that motivated them but will fail for
+//! arbitrary code with different naming patterns.
+//!
+//! Each heuristic is tagged with a severity:
+//! - **CRITICAL**: fundamental distinction that breaks entire code paths
+//! - **HIGH**: changes semantics based on variable names
+//! - **MEDIUM**: formatting side-effects, less impactful
+//!
+//! These should be consolidated into a single place so cleanup can track
+//! what heuristics exist and prioritize removing them over time.
+
+// ============================================================================
+// Map Detection Heuristics
+// ============================================================================
+// Severity: CRITICAL — misidentifying a slice as a map (or vice versa)
+// completely changes the generated code. This is test-specific overmapping.
+
+/// Common substrings that suggest a variable holds a map.
+/// These are heuristic guesses — not structural analysis.
+const MAP_CONTAINS_KEYWORDS: &[&str] = &[
+    "map",
+    "count",
+    "freq",
+    "dict",
+    "hash",
+    "result",
+];
+
+/// Common substrings that suggest a variable holds a map key.
+const KEY_CONTAINS_KEYWORDS: &[&str] = &[
+    "key",
+    "word",
+    "item",
+    "tag",
+    "name",
+    "label",
+];
+
+/// Exact variable names that indicate map-iteration context.
+const MAP_ITERATION_EXACT_NAMES: &[&str] = &[
+    "counts", "result", "map", "freq", "freqs", "hash",
+    "hash_map", "counter", "counters", "dict", "wordfreq",
+];
+
+/// Check whether a collection variable name suggests it holds a map.
+/// This is the core "map detection" heuristic used across multiple files.
+pub fn collection_name_suggests_map(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Check whether an index variable name suggests it holds a map key.
+pub fn index_name_suggests_key(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    KEY_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Determine if map access should use `map_get_ref` vs standard indexing,
+/// based on collection and index variable names.
+///
+/// Returns `true` if the names suggest map access, meaning the transpiler
+/// should use a special `map_get_ref` helper instead of standard Rust indexing.
+pub fn heuristic_should_use_map_get_ref(collection: &str, index: &str) -> bool {
+    // Explicit HashMap type in the name always uses map_get_ref (this is type-based, not heuristic)
+    if collection.contains("HashMap") || collection.contains("hash_map") {
+        return true;
+    }
+    // String-typed index implies map access (type-based)
+    if index.contains("String") || index.contains("from(") {
+        return true;
+    }
+    // Heuristic: variable names suggest map
+    collection_name_suggests_map(collection) || index_name_suggests_key(index)
+}
+
+/// Determine if map assignment should use `map_set_mut_ref`,
+/// based on collection variable name.
+pub fn heuristic_should_use_map_set(collection: &str) -> bool {
+    let lower = collection.to_lowercase();
+    MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Exact-match check for map iteration variable names.
+pub fn heuristic_is_map_iteration_name(name: &str) -> bool {
+    MAP_ITERATION_EXACT_NAMES.contains(&name)
+}
+
+/// Check whether an iterator variable name suggests map-iteration context.
+pub fn heuristic_is_map_iteration(collection: &str) -> bool {
+    let lower = collection.to_lowercase();
+    // Structural detection: actual HashMap types
+    if lower.contains("hashmap") || lower.contains("hash_map") {
+        return true;
+    }
+    // Heuristic: variable name suggests map
+    collection_name_suggests_map(collection)
+}
+
+// ============================================================================
+// Numeric vs String Addition Heuristic
+// ============================================================================
+// Severity: CRITICAL — `a + b` on two strings becomes string concatenation,
+// but `a + b` on two ints should be numeric addition. Without type info,
+// we guess based on variable names.
+
+/// Simple identifier names that suggest a numeric context.
+/// Used to disambiguate `a + b` as numeric addition vs string concatenation.
+const NUMERIC_NAMES: &[&str] = &[
+    "sum", "_sum", "count", "_count", "len", "peak",
+    "peakVal", "peak_idx", "i", "_i", "v", "_v", "hi", "lo",
+    "clamped", "r", "secs", "remaining", "ms", "WordFreqTopN",
+    "wordfreq", "total", "_total", "n", "m", "k", "z", "num",
+    "x", "y", "val", "elem", "idx", "step", "diff", "abs",
+    "offset", "size", "width", "height", "a", "b", "c", "d", "e",
+];
+
+/// Check if a simple identifier name suggests numeric context.
+pub fn is_numeric_name(name: &str) -> bool {
+    NUMERIC_NAMES.contains(&name)
+}
+
+/// Heuristic to determine whether a binary `+` on simple identifiers should be
+/// numeric addition or string concatenation.
+///
+/// This is a **guess** based on variable naming conventions. It will fail for
+/// code that uses numeric names as strings or vice versa.
+pub fn heuristic_addition_is_numeric(lhs: &str, rhs: &str) -> bool {
+    // First, check if either side looks like a field access with known numeric fields.
+    let lhs_has_numeric_field = lhs.contains(".value") || lhs.contains(".n") || lhs.contains(".data");
+    let rhs_has_numeric_field = rhs.contains(".value") || rhs.contains(".n") || rhs.contains(".data");
+
+    // If either side is a field access on a known numeric field, likely numeric.
+    if lhs_has_numeric_field || rhs_has_numeric_field {
+        return true;
+    }
+
+    // If either side is a chain containing numeric names, likely numeric.
+    if lhs.contains('+') && NUMERIC_NAMES.iter().any(|n| lhs.contains(n)) {
+        return true;
+    }
+    if rhs.contains('+') && NUMERIC_NAMES.iter().any(|n| rhs.contains(n)) {
+        return true;
+    }
+
+    // Exact name match on either side.
+    NUMERIC_NAMES.contains(&lhs) || NUMERIC_NAMES.contains(&rhs)
+}
+
+// ============================================================================
+// Map Display Heuristic
+// ============================================================================
+// Severity: MEDIUM — affects formatting output only, not core semantics.
+
+/// Keywords suggesting a variable is displayed as a map via `display_map()`.
+const MAP_DISPLAY_KEYWORDS: &[&str] = &["hashmap", "wordfreq", "topn", "wordfreqtopn"];
+
+/// Check if an argument name suggests it should be displayed via `display_map()`.
+pub fn heuristic_should_display_as_map(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    MAP_DISPLAY_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+// ============================================================================
+// Map Iteration Value Dereference Heuristic
+// ============================================================================
+// Severity: HIGH — misidentifying the value variable causes wrong dereferencing.
+
+/// Simple identifier names that appear as map-iteration values (the `v` in `for k, v := range map`).
+const MAP_ITER_VALUE_NAMES: &[&str] = &["v", "val", "elem"];
+
+/// Check if a variable name suggests it's a map-iteration value that needs dereferencing.
+pub fn is_map_iteration_value_name(name: &str) -> bool {
+    MAP_ITER_VALUE_NAMES.contains(&name)
+}
+
+// ============================================================================
+// Module-Level Summary
+// ============================================================================
+/// Returns a summary of what heuristics are available in this module.
+pub fn heuristic_summary() -> &'static str {
+    "Heuristics module — variable-name-based guesses used when type info is unavailable.\n\
+     Map detection: collection/index name contains map keywords → use map_get_ref/map_set_mut_ref\n\
+     Numeric add: simple identifier in numeric_names → numeric addition, else string concat\n\
+     Map display: name contains hashmap/wordfreq/topn → use display_map()\n\
+     Map iter value: name is v/val/elem in map context → dereference RHS\n\
+     WARNING: these are not type analysis — they fail on code with different naming patterns."
+}

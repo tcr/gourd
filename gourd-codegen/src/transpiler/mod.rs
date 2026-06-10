@@ -17,6 +17,11 @@ pub(crate) mod slice_map;
 // Statement parsing and type declarations
 pub(crate) mod parsing;
 
+// Heuristic detection — variable-name-based guesses when type info is unavailable.
+// These are inherently unreliable and should be removed over time as type information
+// becomes available through better analysis.
+pub(crate) mod heuristics;
+
 // Receiver function parsing
 pub(crate) mod receiver;
 

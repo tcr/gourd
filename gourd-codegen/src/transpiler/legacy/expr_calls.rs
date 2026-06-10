@@ -4,6 +4,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Expr, ExprField, ExprIndex, ExprMacro, ExprMethodCall, ExprRange};
+use crate::transpiler::heuristics;
 
 use crate::transpiler::legacy::expr_dispatch::emit_todo;
 
@@ -442,16 +443,8 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
     let is_num_or_range = matches!(&*input.index, Expr::Lit(lit) if matches!(&lit.lit, syn::Lit::Int(_) | syn::Lit::Float(_)))
         || matches!(&*input.index, Expr::Range(_));
     if !is_num_or_range {
-        // Check if the sequence looks like a map variable by name
-        let seq_lower = seq_str.to_lowercase();
-        let idx_lower = idx_str.to_lowercase();
-        let is_map_named = seq_lower.contains("map") || seq_lower.contains("count")
-            || seq_lower.contains("freq") || seq_lower.contains("dict")
-            || seq_lower.contains("hash") || seq_lower.contains("result");
-        let is_key_named = idx_lower.contains("key") || idx_lower.contains("word")
-            || idx_lower.contains("item") || idx_lower.contains("tag")
-            || idx_lower.contains("name") || idx_lower.contains("label");
-        if is_map_named || is_key_named {
+        // Heuristic: variable names suggest map access → use map_get_ref helper
+        if heuristics::heuristic_should_use_map_get_ref(&seq_str, &idx_str) {
             return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
         }
     }
@@ -591,11 +584,8 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                     // For Print/Println, ALL args are displayed (no format string)
                     let display_args: Vec<_> = args.iter().map(|a| {
                         let a_str = quote! { #a }.to_string().to_lowercase();
-                        // Check if this is a HashMap-typed expression (function returns HashMap)
-                        let is_map = a_str.contains("hashmap")
-                            || a_str.contains("wordfreq")
-                            || a_str.contains("topn")
-                            || a_str.contains("wordfreqtopn");
+                        // Heuristic: name suggests map → use display_map helper
+                        let is_map = heuristics::heuristic_should_display_as_map(&a_str);
                         if is_map {
                             quote! { ::gourd::prelude::display_map(#a.clone()) }
                         } else {
@@ -609,10 +599,7 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                             // Build display args from arguments AFTER the format string
                             let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
                                 let a_str = quote! { #a }.to_string().to_lowercase();
-                                let is_map = a_str.contains("hashmap")
-                                    || a_str.contains("wordfreq")
-                                    || a_str.contains("topn")
-                                    || a_str.contains("wordfreqtopn");
+                                let is_map = heuristics::heuristic_should_display_as_map(&a_str);
                                 if is_map {
                                     quote! { ::gourd::prelude::display_map(#a.clone()) }
                                 } else {
@@ -634,10 +621,7 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                             let format_arg = &args[0];
                             let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
                                 let a_str = quote! { #a }.to_string().to_lowercase();
-                                let is_map = a_str.contains("hashmap")
-                                    || a_str.contains("wordfreq")
-                                    || a_str.contains("topn")
-                                    || a_str.contains("wordfreqtopn");
+                                let is_map = heuristics::heuristic_should_display_as_map(&a_str);
                                 if is_map {
                                     quote! { ::gourd::prelude::display_map(#a.clone()) }
                                 } else {

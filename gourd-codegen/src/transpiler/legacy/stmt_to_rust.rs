@@ -1,6 +1,7 @@
 //! Go statement to Rust token conversion (the `go_stmt_to_rust` bridge).
 
 pub(crate) use crate::transpiler::hir::ast::{GoForInit, GoSelect, GoStmt, Switch};
+use crate::transpiler::heuristics;
 use crate::transpiler::legacy::expr_dispatch::go_to_rust;
 use crate::transpiler::types::map_go_types;
 use proc_macro2::TokenStream;
@@ -188,7 +189,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                             || iter_str.contains("hash_map");
                         // Also check by variable name — common map names
                         let iter_name = iter_str.trim();
-                        let is_map_named = matches!(iter_name, "counts" | "result" | "map" | "freq" | "freqs" | "hash" | "hash_map" | "counter" | "counters" | "dict" | "wordfreq");
+                        let is_map_named = heuristics::heuristic_is_map_iteration_name(iter_name);
                         if is_map_type || is_map_named {
                             // Map iteration: for k, v := range map
                             quote! {

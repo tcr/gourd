@@ -4,6 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{BinOp, ExprAssign, ExprBreak, ExprCast, ExprContinue, ExprUnary, UnOp};
 
+use crate::transpiler::heuristics;
 use crate::transpiler::legacy::expr_dispatch::emit_todo;
 
 pub fn transpile_binary(input: &syn::ExprBinary) -> TokenStream {
@@ -47,24 +48,8 @@ pub fn transpile_binary(input: &syn::ExprBinary) -> TokenStream {
                 if is_simple_ident {
                     eprintln!("[DEBUG OP] simple_ident: lhs={} rhs={}", lhs_str, rhs_str);
                     // Simple identifier — distinguish numeric from string contexts.
-                    // If the LHS has a numeric variable name or is a field access,
-                    // treat as numeric addition.
-                    let numeric_names = ["sum", "_sum", "count", "_count", "len", "peak",
-                        "peakVal", "peak_idx", "i", "_i", "v", "_v", "hi", "lo",
-                        "clamped", "r", "secs", "remaining", "ms", "WordFreqTopN",
-                        "wordfreq", "total", "_total", "n", "m", "k", "z", "num",
-                        "x", "y", "val", "elem", "idx", "step", "diff", "abs",
-                        "offset", "size", "width", "height", "a", "b", "c", "d", "e"];
-                    // Only match exact numeric names (not substrings like "result" → "r")
-                    // Field accesses like "s.value" use substring matching since field names differ.
-                    let lhs_is_numeric = numeric_names.contains(&lhs_str.as_str())
-                        || lhs_str.contains(".value")
-                        || lhs_str.contains(".n")
-                        || lhs_str.contains(".data")
-                        // Detect numeric chains like "a + b" or "total + i"
-                        || (lhs_str.contains('+') && numeric_names.iter().any(|n| lhs_str.contains(n)))
-                        // If RHS is an exact numeric name match, LHS is likely numeric too
-                        || numeric_names.contains(&rhs_str.as_str());
+                    // Uses heuristic guesses based on variable naming conventions.
+                    let lhs_is_numeric = heuristics::heuristic_addition_is_numeric(&lhs_str, &rhs_str);
                     if lhs_is_numeric {
                         eprintln!("DEBUG_NUMERIC");
                         // Numeric addition — pass through unchanged
@@ -142,10 +127,8 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
             if let syn::Expr::Path(path) = idx.expr.as_ref() {
                 if let Some(first_seg) = path.path.segments.first() {
                     let map_var = quote! { #first_seg };
-                    let map_name = map_var.to_string().to_lowercase();
-                    let is_map_named = map_name.contains("map") || map_name.contains("count")
-                        || map_name.contains("freq") || map_name.contains("dict")
-                        || map_name.contains("hash") || map_name.contains("result");
+                    let map_name = first_seg.ident.to_string().to_lowercase();
+                    let is_map_named = heuristics::heuristic_should_use_map_set(&map_name);
                     // Check if the index is a simple path (identifier) — suggests HashMap iteration key
                     let idx_is_simple_path = matches!(&*idx.index, syn::Expr::Path(_));
                     let key = crate::transpiler::legacy::expr_dispatch::go_to_rust(&idx.index);
@@ -157,7 +140,7 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
                         // Check if RHS is a common iteration value variable name (v, val, elem)
                         // and dereference if the LHS is a map.
                         let rhs_str = quote! { #rhs }.to_string();
-                        let rhs_is_iter_val = rhs_str == "v" || rhs_str == "val" || rhs_str == "elem";
+                        let rhs_is_iter_val = heuristics::is_map_iteration_value_name(&rhs_str);
                         if rhs_is_iter_val {
                             // Map iteration value — dereference &V to get V
                             return quote! { *::gourd::prelude::map_set_mut_ref( &mut #map_var , &#key ) = *#rhs };
