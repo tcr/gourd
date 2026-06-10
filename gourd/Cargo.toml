@@ -28,6 +28,7 @@ syn = { version = "2", features = ["full"] }
 crossbeam = "0.8"
 num-traits = "0.2"
 tempfile = "3"
+log = "0.4"
 
 [dev-dependencies]
 gourd-macro = { path = "../gourd-macro" }

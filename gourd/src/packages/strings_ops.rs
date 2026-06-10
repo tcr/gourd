@@ -19,15 +19,6 @@ pub fn slice_sub<T: Clone>(slice: &[T], start: i32, end: i32) -> Vec<T> {
     slice[start..end].to_vec()
 }
 
-/// Sorts a slice in ascending order (Go `sort.Slice`).
-pub fn sort<T: Ord>(slice: &mut [T]) {
-    slice.sort();
-}
-
-/// Reverses a slice in place (Go `sort.Reverse`).
-pub fn reverse<T>(slice: &mut [T]) {
-    slice.reverse();
-}
 
 /// Returns true if the slice contains the value (Go `Contains`).
 pub fn contains<T: PartialEq>(slice: &[T], val: &T) -> bool {

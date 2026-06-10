@@ -227,6 +227,7 @@ dependencies = [
  "crossbeam",
  "gourd-codegen",
  "gourd-macro",
+ "log",
  "num-traits",
  "prettyplease",
  "proc-macro2",
