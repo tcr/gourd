@@ -281,7 +281,7 @@ impl<T: Clone> GoSelect<T> {
         let poll_interval = Duration::from_micros(10);
         let max_timeout = self
             .timeout
-            .unwrap_or(Duration::from_secs(60));
+            .unwrap_or(Duration::from_millis(50));
 
         let deadline = std::time::Instant::now() + max_timeout;
 
