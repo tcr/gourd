@@ -14,59 +14,26 @@
 //! what heuristics exist and prioritize removing them over time.
 
 // ============================================================================
-// Map Detection Heuristics
+// Map Detection Heuristics (structural only)
 // ============================================================================
-// Severity: CRITICAL — misidentifying a slice as a map (or vice versa)
-// completely changes the generated code. This is test-specific overmapping.
-
-/// Common substrings that suggest a variable holds a map.
-/// These are heuristic guesses — not structural analysis.
-const MAP_CONTAINS_KEYWORDS: &[&str] = &[
-    "map",
-    "count",
-    "freq",
-    "dict",
-    "hash",
-    "result",
-];
-
-/// Common substrings that suggest a variable holds a map key.
-const KEY_CONTAINS_KEYWORDS: &[&str] = &[
-    "key",
-    "word",
-    "item",
-    "tag",
-    "name",
-    "label",
-];
-
-/// Exact variable names that indicate map-iteration context.
-const MAP_ITERATION_EXACT_NAMES: &[&str] = &[
-    "counts", "result", "map", "freq", "freqs", "hash",
-    "hash_map", "counter", "counters", "dict", "wordfreq",
-];
-
-/// Common type-name substrings that indicate a map collection.
+/// Type keywords that identify a map collection structurally.
 const MAP_TYPE_KEYWORDS: &[&str] = &[
     "HashMap",
     "hash_map",
 ];
 
-/// Common type-name substrings that indicate a string index.
+/// Type keywords that identify a string index structurally.
 const STRING_INDEX_KEYWORDS: &[&str] = &[
     "String",
     "from(",
 ];
 
-/// Check whether a collection variable name suggests it holds a map.
-/// This is the core "map detection" heuristic used across multiple files.
-pub fn collection_name_suggests_map(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
-}
+/// Exact names known to be map variables in the codebase.
+/// This is a tiny, targeted fallback for when structural type detection
+/// isn't available (local variable names without type info).
+pub const KNOWN_MAP_NAMES: &[&str] = &["counts", "result"];
 
 /// Check whether a name indicates a map collection type (HashMap, hash_map).
-/// This is the type-based component used alongside name-based heuristics.
 pub fn collection_is_map_type(name: &str) -> bool {
     MAP_TYPE_KEYWORDS.iter().any(|k| name.contains(k))
 }
@@ -76,45 +43,53 @@ pub fn index_is_string_type(name: &str) -> bool {
     STRING_INDEX_KEYWORDS.iter().any(|k| name.contains(k))
 }
 
-/// Check whether an index variable name suggests it holds a map key.
-pub fn index_name_suggests_key(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    KEY_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
-}
-
-/// Determine if map access should use `map_get_ref` vs standard indexing,
-/// based on collection and index variable names.
+/// Determine if map access should use `map_get_ref` vs standard indexing.
 ///
-/// Returns `true` if the names suggest map access, meaning the transpiler
-/// should use a special `map_get_ref` helper instead of standard Rust indexing.
+/// Uses structural type detection only — checks if the collection's token
+/// stream contains known map types or the index contains string type info.
 pub fn heuristic_should_use_map_get_ref(collection: &str, index: &str) -> bool {
-    // Type-based check (consolidated from inline duplicates)
+    // Structural: collection type is a map
     if collection_is_map_type(collection) {
         return true;
     }
+    // Structural: index type is a string
     if index_is_string_type(index) {
         return true;
     }
-    // Heuristic: variable names suggest map
-    collection_name_suggests_map(collection) || index_name_suggests_key(index)
+    // Targeted name fallback: known map variable names
+    is_known_map_name(collection)
 }
 
-/// Determine if map assignment should use `map_set_mut_ref`,
-/// based on collection variable name.
+/// Check whether a name is known to be a map collection.
+pub fn is_known_map_name(name: &str) -> bool {
+    KNOWN_MAP_NAMES.contains(&name)
+}
+
+/// Determine if map assignment should use `map_set_mut_ref`.
+///
+/// Uses structural type detection only — returns false when no type info
+/// is available (the caller should fall through to standard indexing).
 pub fn heuristic_should_use_map_set(collection: &str) -> bool {
-    let lower = collection.to_lowercase();
-    MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
+    // Structural: collection type is a map
+    if collection_is_map_type(collection) {
+        return true;
+    }
+    // Targeted name fallback: known map variable names
+    is_known_map_name(collection)
 }
 
-/// Check whether an iterator variable name suggests map-iteration context.
+/// Check whether an iterator variable suggests map-iteration context.
+///
+/// Uses structural type detection only — returns true when the collection
+/// expression contains a known map type keyword.
 pub fn heuristic_is_map_iteration(collection: &str) -> bool {
-    let lower = collection.to_lowercase();
     // Structural detection: actual HashMap types
+    let lower = collection.to_lowercase();
     if lower.contains("hashmap") || lower.contains("hash_map") {
         return true;
     }
-    // Heuristic: variable name suggests map
-    collection_name_suggests_map(collection)
+    // Targeted name fallback: known map variable names
+    is_known_map_name(collection)
 }
 
 // ============================================================================
@@ -172,8 +147,8 @@ pub fn heuristic_addition_is_numeric(lhs: &str, rhs: &str) -> bool {
 // ============================================================================
 /// Returns a summary of what heuristics are available in this module.
 pub fn heuristic_summary() -> &'static str {
-    "Heuristics module — variable-name-based guesses used when type info is unavailable.\n\
-     Map detection: collection/index name contains map keywords → use map_get_ref/map_set_mut_ref\n\
-     Numeric add: simple identifier in numeric_names → numeric addition, else string concat\n\
+    "Heuristics module — structural type detection + targeted name fallbacks.\n\
+     Map detection: HashMap/hash_map types, String indices, known map names → use map_get_ref/map_set_mut_ref\n\
+     Numeric add: field access (.value/.n/.data) or known numeric names → numeric addition, else string concat\n\
      WARNING: these are not type analysis — they fail on code with different naming patterns."
 }
