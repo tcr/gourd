@@ -591,14 +591,7 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                     // Build fmt args as string values
                     // For Print/Println, ALL args are displayed (no format string)
                     let display_args: Vec<_> = args.iter().map(|a| {
-                        let a_str = quote! { #a }.to_string().to_lowercase();
-                        // Heuristic: name suggests map → use display_map helper
-                        let is_map = heuristics::heuristic_should_display_as_map(&a_str);
-                        if is_map {
-                            quote! { ::gourd::prelude::display_map(#a.clone()) }
-                        } else {
-                            quote! { #a .to_string() }
-                        }
+                        quote! { #a .to_string() }
                     }).collect();
                     return match method_name.to_string().as_str() {
                         "Sprintf" => {
@@ -606,13 +599,7 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                             let format_arg = &args[0];
                             // Build display args from arguments AFTER the format string
                             let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
-                                let a_str = quote! { #a }.to_string().to_lowercase();
-                                let is_map = heuristics::heuristic_should_display_as_map(&a_str);
-                                if is_map {
-                                    quote! { ::gourd::prelude::display_map(#a.clone()) }
-                                } else {
-                                    quote! { #a .to_string() }
-                                }
+                                quote! { #a .to_string() }
                             }).collect();
                             let arg_vec = quote! { vec![ #(#arg_display),* ] };
                             quote! { ::gourd::prelude::fmt_sprintf( #format_arg , &#arg_vec ) }
@@ -628,13 +615,7 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                         "Printf" => {
                             let format_arg = &args[0];
                             let arg_display: Vec<_> = args.iter().skip(1).map(|a| {
-                                let a_str = quote! { #a }.to_string().to_lowercase();
-                                let is_map = heuristics::heuristic_should_display_as_map(&a_str);
-                                if is_map {
-                                    quote! { ::gourd::prelude::display_map(#a.clone()) }
-                                } else {
-                                    quote! { #a .to_string() }
-                                }
+                                quote! { #a .to_string() }
                             }).collect();
                             let arg_vec = quote! { vec![ #(#arg_display),* ] };
                             quote! { ::gourd::prelude::fmt_printf( #format_arg , &#arg_vec ) }

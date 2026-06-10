@@ -141,15 +141,6 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
                     // Use map_set_mut_ref when iterating over a map (key is already a reference)
                     // Pass key directly; map_set_mut_ref expects &K
                     if is_map_named && idx_is_simple_path {
-                        // For map iteration (for k, v := range map), v is &V in Rust.
-                        // Check if RHS is a common iteration value variable name (v, val, elem)
-                        // and dereference if the LHS is a map.
-                        let rhs_str = quote! { #rhs }.to_string();
-                        let rhs_is_iter_val = heuristics::is_map_iteration_value_name(&rhs_str);
-                        if rhs_is_iter_val {
-                            // Map iteration value — dereference &V to get V
-                            return quote! { *::gourd::prelude::map_set_mut_ref( &mut #map_var , &#key ) = *#rhs };
-                        }
                         // Normal map assignment: pass value directly
                         return quote! { *::gourd::prelude::map_set_mut_ref( &mut #map_var , &#key ) = #rhs };
                     }

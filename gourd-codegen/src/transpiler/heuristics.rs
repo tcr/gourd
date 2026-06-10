@@ -106,11 +106,6 @@ pub fn heuristic_should_use_map_set(collection: &str) -> bool {
     MAP_CONTAINS_KEYWORDS.iter().any(|k| lower.contains(k))
 }
 
-/// Exact-match check for map iteration variable names.
-pub fn heuristic_is_map_iteration_name(name: &str) -> bool {
-    MAP_ITERATION_EXACT_NAMES.contains(&name)
-}
-
 /// Check whether an iterator variable name suggests map-iteration context.
 pub fn heuristic_is_map_iteration(collection: &str) -> bool {
     let lower = collection.to_lowercase();
@@ -173,33 +168,6 @@ pub fn heuristic_addition_is_numeric(lhs: &str, rhs: &str) -> bool {
 }
 
 // ============================================================================
-// Map Display Heuristic
-// ============================================================================
-// Severity: MEDIUM — affects formatting output only, not core semantics.
-
-/// Keywords suggesting a variable is displayed as a map via `display_map()`.
-const MAP_DISPLAY_KEYWORDS: &[&str] = &["hashmap", "wordfreq", "topn", "wordfreqtopn"];
-
-/// Check if an argument name suggests it should be displayed via `display_map()`.
-pub fn heuristic_should_display_as_map(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    MAP_DISPLAY_KEYWORDS.iter().any(|k| lower.contains(k))
-}
-
-// ============================================================================
-// Map Iteration Value Dereference Heuristic
-// ============================================================================
-// Severity: HIGH — misidentifying the value variable causes wrong dereferencing.
-
-/// Simple identifier names that appear as map-iteration values (the `v` in `for k, v := range map`).
-const MAP_ITER_VALUE_NAMES: &[&str] = &["v", "val", "elem"];
-
-/// Check if a variable name suggests it's a map-iteration value that needs dereferencing.
-pub fn is_map_iteration_value_name(name: &str) -> bool {
-    MAP_ITER_VALUE_NAMES.contains(&name)
-}
-
-// ============================================================================
 // Module-Level Summary
 // ============================================================================
 /// Returns a summary of what heuristics are available in this module.
@@ -207,7 +175,5 @@ pub fn heuristic_summary() -> &'static str {
     "Heuristics module — variable-name-based guesses used when type info is unavailable.\n\
      Map detection: collection/index name contains map keywords → use map_get_ref/map_set_mut_ref\n\
      Numeric add: simple identifier in numeric_names → numeric addition, else string concat\n\
-     Map display: name contains hashmap/wordfreq/topn → use display_map()\n\
-     Map iter value: name is v/val/elem in map context → dereference RHS\n\
      WARNING: these are not type analysis — they fail on code with different naming patterns."
 }
