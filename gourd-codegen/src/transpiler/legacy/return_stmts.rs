@@ -159,9 +159,10 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
         let raw_args = args_ts.to_string();
         let (slice_str, items_str) = split_top_level_comma(&raw_args);
         if items_str.is_none() {
+            // append(slice) with no items — return the slice as Vec for compatibility
             let slice = slice_str.trim();
             let rust_slice = go_to_rust_slice_arg(slice);
-            stmts.push(GoStmt::RawStmt(quote! { return #rust_slice }));
+            stmts.push(GoStmt::RawStmt(quote! { return #rust_slice.to_vec() }));
         } else {
             let slice = slice_str.trim();
             let items_str = items_str.unwrap().trim();

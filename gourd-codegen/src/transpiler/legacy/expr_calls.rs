@@ -55,10 +55,11 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
     // Handle Go builtin functions that are now stdlib: copy, delete
     if let Expr::Path(path) = &*input.func {
         if let Some(_func_name) = try_parse_std_copy(path) {
+            // std::copy(dst, src) → std_copy_slice(GoSlice, &GoSlice)
             let func = args.iter().enumerate().map(|(i, arg)| {
-                if i == 0 { quote! { &mut #arg } } else { quote! { & #arg } }
+                if i == 0 { quote! { #arg } } else { quote! { &#arg } }
             }).collect::<Vec<_>>();
-            return quote! { ::gourd::prelude::std_copy( #(#func),* ) };
+            return quote! { ::gourd::prelude::std_copy_slice( #(#func),* ) };
         }
         if let Some(_func_name) = try_parse_std_delete(path) {
             return quote! { ::gourd::prelude::std_delete( #(#args),* ) };
@@ -72,21 +73,19 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         let arg = args[0].clone();
         return quote! { #arg.len() as i32 };
     }
-    // Go builtin `append(slice, val)` → prelude::append
+    // Go builtin `append(slice, val)` → GoSlice::append()
     if let Expr::Path(path) = &*input.func
         && let Some(name) = path.path.get_ident()
         && name.to_string() == "append"
     {
         let slice = &args[0];
         if args.len() == 1 {
-            return quote! { #slice.clone() };
+            // append(slice) with no items — return the clone as Vec for compatibility
+            return quote! { #slice.clone().to_vec() };
         }
         let rest = &args[1..];
-        // Append now accepts owned values (val: T where T: Clone).
-        // For numeric literals, pass directly.
-        // For everything else (identifiers, indexed access, etc.), clone
-        // to get an owned value since slice indexing yields references.
-        let refs = rest.iter().map(|a| {
+        // Append elements — use GoSlice::append() for each item.
+        let appended = rest.iter().map(|a| {
             let ts = quote! { #a };
             let s = ts.to_string();
             // Check if it's a numeric literal (starts with digit)
@@ -95,11 +94,15 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 quote! { #a }
             } else {
                 // For all non-literal expressions, clone to get an owned value.
-                // This handles identifiers, indexed access `items[i]`, etc.
                 quote! { #a .clone() }
             }
         });
-        return quote! { ::gourd::prelude::append( #slice , #(#refs),* ) };
+        // Wrap in append chain: __s.append(val); __s.append(val2); ...
+        return quote! {
+            { let mut __gourd_append_result = (#slice).clone();
+              #(__gourd_append_result.append(#appended);)*
+              __gourd_append_result }
+        };
     }
     // Go type conversion calls: int(), int8(), ..., string(), bool(), byte(), rune(), ...
     if let Expr::Path(path) = &*input.func
@@ -143,13 +146,13 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 // string(byte_from_string_indexing) → (byte as char).to_string()
                 if arg_str.contains("as_bytes") {
                     // Go `string(str[i])`: str[i] is a byte (u8), convert to single-char string
-                    return quote! { ( #arg as char ).to_string() };
+                    return quote! { ::gourd::GoString::from(( #arg as char ).to_string()) };
                 }
                 // string(rune) → char.to_string()
                 if arg_str.contains("char") || arg_str.contains("as char") {
-                    return quote! { #arg.to_string() };
+                    return quote! { ::gourd::GoString::from(#arg.to_string()) };
                 }
-                return quote! { ::std::str::from_utf8(&#arg).unwrap_or("").to_string() };
+                return quote! { ::gourd::GoString::from(::std::str::from_utf8(&#arg).unwrap_or("").to_string()) };
             }
             "byte" => {
                 return quote! { (#(#args),* as u8) };
@@ -200,7 +203,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                     "rune" => "char",
                     "float32" => "f32",
                     "float64" => "f64",
-                    "string" => "String",
+                    "string" => "::gourd::GoString",
                     "bool" => "bool",
                     "error" => "Box<dyn std::error::Error>",
                     _ => &type_str, // user-defined type, keep as-is
@@ -242,8 +245,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
         }).collect();
         return quote! { panic!( #(#panic_args),* ) };
     }
-    // Go `append(slice, items...)` → stdlib std_append
-    // Stdlib version: converts slice to Vec, extends with items, returns new Vec.
+    // Go `append(slice, items...)` → GoSlice::append_items()
     if let Expr::Path(path) = &*input.func
         && let Some(_func_name) = try_parse_std_append(path)
     {
@@ -256,11 +258,15 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             // append(slice) — no-op, just return the slice
             return quote! { #slice };
         }
-        // append(slice, items...) — pass items as a slice
+        // append(slice, items...) — pass items via append_items
         let items: Vec<_> = append_args[1..].iter()
             .map(|arg| crate::transpiler::legacy::expr_dispatch::go_to_rust(arg))
             .collect();
-        return quote! { ::gourd::prelude::std_append( #slice, &[ #(#items),* ] ) };
+        return quote! { {
+            let mut __gourd_append_result = #slice;
+            __gourd_append_result.append_items(&[#(#items),*]);
+            __gourd_append_result
+        }};
     }
     // Go `make` builtin — special handling for chan/map/slice types.
     // `make(chan T, cap)` → `GoChannel::<T>::with_capacity(cap)`
@@ -298,13 +304,19 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 return quote! { ::gourd::prelude::HashMap::default() };
             }
             if type_str.starts_with("[]") {
-                let type_default: TokenStream = quote! { #type_tokens::default() };
+                // make([]T, len) → GoSlice::with_length(len)
+                let type_tokens_str = quote! { #type_tokens }.to_string();
                 if make_args.len() == 2 {
                     let len = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[1]);
-                    return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
-                } else {
+                    return quote! { ::gourd::GoSlice::<#type_tokens>::with_length(#len as usize) };
+                } else if make_args.len() == 3 {
+                    // make([]T, len, cap)
                     let len = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[1]);
-                    return quote! { ::std::iter::repeat(#type_default).take(#len).collect::<#type_tokens>() };
+                    let cap = crate::transpiler::legacy::expr_dispatch::go_to_rust(&make_args[2]);
+                    return quote! { ::gourd::GoSlice::<#type_tokens>::with_capacity(#cap as usize) };
+                } else {
+                    // make([]T) — no args, unknown len → empty slice
+                    return quote! { ::gourd::GoSlice::<#type_tokens>::new() };
                 }
             }
             return emit_todo("unsupported type in make()");
@@ -324,8 +336,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             "Contains" => return quote! { ::gourd::prelude::contains_str( #(#args),* ) },
             "Split" => return quote! { ::gourd::prelude::split( #(#args),* ) },
             "Join" => {
-                let refs: Vec<_> = args.iter().map(|a| quote! { & #a }).collect();
-                return quote! { ::gourd::prelude::join( #(#refs),* ) };
+                // args = [parts, sep]; parts is already a vec!, pass directly
+                let elems = &args[0];
+                let sep = &args[1];
+                return quote! { ::gourd::prelude::join( #elems , &#sep.as_ref()) };
             }
             "Index" => return quote! { ::gourd::prelude::index_str( #(#args),* ) },
             "LastIndex" => return quote! { ::gourd::prelude::last_index_str( #(#args),* ) },
@@ -521,10 +535,10 @@ pub fn transpile_method_call(input: &ExprMethodCall) -> TokenStream {
                         "Contains" => quote! { ::gourd::prelude::contains_str( #(#args),* ) },
                         "Split" => quote! { ::gourd::prelude::split( #(#args),* ) },
                         "Join" => {
+                            // args = [parts, sep]; parts is already a vec!, pass directly
                             let elems = &args[0];
-                            let rest = &args[1..];
-                            // join takes Vec<String> and String by value
-                            quote! { ::gourd::prelude::join( #elems , #(#rest),* ) }
+                            let sep = &args[1];
+                            quote! { ::gourd::prelude::join( #elems , &#sep.as_ref()) }
                         },
                         "Index" => quote! { ::gourd::prelude::index_str( #(#args),* ) },
                         "LastIndex" => quote! { ::gourd::prelude::last_index_str( #(#args),* ) },

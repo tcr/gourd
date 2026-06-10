@@ -223,8 +223,8 @@ fn test_fn_no_return() {
 
 // ── String conversion builtin ────────────────────────────────────────────
 
-#[verify_rust_output({fn goStr(bytes: &[u8]) -> String {
-        return ::std::str::from_utf8(&bytes).unwrap_or("").to_string()
+#[verify_rust_output({fn goStr(bytes: &[u8]) -> ::gourd::GoString {
+        return ::gourd::GoString::from(::std::str::from_utf8(&bytes).unwrap_or("").to_string())
     }})]
 go! {
     func goStr(bytes []byte) string {
@@ -255,8 +255,8 @@ fn test_param_grouping() {
 }
 
 
-#[verify_rust_output({fn hello() -> String {
-        return ::std::string::String::from("hello")
+#[verify_rust_output({fn hello() -> ::gourd::GoString {
+        return ::gourd::GoString::from("hello")
     }})]
 go! {
     func hello() string {

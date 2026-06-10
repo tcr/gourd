@@ -2,6 +2,8 @@
 //!
 //! Provides 16 string manipulation functions matching Go's stdlib.
 
+use crate::GoString;
+
 /// Returns the index of the first occurrence of `val` in a slice (-1 if not found).
 pub fn index<T: PartialEq>(slice: &[T], val: &T) -> i32 {
     for (i, v) in slice.iter().enumerate() {
@@ -26,52 +28,52 @@ pub fn contains<T: PartialEq>(slice: &[T], val: &T) -> bool {
 }
 
 /// Joins a vector of strings with a separator (Go `strings.Join`).
-pub fn join(elems: Vec<String>, sep: String) -> String {
-    elems.join(&sep)
+pub fn join(elems: impl AsRef<[GoString]>, sep: &str) -> GoString {
+    elems.as_ref().iter().map(|e| e.as_ref()).collect::<Vec<_>>().join(sep).into()
 }
 
 /// Splits a string by a separator (Go `strings.Split`).
-pub fn split(s: String, sep: String) -> Vec<String> {
-    s.split(&sep).map(|s| s.to_string()).collect()
+pub fn split<S: AsRef<str>>(s: S, sep: S) -> Vec<GoString> {
+    s.as_ref().split(sep.as_ref()).map(|s| GoString::from(s.to_string())).collect()
 }
 
 /// Returns true if the string contains the substring (Go `strings.Contains`).
-pub fn contains_str(s: String, sub: String) -> bool {
-    s.contains(&sub)
+pub fn contains_str<S: AsRef<str>>(s: S, sub: S) -> bool {
+    s.as_ref().contains(sub.as_ref())
 }
 
 /// Returns the first index of the substring, or -1 (Go `strings.Index`).
-pub fn index_str(s: String, sub: String) -> i32 {
-    s.find(&sub).map(|i| i as i32).unwrap_or(-1)
+pub fn index_str<S: AsRef<str>>(s: S, sub: S) -> i32 {
+    s.as_ref().find(sub.as_ref()).map(|i| i as i32).unwrap_or(-1)
 }
 
 /// Trims leading and trailing characters (Go `strings.Trim`).
-pub fn trim(s: String, cutset: String) -> String {
-    s.chars().filter(|c| !cutset.contains(*c)).collect()
+pub fn trim<S: AsRef<str>, C: AsRef<str>>(s: S, cutset: C) -> GoString {
+    GoString::from(s.as_ref().chars().filter(|c| !cutset.as_ref().contains(*c)).collect::<String>())
 }
 
 /// Trims leading characters (Go `strings.TrimLeft`).
-pub fn trim_left(s: String, cutset: String) -> String {
-    s.trim_start_matches(|c: char| cutset.contains(c)).to_string()
+pub fn trim_left<S: AsRef<str>, C: AsRef<str>>(s: S, cutset: C) -> GoString {
+    GoString::from(s.as_ref().trim_start_matches(|c: char| cutset.as_ref().contains(c)).to_string())
 }
 
 /// Trims trailing characters (Go `strings.TrimRight`).
-pub fn trim_right(s: String, cutset: String) -> String {
-    s.trim_end_matches(|c: char| cutset.contains(c)).to_string()
+pub fn trim_right<S: AsRef<str>, C: AsRef<str>>(s: S, cutset: C) -> GoString {
+    GoString::from(s.as_ref().trim_end_matches(|c: char| cutset.as_ref().contains(c)).to_string())
 }
 
 /// Converts a string to uppercase (Go `strings.ToUpper`).
-pub fn to_upper(s: String) -> String {
-    s.to_uppercase()
+pub fn to_upper<S: AsRef<str>>(s: S) -> GoString {
+    GoString::from(s.as_ref().to_uppercase())
 }
 
 /// Converts a string to lowercase (Go `strings.ToLower`).
-pub fn to_lower(s: String) -> String {
-    s.to_lowercase()
+pub fn to_lower<S: AsRef<str>>(s: S) -> GoString {
+    GoString::from(s.as_ref().to_lowercase())
 }
 
 /// Repeats a string n times (Go `strings.Repeat`).
-pub fn repeat(s: String, n: i32) -> String {
+pub fn repeat<S: AsRef<str>>(s: S, n: i32) -> String {
     if n <= 0 { return String::new(); }
-    s.repeat(n as usize)
+    s.as_ref().repeat(n as usize)
 }

@@ -12,7 +12,7 @@ fn test_basic_interface() {
     let rust_str = quote::quote! { #rust }.to_string();
     assert!(rust_str.contains("trait Shape"), "expected 'trait Shape' in: {}", rust_str);
     assert!(rust_str.contains("fn name"), "expected 'fn name' in: {}", rust_str);
-    assert!(rust_str.contains("-> String"), "expected '-> String' in: {}", rust_str);
+    assert!(rust_str.contains("GoString"), "expected 'GoString' in: {}", rust_str);
 }
 
 // ── Interface with multiple methods ──────────────────────────────────
@@ -37,7 +37,7 @@ fn test_interface_with_params() {
     let rust_str = quote::quote! { #rust }.to_string();
     assert!(rust_str.contains("trait Printer"), "expected 'trait Printer' in: {}", rust_str);
     assert!(rust_str.contains("fn print"), "expected 'fn print' in: {}", rust_str);
-    assert!(rust_str.contains("msg : String"), "expected 'msg : String' in: {}", rust_str);
+    assert!(rust_str.contains("GoString"), "expected 'GoString' in: {}", rust_str);
 }
 
 // ── Interface with mixed return types ────────────────────────────────
@@ -51,7 +51,7 @@ fn test_interface_mixed_returns() {
     assert!(rust_str.contains("fn id"), "expected 'fn id' in: {}", rust_str);
     assert!(rust_str.contains("fn name"), "expected 'fn name' in: {}", rust_str);
     assert!(rust_str.contains("-> i32"), "expected '-> i32' in: {}", rust_str);
-    assert!(rust_str.contains("-> String"), "expected '-> String' in: {}", rust_str);
+    assert!(rust_str.contains("GoString"), "expected 'GoString' in: {}", rust_str);
 }
 
 // ── Interface with slice method ──────────────────────────────────────
@@ -65,7 +65,7 @@ fn test_interface_slice_method() {
     assert!(rust_str.contains("fn read"), "expected 'fn read' in: {}", rust_str);
     assert!(rust_str.contains("data : &"), "expected 'data : &' in: {}", rust_str);
     assert!(rust_str.contains("[u8]"), "expected '[u8]' in: {}", rust_str);
-    assert!(rust_str.contains("-> Vec"), "expected '-> Vec' in: {}", rust_str);
+    assert!(rust_str.contains("GoSlice"), "expected 'GoSlice' in: {}", rust_str);
 }
 
 // ── Interface with parameter grouping ────────────────────────────────

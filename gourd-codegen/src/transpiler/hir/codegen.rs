@@ -69,16 +69,24 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
         }
         HirExprKind::Binary { op, lhs, rhs } => hir_binary_to_rust(op, lhs, rhs),
         HirExprKind::Unary { op, operand } => hir_unary_to_rust(op, operand),
-        HirExprKind::Call { func, args } => hir_call_to_rust(func, args),
-        HirExprKind::MethodCall { receiver, method, args } => hir_method_call_to_rust(receiver, method, args),
+        HirExprKind::Call { func, args } => {
+            let ft = hir_expr_to_rust(func);
+            eprintln!("DEBUG CALL PATH: func={}", ft);
+            hir_call_to_rust(func, args)
+        }
+        HirExprKind::MethodCall { receiver, method, args } => {
+            let rt = hir_expr_to_rust(receiver);
+            eprintln!("DEBUG METHOD PATH: receiver={}, method={}", rt, method);
+            hir_method_call_to_rust(receiver, method, args)
+        }
         HirExprKind::FieldAccess { receiver, field } => hir_field_access_to_rust(receiver, field),
         HirExprKind::Index { collection, index } => hir_index_to_rust(collection, index),
         HirExprKind::StringByteIndex { collection, index } => {
-            // Go string byte indexing: `str[i]` → `.as_bytes()[i as usize]`
+            // Go string byte indexing: `str[i]` → `.get_byte(i as usize)`
             // In Go, string indexing always yields a byte (u8).
             let collection_tokens = hir_expr_to_rust(collection);
             let index_tokens = hir_expr_to_rust(index);
-            quote! { #collection_tokens.as_bytes()[(#index_tokens) as usize] }
+            quote! { (#collection_tokens).get_byte((#index_tokens) as usize) }
         }
         HirExprKind::Slice { collection, start, end } => hir_slice_to_rust(collection, start, end),
         HirExprKind::RangeVar(name) => quote! { #name },
@@ -99,7 +107,7 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
             // std::delete(m, key) → std_delete(m, key)
             // std::append(slice, items...) → std_append(slice, &[items])
             let rust_fn = match func_name.as_str() {
-                "copy" => "std_copy",
+                "copy" => "std_copy_slice",
                 "delete" => "std_delete",
                 "append" => "std_append",
                 _ => return emit_todo(&format!("std::{} is not supported", func_name)),
@@ -109,14 +117,13 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
             let arg_tokens: Vec<TokenStream> = args.iter().map(|a| hir_expr_to_rust(a)).collect();
             let wrapped_args: Vec<TokenStream> = match func_name.as_str() {
                 "copy" => {
-                    // std_copy(&mut [T], &[T]) — pass slices from vecs
+                    // std_copy_slice takes owned GoSlice and &[T] — convert Vec arg if needed
                     if arg_tokens.len() >= 2 {
                         let first = &arg_tokens[0];
-                        // For the second arg, if it's already a slice-like value, just pass &it
-                        // Otherwise wrap in &[...]
                         let second = &arg_tokens[1];
+                        // Convert first arg to GoSlice, convert second to &[T]
                         vec![
-                            quote! { &mut (#first).as_mut_slice() },
+                            quote! { #first.into() },  // Vec<T> or GoSlice<T> → GoSlice<T>
                             quote! { &#second },
                         ]
                     } else {
@@ -137,7 +144,7 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
                     }
                 }
                 "append" => {
-                    // std_append(Vec, &[items]) — collect remaining args into a slice
+                    // std_append(GoSlice, &[items]) — pass GoSlice with slice of items
                     if arg_tokens.len() >= 2 {
                         let items = &arg_tokens[1..];
                         vec![
@@ -145,7 +152,7 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
                             quote! { &[ #(#items),* ] },
                         ]
                     } else if arg_tokens.len() == 1 {
-                        // No items to append
+                        // No items to append — pass empty slice
                         vec![
                             arg_tokens[0].clone(),
                             quote! { &[] },
@@ -205,7 +212,7 @@ fn hir_literal_to_rust(lit: &HirLiteral) -> TokenStream {
         }
         HirLiteral::Float(f) => quote! { #f },
         HirLiteral::Bool(b) => quote! { #b },
-        HirLiteral::StringTy(s) => quote! { ::std::string::String::from(#s) },
+        HirLiteral::StringTy(s) => quote! { ::gourd::GoString::from(#s) },
         HirLiteral::Nil => quote! { None },
     }
 }
@@ -296,13 +303,19 @@ fn hir_call_to_rust(func: &HirExpr, args: &[HirExpr]) -> TokenStream {
         // Normalize for detection by checking both spaced and non-spaced forms
         let path_str = quote::quote!(#hir_path).to_string();
         let normalized = path_str.replace(" :: ", "::").replace("::", "::");
+        eprintln!("DEBUG CALL: path_str={:?}, normalized={:?}", path_str, normalized);
         if normalized.contains("strings::Fields") || path_str.contains("strings :: Fields") {
             // strings.Fields(s) → gourd::prelude::fields(&s)
             return quote! { ::gourd::prelude::fields(&#(#arg_tokens),*) };
         }
         if normalized.contains("strings::Join") || path_str.contains("strings :: Join") {
-            // strings.Join(parts, sep) → gourd::prelude::join(&parts, sep)
-            return quote! { ::gourd::prelude::join(&#(#arg_tokens),*) };
+            // strings.Join(parts, sep) → gourd::prelude::join(parts, &sep.as_ref())
+            // The first arg is the parts (Vec<GoString> from transpiled array literal), second is the separator
+            if arg_tokens.len() >= 2 {
+                let parts = &arg_tokens[0];
+                let sep = &arg_tokens[1];
+                return quote! { ::gourd::prelude::join(#parts, &#sep.as_ref()) };
+            }
         }
         if normalized.contains("fmt::Sprintf") || path_str.contains("fmt :: Sprintf")
             || normalized.contains("::gourd::prelude::fmt_sprintf") || path_str.contains(":: gourd :: prelude :: fmt_sprintf")
@@ -339,6 +352,15 @@ fn hir_call_to_rust(func: &HirExpr, args: &[HirExpr]) -> TokenStream {
 fn hir_method_call_to_rust(receiver: &HirExpr, method: &syn::Ident, args: &[HirExpr]) -> TokenStream {
     let receiver_tokens = hir_expr_to_rust(receiver);
     let arg_tokens: Vec<TokenStream> = args.iter().map(|a| hir_expr_to_rust(a)).collect();
+    
+    // Handle strings.Join specially
+    if method.to_string() == "Join" {
+        if arg_tokens.len() >= 2 {
+            let parts = &arg_tokens[0];
+            let sep = &arg_tokens[1];
+            return quote! { ::gourd::prelude::join(#parts, &#sep.as_ref()) };
+        }
+    }
     quote! { #receiver_tokens.#method( #(#arg_tokens),* ) }
 }
 
@@ -351,42 +373,31 @@ fn hir_field_access_to_rust(receiver: &HirExpr, field: &syn::Ident) -> TokenStre
 /// Convert a HIR index access to Rust tokens.
 /// Go indices (int/i32) are cast to usize for Rust compatibility.
 /// Map accesses are detected via collection name heuristics and
-/// redirected to `map_get_ref` for correct HashMap behavior.
+/// redirected to `GoMap::get()` for correct map behavior.
 fn hir_index_to_rust(collection: &HirExpr, index: &HirExpr) -> TokenStream {
     let collection_tokens = hir_expr_to_rust(collection);
     let index_tokens = hir_expr_to_rust(index);
     let collection_str = quote::quote!(#collection_tokens).to_string();
-    let index_str = quote::quote!(#index_tokens).to_string();
-    
+
     // Use consolidated heuristic for map detection (type-based + name-based)
-    if heuristics::heuristic_should_use_map_get_ref(&collection_str, &index_str) {
-        return quote! { ::gourd::prelude::map_get_ref( &#collection_tokens, &#index_tokens) };
+    if heuristics::heuristic_should_use_map_get_ref(&collection_str, "") {
+        return quote! { (#collection_tokens).get( &#index_tokens) };
     }
 
-    // Detect string byte indexing: Go `str[i]` where str is a String.
-    // In Rust, `String[i]` is not valid — use `.as_bytes()[i]` instead.
-    // Heuristic: simple identifier, not map-like, and name suggests string.
-    let collection_lower = collection_str.to_lowercase();
-    let collection_is_string = collection_str.contains("::std::string::String")
-        || collection_str.contains("::std::string :: String")
-        || collection_lower == "string";
-    // Also detect common Go string parameter names that aren't slice collections.
-    // In Go, `input[i]` on a string parameter always yields a byte.
-    // We detect this when: it's a single-word identifier, not map-like,
-    // and the name is commonly used for strings rather than slices.
-    let common_string_params = ["input", "text", "str", "s", "msg", "phrase"];
-    let is_common_string_param = syn::parse_str::<syn::Ident>(&collection_lower)
-        .ok()
-        .filter(|id| {
-            common_string_params.iter().any(|&name| id == name)
-        })
-        .is_some();
-    if is_common_string_param && !heuristics::heuristic_is_map_iteration(&collection_lower) {
-        return quote! { #collection_tokens.as_bytes()[ (#index_tokens) as usize] };
+    // Default: cast Go int index to usize for Rust slice indexing.
+    // For known GoSlice, use .get_or_default() which panics on out-of-bounds.
+    // For everything else (Rust slice refs, unknowns), use [] directly.
+    let coll_ty = get_expr_type(collection);
+    match &coll_ty.kind {
+        HirTypeKind::Slice(inner) => {
+            // GoSlice[T] indexing — use .get_or_default() to panic on OOB
+            quote! { #collection_tokens.get_or_default((#index_tokens) as usize) }
+        }
+        _ => {
+            // Rust slice ref (&[T]) or unknown — use Rust [] indexing
+            quote! { #collection_tokens[(#index_tokens) as usize] }
+        }
     }
-
-    // Default: cast Go int index to usize for Rust slice indexing
-    quote! { #collection_tokens[(#index_tokens) as usize] }
 }
 
 /// Convert a HIR slice expression to Rust tokens.
@@ -394,20 +405,24 @@ fn hir_slice_to_rust(collection: &HirExpr, start: &Option<Box<HirExpr>>, end: &O
     let collection_tokens = hir_expr_to_rust(collection);
     match (start, end) {
         (Some(s), Some(e)) => {
+            // Go `s[lo:hi]` → .slice(lo, hi)
             let s_tokens = hir_expr_to_rust(s);
             let e_tokens = hir_expr_to_rust(e);
-            quote! { #collection_tokens[#s_tokens..#e_tokens] }
+            quote! { #collection_tokens.slice(#s_tokens as usize, #e_tokens as usize) }
         }
         (Some(s), None) => {
+            // Go `s[lo:]` → .slice_from(lo)
             let s_tokens = hir_expr_to_rust(s);
-            quote! { #collection_tokens[#s_tokens..] }
+            quote! { #collection_tokens.slice_from(#s_tokens as usize) }
         }
         (None, Some(e)) => {
+            // Go `s[:hi]` → .slice_to(hi)
             let e_tokens = hir_expr_to_rust(e);
-            quote! { #collection_tokens[..#e_tokens] }
+            quote! { #collection_tokens.slice_to(#e_tokens as usize) }
         }
         (None, None) => {
-            quote! { #collection_tokens[..] }
+            // Go `s[:]` → .clone_slice()
+            quote! { #collection_tokens.clone_slice() }
         }
     }
 }
@@ -465,11 +480,11 @@ fn hir_type_convert_to_rust(func: &syn::Ident, arg: &HirExpr) -> TokenStream {
         "string" => {
             let arg_str = quote::quote!(#arg_tokens).to_string();
             // If the argument is already a u8 (from string byte indexing), 
-            // convert byte to char then to String
+            // convert byte to char then to GoString
             if arg_str.contains("as_bytes") {
-                quote! { ( #arg_tokens as char ).to_string() }
+                quote! { ::gourd::GoString::from_byte((#arg_tokens) as u8) }
             } else {
-                quote! { ::std::str::from_utf8(&#arg_tokens).unwrap_or("").to_string() }
+                quote! { ::gourd::GoString::from_int(#arg_tokens as i64) }
             }
         },
         // Fallback
@@ -644,33 +659,30 @@ fn hir_cap_to_rust(expr: &HirExpr) -> TokenStream {
 fn hir_make_to_rust(kind: &MakeKind) -> TokenStream {
     match kind {
         MakeKind::Slice(elem_ty, len) => {
+            // make([]T, len) → GoSlice::with_length(len)
             let elem_ty = elem_ty.as_ref();
             let elem_tokens = elem_ty.to_rust_type();
             let len_tokens = hir_expr_to_rust(len);
-            quote! { ::std::iter::repeat(#elem_tokens::default()).take(#len_tokens as usize).collect::<Vec<#elem_tokens>>() }
+            quote! { ::gourd::GoSlice::<#elem_tokens>::with_length(#len_tokens as usize) }
         }
         MakeKind::SliceWithCap(elem_ty, len, cap) => {
+            // make([]T, len, cap) → GoSlice::with_capacity(cap)
             let elem_ty = elem_ty.as_ref();
             let elem_tokens = elem_ty.to_rust_type();
-            let len_tokens = hir_expr_to_rust(len);
             let cap_tokens = hir_expr_to_rust(cap);
-            quote! { {
-                let mut v: Vec<#elem_tokens> = Vec::with_capacity(#cap_tokens as usize);
-                v.resize(#len_tokens as usize, #elem_tokens::default());
-                v
-            } }
+            quote! { ::gourd::GoSlice::<#elem_tokens>::with_capacity(#cap_tokens as usize) }
         }
         MakeKind::Map(key_ty, val_ty) => {
             let key_tokens = key_ty.to_rust_type();
             let val_tokens = val_ty.to_rust_type();
-            quote! { ::gourd::prelude::HashMap::<#key_tokens, #val_tokens>::new() }
+            quote! { ::gourd::GoMap::<#key_tokens, #val_tokens>::new() }
         }
         MakeKind::MapWithCap(key_ty, val_ty, cap) => {
             let key_tokens = key_ty.to_rust_type();
             let val_tokens = val_ty.to_rust_type();
             let cap_tokens = hir_expr_to_rust(cap);
             quote! { {
-                let mut m = ::gourd::prelude::HashMap::<#key_tokens, #val_tokens>::with_capacity(#cap_tokens as usize);
+                let mut m = ::gourd::GoMap::<#key_tokens, #val_tokens>::with_capacity(#cap_tokens as usize);
                 m
             } }
         }
@@ -707,7 +719,7 @@ fn hir_append_to_rust(target: &HirExpr, elements: &[HirExpr]) -> TokenStream {
 fn hir_copy_to_rust(dst: &HirExpr, src: &HirExpr) -> TokenStream {
     let dst_tokens = hir_expr_to_rust(dst);
     let src_tokens = hir_expr_to_rust(src);
-    quote! { #dst_tokens.copy_from_slice(&#src_tokens) }
+    quote! { #dst_tokens.copy_from(#src_tokens) }
 }
 
 /// Convert a HIR statement to Rust tokens.
@@ -720,18 +732,17 @@ pub fn hir_stmt_to_rust(stmt: &HirStatement, strip_returns: bool) -> TokenStream
             quote! { let #mut_kw #name = #value_tokens ; }
         }
         HirStatement::Assign { target, value } => {
-            // Detect map index assignment: when target is Index, use map_set_mut_ref.
+            // Detect map index assignment: when target is Index, use GoMap::set().
             // In Go, `map[key] = value` is an lvalue; in Rust we use
-            // `*map_set_mut_ref(&mut map, &key) = value` to modify entries.
+            // `(*map.set(key)) = value` to modify entries.
             if let HirExprKind::Index { collection, index } = &target.kind {
                 let collection_tokens = hir_expr_to_rust(collection);
                 let collection_str = collection_tokens.to_string();
-                let collection_lower = collection_str.to_lowercase();
-                // Heuristic: collection name suggests map → use map_set_mut_ref
+                // Heuristic: collection name suggests map → use GoMap::set()
                 if heuristics::heuristic_should_use_map_set(&collection_str) {
                     let idx_tokens = hir_expr_to_rust(index);
                     let val_tokens = hir_expr_to_rust(value);
-                    return quote! { *::gourd::prelude::map_set_mut_ref( &mut #collection_tokens, &#idx_tokens ) = #val_tokens };
+                    return quote! { (*(#collection_tokens).set(#idx_tokens)) = #val_tokens };
                 }
             }
             let target_tokens = hir_expr_to_rust(target);
@@ -1053,11 +1064,11 @@ fn get_expr_type(expr: &HirExpr) -> HirType {
             HirType::new(HirTypeKind::I32)
         }
         HirExprKind::Call { func, .. } => {
-            // Detect String::from(...) calls and fmt functions
+            // Detect ::gourd::GoString::from(...) calls and fmt functions
             if let HirExprKind::Path(ref hir_path) = func.kind {
                 let path_str = quote::quote!(#hir_path).to_string();
                 let normalized = path_str.replace(" :: ", "::");
-                if normalized.contains("::std::string::String::from") {
+                if normalized.contains("::gourd::GoString::from") {
                     return HirType::new(HirTypeKind::StringTy);
                 }
                 if normalized.contains("fmt_") {
@@ -1078,10 +1089,15 @@ fn get_expr_type(expr: &HirExpr) -> HirType {
             HirType::new(HirTypeKind::Slice(Box::new(HirType::new(HirTypeKind::I32))))
         }
         HirExprKind::Index { collection, .. } | HirExprKind::StringByteIndex { collection, .. } => {
-            // Indexing into a Vec<String> or similar collection yields String
-            // When collection type is unknown (Identifier), return Slice<I32> so slicing works
+            // Indexing into a GoString yields a byte (u8) via .get_byte()
+            // Indexing into a GoSlice yields the element type
             let coll_ty = get_expr_type(collection);
             match &coll_ty.kind {
+                HirTypeKind::StringTy => HirType::new(HirTypeKind::U8),
+                HirTypeKind::Slice(inner) => {
+                    // GoSlice[T] indexing yields T
+                    HirType::new(HirTypeKind::Slice(inner.clone()))
+                }
                 HirTypeKind::Slice(inner) if matches!(&inner.kind, HirTypeKind::StringTy) => {
                     HirType::new(HirTypeKind::StringTy)
                 }
@@ -1156,10 +1172,11 @@ fn hir_match_to_rust(
 fn hir_slice_literal_to_rust(elements: &[HirExpr]) -> TokenStream {
     let elems: Vec<TokenStream> = elements.iter().map(|e| hir_expr_to_rust(e)).collect();
     if elems.is_empty() {
-        // Empty slice literal `[]int{}` → `vec![]` (type inferred by context)
-        quote! { vec![] }
+        // Empty slice literal `[]int{}` → `GoSlice::new()` (type inferred by context)
+        quote! { ::gourd::GoSlice::new() }
     } else {
-        quote! { vec![#(#elems),*] }
+        // Go slice literal `[]int{1, 2, 3}` → `GoSlice::from(vec![1, 2, 3])`
+        quote! { ::gourd::GoSlice::from(vec![#(#elems),*]) }
     }
 }
 

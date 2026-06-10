@@ -18,8 +18,8 @@ fn test_multi_return() {
 }
 
 // Test triple multi-return
-#[verify_rust_output({fn go_triple(a: i32, b: i32) -> (i32, i32, String) {
-    return (a + b, a * b, ::std::string::String::from("pair"))
+#[verify_rust_output({fn go_triple(a: i32, b: i32) -> (i32, i32, ::gourd::GoString) {
+    return (a + b, a * b, ::gourd::GoString::from("pair"))
 }})]
 go! {
     func go_triple(a int, b int) (int, int, string) {
@@ -36,12 +36,12 @@ fn test_triple_return() {
 }
 
 // Test string-keyed map literal
-#[verify_rust_output({fn goMapSize(_a: String) -> i32 {
+#[verify_rust_output({fn goMapSize(_a: ::gourd::GoString) -> i32 {
     let m = {
         let mut m = ::gourd::prelude::HashMap::new();
-        m.insert(::std::string::String::from("a"), 1);
-        m.insert(::std::string::String::from("b"), 2);
-        m.insert(::std::string::String::from("c"), 3);
+        m.insert(::gourd::GoString::from("a"), 1);
+        m.insert(::gourd::GoString::from("b"), 2);
+        m.insert(::gourd::GoString::from("c"), 3);
         m
     };
     ;
@@ -56,7 +56,7 @@ go! {
 
 #[test]
 fn test_map_literal() {
-    let result = goMapSize(String::from("ignored"));
+    let result = goMapSize(::gourd::GoString::from("ignored"));
     assert_eq!(result, 3);
 }
 
@@ -64,7 +64,7 @@ fn test_map_literal() {
 #[verify_rust_output({fn goEmptyMap() -> i32 {
     let m = {
         let mut m = ::gourd::prelude::HashMap::new();
-        m.insert(::std::string::String::from("x"), 0);
+        m.insert(::gourd::GoString::from("x"), 0);
         m
     };
     ;

@@ -185,14 +185,14 @@ fn test_multi_return() {
 fn test_mixed_tuple_return() {
     let input = goFn(quote! {
         fn go_format(n int) (int, string) {
-            (n, String::from("hello"))
+            (n, ::gourd::GoString::from("hello"))
         }
     });
     assert_transpile_matches(
         input,
         quote! {
-            fn go_format(n: i32) -> (i32, String) {
-                (n, String::from("hello"))
+            fn go_format(n: i32) -> (i32, ::gourd::GoString) {
+                (n, ::gourd::GoString::from("hello"))
             }
         },
     );
@@ -202,14 +202,14 @@ fn test_mixed_tuple_return() {
 fn test_triple_return() {
     let input = goFn(quote! {
         fn go_triple(a int, b int) (int, int, string) {
-            (a + b, a * b, String::from("pair"))
+            (a + b, a * b, ::gourd::GoString::from("pair"))
         }
     });
     assert_transpile_matches(
         input,
         quote! {
-            fn go_triple(a: i32, b: i32) -> (i32, i32, String) {
-                (a + b, a * b, String::from("pair"))
+            fn go_triple(a: i32, b: i32) -> (i32, i32, ::gourd::GoString) {
+                (a + b, a * b, ::gourd::GoString::from("pair"))
             }
         },
     );
@@ -220,7 +220,7 @@ fn test_triple_return() {
 #[test]
 fn test_string_param() {
     let input = goFn(quote! { fn goLen(s string) i32 { s.len() as i32 } });
-    assert_transpile_matches(input, quote! { fn goLen(s: String) -> i32 { s.len() as i32 } });
+    assert_transpile_matches(input, quote! { fn goLen(s: ::gourd::GoString) -> i32 { s.len() as i32 } });
 }
 
 #[test]
@@ -287,8 +287,8 @@ fn test_string_builtin() {
     assert_transpile_matches(
         input,
         quote! {
-            fn goStr(bytes: &[u8]) -> String {
-                std::str::from_utf8(&bytes).unwrap_or("").to_string()
+            fn goStr(bytes: &[u8]) -> ::gourd::GoString {
+                ::gourd::GoString::from(std::str::from_utf8(&bytes).unwrap_or("").to_string())
             }
         },
     );
@@ -321,11 +321,11 @@ fn test_int_map_body() {
     assert_transpile_matches(
         input,
         quote! {
-            fn goIntMap() -> String {
+            fn goIntMap() -> ::gourd::GoString {
                 {
-                    let mut m = std::collections::HashMap::<i32, String>::new();
-                    m.insert(1, ::std::string::String::from("one"));
-                    m.insert(2, ::std::string::String::from("two"));
+                    let mut m = std::collections::HashMap::<i32, ::gourd::GoString>::new();
+                    m.insert(1, ::gourd::GoString::from("one"));
+                    m.insert(2, ::gourd::GoString::from("two"));
                     m
                 }.get(&2).unwrap().clone()
             }

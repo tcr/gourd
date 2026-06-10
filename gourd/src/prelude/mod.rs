@@ -92,7 +92,11 @@ pub use error::{GoError, make_error, check_error, recover};
 pub use any::Any;
 
 // Standard library builtins
-pub use std::{len, cap, append, make_slice, make_map, copy, min, max, std_copy, std_delete, std_append, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, display_map, HashMap};
+pub use std::{len, cap, append, make_slice, copy, min, max, std_copy, std_copy_slice, std_append};
+pub use ::std::collections::HashMap;
+
+// Deprecated: map helper functions (use GoMap::get/set/delete instead)
+pub use std::{make_map, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, display_map, std_delete};
 
 // Random
 pub use rand::GoRand;

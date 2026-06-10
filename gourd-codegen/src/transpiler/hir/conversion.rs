@@ -54,14 +54,20 @@ fn preprocess_go_slice_literals(ts: TokenStream) -> TokenStream {
                         && matches!(&rest[1], TokenTree::Ident(_))
                         && matches!(&rest[2], TokenTree::Group(g) if g.delimiter() == Delimiter::Brace)
                     {
-                        // Emit `vec![elems]` instead of `[]T{...}`
+                        // Emit `GoSlice::from(vec![elems])` instead of `[]T{...}`
                         let inner = rest[2].clone();
                         if let TokenTree::Group(g) = &inner {
-                            result.push(TokenTree::Ident(syn::Ident::new("vec", proc_macro2::Span::call_site())));
-                            result.push(TokenTree::Punct(Punct::new('!', Spacing::Joint)));
+                            result.push(TokenTree::Ident(syn::Ident::new("GoSlice", proc_macro2::Span::call_site())));
+                            result.push(TokenTree::Punct(Punct::new(':', Spacing::Joint)));
+                            result.push(TokenTree::Punct(Punct::new(':', Spacing::Alone)));
+                            result.push(TokenTree::Ident(syn::Ident::new("from", proc_macro2::Span::call_site())));
                             result.push(TokenTree::Group(Group::new(
-                                Delimiter::Bracket,
-                                g.stream(),
+                                Delimiter::Parenthesis,
+                                TokenStream::from_iter(vec![
+                                    TokenTree::Ident(syn::Ident::new("vec", proc_macro2::Span::call_site())),
+                                    TokenTree::Punct(Punct::new('!', Spacing::Joint)),
+                                    inner,
+                                ]),
                             )));
                             i += 3;
                         } else {

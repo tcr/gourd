@@ -30,7 +30,7 @@ fn try_parse_fmt_method_call(path: &syn::Path) -> Option<TokenStream> {
 pub fn transpile_lit(input: &ExprLit) -> TokenStream {
     let lit = &input.lit;
     match lit {
-        syn::Lit::Str(s) => quote! { ::std::string::String::from(#s) },
+        syn::Lit::Str(s) => quote! { ::gourd::GoString::from(#s) },
         _                => quote! { #lit },
     }
 }
@@ -98,7 +98,7 @@ pub fn transpile_verbatim(tokens: &proc_macro2::TokenStream) -> TokenStream {
             let brace_content = g.stream();
             let parser: ElemParser = syn::parse2(brace_content).unwrap_or_default();
             let elems: Vec<_> = parser.elems.iter().map(|expr| crate::transpiler::legacy::expr_dispatch::go_to_rust(expr)).collect();
-            return quote! { vec![ #(#elems),* ] };
+            return quote! { ::gourd::GoSlice::from(vec![ #(#elems),* ]) };
         }
     }
 

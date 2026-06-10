@@ -111,12 +111,12 @@ impl HirType {
             HirTypeKind::F32 => quote! { f32 },
             HirTypeKind::F64 => quote! { f64 },
             HirTypeKind::Bool => quote! { bool },
-            HirTypeKind::StringTy => quote! { String },
+            HirTypeKind::StringTy => quote! { ::gourd::GoString },
             HirTypeKind::Char => quote! { char },
             HirTypeKind::Slice(elem) => {
-                // Owned slice in expression/variable position → Vec<T>
+                // Owned slice in expression/variable position → GoSlice<T>
                 let elem_ty = elem.to_rust_type();
-                quote! { Vec<#elem_ty> }
+                quote! { ::gourd::GoSlice<#elem_ty> }
             }
             HirTypeKind::SliceRef(elem) => {
                 // Borrowed slice in parameter position → &[T]
@@ -142,10 +142,11 @@ impl HirType {
                 quote! { GoChannel<#elem_ty> }
             }
             HirTypeKind::GenericHirVec(elem) => {
+                // Generic vec (e.g. from slice literals) → GoSlice<T>
                 let elem_ty = elem.to_rust_type();
-                quote! { Vec<#elem_ty> }
+                quote! { ::gourd::GoSlice<#elem_ty> }
             }
-            HirTypeKind::GenericHirHashMap => quote! { ::gourd::prelude::HashMap },
+            HirTypeKind::GenericHirHashMap => quote! { ::gourd::GoMap },
             HirTypeKind::Error => quote! { Box<dyn std::error::Error> },
             HirTypeKind::Unit => TokenStream::new(),
             HirTypeKind::Struct { name, fields } => {
@@ -278,7 +279,7 @@ impl HirTypeKind {
             HirTypeKind::F32 => "f32".to_string(),
             HirTypeKind::F64 => "f64".to_string(),
             HirTypeKind::Bool => "bool".to_string(),
-            HirTypeKind::StringTy => "string".to_string(),
+            HirTypeKind::StringTy => "GoString".to_string(),
             HirTypeKind::Char => "char".to_string(),
             HirTypeKind::Slice(_) | HirTypeKind::SliceRef(_) => "slice".to_string(),
             HirTypeKind::Array(_, _) => "array".to_string(),
@@ -286,7 +287,7 @@ impl HirTypeKind {
             HirTypeKind::Pointer(_) => "pointer".to_string(),
             HirTypeKind::Channel(_) => "channel".to_string(),
             HirTypeKind::GenericHirVec(_) => "Vec".to_string(),
-            HirTypeKind::GenericHirHashMap => "HashMap".to_string(),
+            HirTypeKind::GenericHirHashMap => "GoMap".to_string(),
             HirTypeKind::Error => "error".to_string(),
             HirTypeKind::Unit => "unit".to_string(),
             HirTypeKind::Unknown(n) => n.clone(),
@@ -1047,16 +1048,39 @@ pub(crate) fn map_go_type_str(go_type: &str) -> syn::Type {
         "rune" => "char",
         "float32" => "f32",
         "float64" => "f64",
-        "string" => "String",
+        "string" => "::gourd::GoString",
         "bool" => "bool",
         "error" => "Box<dyn std::error::Error>",
         _ => "unknown",
     };
     syn::parse_str::<syn::Type>(rust_type).unwrap_or_else(|_| {
-        syn::Type::Path(syn::TypePath {
-            path: syn::Path::from(syn::Ident::new(rust_type, proc_macro2::Span::call_site())),
-            qself: None,
-        })
+        // Fallback: construct a Type::Path manually.
+        // If the type string contains '::', it's a qualified path like "::gourd::GoString".
+        let (is_global, type_str) = if rust_type.starts_with("::") {
+            (true, &rust_type[2..])
+        } else {
+            (false, rust_type)
+        };
+        let segments: Vec<syn::Ident> = type_str
+            .split("::")
+            .filter(|s| !s.is_empty())
+            .map(|s| syn::Ident::new(s, proc_macro2::Span::call_site()))
+            .collect();
+        let path = if segments.is_empty() {
+            syn::Path::from(syn::Ident::new("unknown", proc_macro2::Span::call_site()))
+        } else if is_global {
+            let mut path_segments = syn::punctuated::Punctuated::new();
+            for seg in segments {
+                path_segments.push(syn::PathSegment::from(seg));
+            }
+            syn::Path {
+                leading_colon: Some(syn::Token![::](proc_macro2::Span::call_site())),
+                segments: path_segments,
+            }
+        } else {
+            syn::Path::from(segments.first().cloned().unwrap_or_else(|| syn::Ident::new("unknown", proc_macro2::Span::call_site())))
+        };
+        syn::Type::Path(syn::TypePath { path, qself: None })
     })
 }
 
@@ -1172,7 +1196,7 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                     // Replace with the mapped Go type
                     let mapped_ident = match first_name.as_str() {
                         "bool" => "bool",
-                        "string" => "String",
+                        "string" => "GoString",
                         "int" => "i32",
                         "int8" => "i8",
                         "int16" => "i16",
@@ -1191,10 +1215,43 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                         "error" => "Box<dyn std::error::Error>",
                         _ => unreachable!(),
                     };
-                    return syn::Type::Path(syn::TypePath {
-                        path: syn::Path::from(syn::Ident::new(mapped_ident, proc_macro2::Span::call_site())),
-                        qself: None,
-                    });
+                    // Build the path from the mapped type string.
+                    // Handle simple names ("bool", "i32") and qualified paths ("::gourd::GoString").
+                    if mapped_ident.contains("::") {
+                        // Qualified path: build from segments
+                        let (is_global, rest) = if mapped_ident.starts_with("::") {
+                            (true, &mapped_ident[2..])
+                        } else {
+                            (false, mapped_ident)
+                        };
+                        let mut path_segments = syn::punctuated::Punctuated::new();
+                        for segment in rest.split("::").filter(|s| !s.is_empty()) {
+                            path_segments.push(syn::PathSegment::from(
+                                syn::Ident::new(segment, proc_macro2::Span::call_site()),
+                            ));
+                        }
+                        if is_global {
+                            return syn::Type::Path(syn::TypePath {
+                                path: syn::Path {
+                                    leading_colon: Some(syn::Token![::](proc_macro2::Span::call_site())),
+                                    segments: path_segments,
+                                },
+                                qself: None,
+                            });
+                        } else {
+                            return syn::Type::Path(syn::TypePath {
+                                path: syn::Path { segments: path_segments, leading_colon: None },
+                                qself: None,
+                            });
+                        }
+                    } else {
+                        // Simple identifier
+                        let id = syn::Ident::new(mapped_ident, proc_macro2::Span::call_site());
+                        return syn::Type::Path(syn::TypePath {
+                            path: syn::Path::from(id),
+                            qself: None,
+                        });
+                    };
                 }
             }
 

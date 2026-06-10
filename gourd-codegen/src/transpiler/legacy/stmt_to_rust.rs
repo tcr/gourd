@@ -61,7 +61,7 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
         }
         GoStmt::GoSlice(elems) => {
             let elems: Vec<_> = elems.iter().map(go_to_rust).collect();
-            quote! { vec![ #(#elems),* ] }
+            quote! { ::gourd::GoSlice::from(vec![ #(#elems),* ]) }
         }
         GoStmt::GoMap(ident, key_type, val_type, entries) => {
             go_stmt_to_rust_map(ident, key_type, val_type, entries)

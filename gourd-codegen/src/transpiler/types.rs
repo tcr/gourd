@@ -21,16 +21,39 @@ pub(crate) fn map_go_type_str(go_type: &str) -> syn::Type {
         "rune" => "char",
         "float32" => "f32",
         "float64" => "f64",
-        "string" => "String",
+        "string" => "::gourd::GoString",
         "bool" => "bool",
         "error" => "Box<dyn std::error::Error>",
         _ => "unknown",
     };
     syn::parse_str::<syn::Type>(rust_type).unwrap_or_else(|_| {
-        syn::Type::Path(syn::TypePath {
-            path: syn::Path::from(syn::Ident::new(rust_type, proc_macro2::Span::call_site())),
-            qself: None,
-        })
+        // Fallback: construct a Type::Path manually.
+        // If the type string contains '::', it's a qualified path like "::gourd::GoString".
+        let (is_global, type_str) = if rust_type.starts_with("::") {
+            (true, &rust_type[2..])
+        } else {
+            (false, rust_type)
+        };
+        let segments: Vec<syn::Ident> = type_str
+            .split("::")
+            .filter(|s| !s.is_empty())
+            .map(|s| syn::Ident::new(s, proc_macro2::Span::call_site()))
+            .collect();
+        let path = if segments.is_empty() {
+            syn::Path::from(syn::Ident::new("unknown", proc_macro2::Span::call_site()))
+        } else if is_global {
+            let mut path_segments = syn::punctuated::Punctuated::new();
+            for seg in segments {
+                path_segments.push(syn::PathSegment::from(seg));
+            }
+            syn::Path {
+                leading_colon: Some(syn::Token![::](proc_macro2::Span::call_site())),
+                segments: path_segments,
+            }
+        } else {
+            syn::Path::from(segments.first().cloned().unwrap_or_else(|| syn::Ident::new("unknown", proc_macro2::Span::call_site())))
+        };
+        syn::Type::Path(syn::TypePath { path, qself: None })
     })
 }
 
@@ -146,7 +169,7 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                     // Replace with the mapped Go type
 let mapped_ident = match first_name.as_str() {
                         "bool" => "bool",
-                        "string" => "String",
+                        "string" => "::gourd::GoString",
                         "int" => "i32",
                         "int8" => "i8",
                         "int16" => "i16",
@@ -165,10 +188,43 @@ let mapped_ident = match first_name.as_str() {
                         "error" => "Box",
                         _ => unreachable!(),
                     };
-                    return syn::Type::Path(syn::TypePath {
-                        path: syn::Path::from(syn::Ident::new(mapped_ident, proc_macro2::Span::call_site())),
-                        qself: None,
-                    });
+                    // Build the path from the mapped type string.
+                    // Handle simple names ("bool", "i32") and qualified paths ("::gourd::GoString").
+                    if mapped_ident.contains("::") {
+                        // Qualified path: build from segments
+                        let (is_global, rest) = if mapped_ident.starts_with("::") {
+                            (true, &mapped_ident[2..])
+                        } else {
+                            (false, mapped_ident)
+                        };
+                        let mut path_segments = syn::punctuated::Punctuated::new();
+                        for segment in rest.split("::").filter(|s| !s.is_empty()) {
+                            path_segments.push(syn::PathSegment::from(
+                                syn::Ident::new(segment, proc_macro2::Span::call_site()),
+                            ));
+                        }
+                        if is_global {
+                            return syn::Type::Path(syn::TypePath {
+                                path: syn::Path {
+                                    leading_colon: Some(syn::Token![::](proc_macro2::Span::call_site())),
+                                    segments: path_segments,
+                                },
+                                qself: None,
+                            });
+                        } else {
+                            return syn::Type::Path(syn::TypePath {
+                                path: syn::Path { segments: path_segments, leading_colon: None },
+                                qself: None,
+                            });
+                        }
+                    } else {
+                        // Simple identifier
+                        let id = syn::Ident::new(mapped_ident, proc_macro2::Span::call_site());
+                        return syn::Type::Path(syn::TypePath {
+                            path: syn::Path::from(id),
+                            qself: None,
+                        });
+                    }
                 }
             }
 
@@ -259,7 +315,7 @@ pub(crate) fn go_to_rust_slice_arg(slice_arg: &str) -> proc_macro2::TokenStream 
         };
         if inner_part.is_empty() {
             // Empty slice literal: []int{}
-            quote! { Vec::<#elem_type>::new() }
+            quote! { ::gourd::GoSlice::<#elem_type>::new() }
         } else {
             // Parse elements: split by comma
             let elems: Vec<_> = inner_part.split(',').map(|e| {
@@ -275,7 +331,7 @@ pub(crate) fn go_to_rust_slice_arg(slice_arg: &str) -> proc_macro2::TokenStream 
                     quote! { #e }
                 }
             }).collect();
-            quote! { vec![ #(#elems),* ] }
+            quote! { ::gourd::GoSlice::from(vec![ #(#elems),* ]) }
         }
     } else {
         // Could be a variable reference (e.g., `data`), a slice type (`[]int`), etc.
@@ -284,10 +340,10 @@ pub(crate) fn go_to_rust_slice_arg(slice_arg: &str) -> proc_macro2::TokenStream 
             let ident: syn::Ident = syn::parse_str(s).unwrap();
             quote! { #ident }
         } else if s.starts_with("[]") {
-            // Slice type reference: `[]int` → Vec<i32>::new()
+            // Slice type reference: `[]int` → GoSlice<i32>::new()
             let elem = s[2..].trim();
             let elem_type = map_go_type_str(elem);
-            quote! { Vec::<#elem_type>::new() }
+            quote! { ::gourd::GoSlice::<#elem_type>::new() }
         } else {
             // Unknown — just emit the token as-is
             let ts: proc_macro2::TokenStream = s.parse().unwrap_or_default();
