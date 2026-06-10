@@ -212,7 +212,7 @@ gourd-check -r PATHS         # Rust-only
 ## Running
 
 ```bash
-cargo test                    # ~112 tests in gourd-macro
+cargo test                    # ~150 tests in gourd-macro
 cargo expand -p gourd         # See expanded transpilation
 gourd transpile "func hello() int { return 42 }"
 ```
@@ -236,9 +236,6 @@ Debug output includes parsing details, type mappings, and transpilation steps. W
 | Metric | Value |
 |--------|-------|
 | **Real-world Go coverage** | ~5–8% |
-| **Tests passing** | 112 in `gourd-macro` |
-| **Transpiler code** | ~6,292 lines (3495 transpiler root + 2797 sub-modules) |
-| **Expr variants handled** | 29 of ~39 |
 
 ### What's next?
 

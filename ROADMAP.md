@@ -140,47 +140,10 @@ These three Go builtin functions are now implemented as standard library functio
 | `delete(m, key)` | `::gourd::prelude::std_delete(m, key)` | `std_delete<T, V>(map: HashMap<T, V>, key: T) -> Option<V>` |
 | `append(slice, items...)` | `::gourd::prelude::std_append(slice, &[items...])` | `std_append<T: Clone>(slice: Vec<T>, items: &[T]) -> Vec<T>` |
 
-## Working tests
-
-All tests pass. 112 total in `gourd-macro/tests/`:
-
-| Test file | Result |
-|-----------|--------|
-| `append_builtin.rs` | ✅ 4/4 |
-| `channel_ops.rs` | ✅ 3/3 |
-| `closure_builtin_test.rs` | ✅ 5/5 |
-| `closure_test.rs` | ✅ 3/3 |
-| `continue_stmt.rs` | ✅ 1/1 |
-| `for_range_test.rs` | ✅ 3/3 |
-| `go_fn.rs` | ✅ 9/9 |
-| `go_variadic.rs` | ✅ 2/2 |
-| `interface_tests.rs` | ✅ 7/7 |
-| `make_builtin.rs` | ✅ 5/5 |
-| `min_max_test.rs` | ✅ 2/2 |
-| `multi_case_switch.rs` | ✅ 1/1 |
-| `multi_return_test.rs` | ✅ 4/4 |
-| `new_builtin.rs` | ✅ 4/4 |
-| `package_functions.rs` | ✅ 4/4 |
-| `panic_builtin.rs` | ✅ 4/4 |
-| `receiver_tests.rs` | ⚠️ 0 tests — commented out due to `gourd-check` wrapping structs after functions |
-| `select_builtin.rs` | ✅ 3/3 (use buffered channels for send-only tests) |
-| `shorthand_query.rs` | ✅ 2/2 |
-| `std_copy_delete_append.rs` | ✅ 3/3 |
-| `struct_literals.rs` | ✅ 3/3 |
-| `switch_extended.rs` | ✅ 7/7 |
-| `switch_minimal.rs` | ⚠️ 0 tests — verification-only stub |
-| `transpile_go_fn.rs` | ✅ 17/17 |
-| `type_assertion.rs` | ✅ 8/8 |
-| `gc_tests.rs` | ✅ 8/8 |
-| `integration.rs` | ✅ 1/1 |
-| `token_test.rs` | ✅ 1/1 |
-
 ## Partially Implemented (tests not passing)
 
 | Go Pattern | Status | Issue |
 |------------|--------|-------|
-| **`receiver_tests`** | ⚠️ | 0 tests — commented out due to `gourd-check` wrapping structs after functions |
-| **`switch_minimal`** | ⚠️ | 0 tests — verification-only stub, not yet a runtime test |
 | **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures — not yet transpiled |
 
 ---
@@ -191,7 +154,7 @@ All tests pass. 112 total in `gourd-macro/tests/`:
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **Closures** `func() { ... }` | ✅ | All closure tests pass; body builtins still ❌ |
+| **Closures** `func() { ... }` | ✅ | Argument forwarding, captures, and nested closures. Body builtins (`len()`, `[]` indexing) still ❌ |
 | **defer** `defer cleanup()` | ✅ | Parsed → Drop guard; no dedicated tests yet |
 | **Error handling** `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr` |
 | **Pointers** | ✅ | `&` (address-of) and `*` (dereference) |
@@ -221,10 +184,6 @@ All tests pass. 112 total in `gourd-macro/tests/`:
 | Metric | Value |
 |--------|-------|
 | **Real-world Go coverage** | ~5–8% |
-| **syn::Expr variants covered** | 29 of ~39 |
-| **Tests passing** | 112 |
-| **Test files** | 27 (gourd-macro/tests/) |
-| **Transpiler lines** | ~6,292 (3,495 root + 2,797 sub-modules) |
 
 ### Debugging
 
