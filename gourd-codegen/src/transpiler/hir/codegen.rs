@@ -16,7 +16,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use super::expression::{ HirExpr, HirExprKind, HirLiteral, HirBinaryOp, HirUnaryOp, MakeKind };
-use super::types::{ HirType, HirTypeKind, HirInterfaceMethod, HirReceiverFn, HirSelect, HirSelectCase, HirSwitch, HirFunction, HirStruct };
+use super::types::primitives::{HirType, HirTypeKind, HirInterfaceMethod, HirReceiverFn};
+use super::types::compound::{HirSelect, HirSelectCase, HirSwitch, HirFunction, HirStruct};
 use super::statement::{ HirStatement, HirBlock };
 use super::ast::{ GoFn, GoStruct };
 use crate::transpiler::heuristics;

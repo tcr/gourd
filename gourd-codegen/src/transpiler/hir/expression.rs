@@ -88,8 +88,7 @@ pub enum HirExprKind {
         index: Box<HirExpr>,
     },
     // String byte indexing: Go `str[i]` on a String type → `.as_bytes()[i]`
-    // In Go, string indexing always returns a byte (u8). This variant
-    // captures that intent so the Rust codegen can use `.as_bytes()`.
+    #[allow(dead_code)]
     StringByteIndex {
         collection: Box<HirExpr>,
         index: Box<HirExpr>,
@@ -131,6 +130,7 @@ pub enum HirExprKind {
     },
 
     // Error handling: `if err != nil` check
+    #[allow(dead_code)]
     ErrorCheck {
         value: Box<HirExpr>,
     },
@@ -143,6 +143,7 @@ pub enum HirExprKind {
         target: Box<HirExpr>,
         elements: Vec<HirExpr>,
     },
+    #[allow(dead_code)]
     Copy {
         dst: Box<HirExpr>,
         src: Box<HirExpr>,
@@ -177,11 +178,13 @@ pub enum HirExprKind {
         value: Box<HirExpr>,
     },
     /// Channel receive: `<-ch`
+    #[allow(dead_code)]
     ChannelRecv {
         channel: Box<HirExpr>,
         target: Option<syn::Ident>,
     },
     /// Select statement: `select { case ... default: ... }`
+    #[allow(dead_code)]
     Select {
         cases: Vec<(Box<HirExpr>, HirBlock)>,
         default_body: Option<HirBlock>,
@@ -237,7 +240,10 @@ pub enum HirBinaryOp {
     Ge,
     And,
     Or,
+    // Bitwise and logical XOR — not used by Go, kept for completeness
+    #[allow(dead_code)]
     Xor,
+    #[allow(dead_code)]
     AndNot,
     BitAnd,
     BitOr,

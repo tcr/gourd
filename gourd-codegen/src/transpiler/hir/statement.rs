@@ -23,6 +23,7 @@ pub enum HirStatement {
         value: Box<HirExpr>,
     },
     /// Assignment: `x = value`
+    #[allow(dead_code)]
     Assign {
         target: Box<HirExpr>,
         value: Box<HirExpr>,
@@ -77,6 +78,7 @@ pub enum HirStatement {
         result_name: Option<syn::Ident>,
     },
     /// Short declaration with a closure: `f := func() { body }`
+    #[allow(dead_code)]
     Closure {
         name: syn::Ident,
         params: Vec<(syn::Ident, Option<Box<HirType>>)>,

@@ -12,8 +12,9 @@ use syn::{Expr, ExprIf, ExprRange, ExprLoop, ExprForLoop, ExprWhile, ExprLet, Ex
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use super::expression::*;
-use super::types::*;
-use super::types::map_go_types;
+use super::types::primitives::{HirType, HirTypeKind};
+use super::types::mapping::{go_type_to_hir};
+use super::types::compound::{HirSelect, HirSelectCase, HirSwitch, HirSwitchCase};
 use super::statement::*;
 // Import HIR module types for all conversion functions
 use super::ast::{GoBlock, GoStmt, GoSelect, GoSelectCase, Switch, GoImport};
