@@ -288,10 +288,32 @@ fn hir_binary_to_hir(binary: &ExprBinary) -> HirExpr {
         }
     }
 
-    let op = hir_binary_op_to_hir(&binary.op);
-    let lhs = Box::new(go_ast_expr_to_hir(&binary.left));
-    let rhs = Box::new(go_ast_expr_to_hir(&binary.right));
-    HirExpr::new(HirExprKind::Binary { op, lhs, rhs })
+    // Detect nil comparisons: Go `m == nil` on maps/channels
+    // Must check BEFORE extracting lhs/rhs to short-circuit early
+    if matches!(binary.op, BinOp::Eq(_) | BinOp::Ne(_)) {
+        // Parse both sides first to check for nil on rhs
+        let lhs_expr = go_ast_expr_to_hir(&binary.left);
+        let rhs_expr = go_ast_expr_to_hir(&binary.right);
+        
+        // Check if rhs is the nil literal
+        if let HirExprKind::Literal(HirLiteral::Nil) = rhs_expr.kind {
+            let negative = matches!(binary.op, BinOp::Ne(_));
+            return HirExpr::new(HirExprKind::NilComparison {
+                collection: Box::new(lhs_expr),
+                negative,
+            });
+        }
+        
+        let op = hir_binary_op_to_hir(&binary.op);
+        let lhs = Box::new(lhs_expr);
+        let rhs = Box::new(rhs_expr);
+        HirExpr::new(HirExprKind::Binary { op, lhs, rhs })
+    } else {
+        let op = hir_binary_op_to_hir(&binary.op);
+        let lhs = Box::new(go_ast_expr_to_hir(&binary.left));
+        let rhs = Box::new(go_ast_expr_to_hir(&binary.right));
+        HirExpr::new(HirExprKind::Binary { op, lhs, rhs })
+    }
 }
 
 /// Convert a Go binary operator to HIR.

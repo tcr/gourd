@@ -88,6 +88,12 @@ pub enum HirStatement {
     Defer {
         body: HirBlock,
     },
+    /// Bare variable declaration: `var x T` (without initialization)
+    /// Transpiles to `let x: T = Default::default()` (zero-value semantics)
+    VarDecl {
+        name: syn::Ident,
+        type_hint: Option<Box<HirType>>,
+    },
     /// Import declaration: `import s "strings"`, `import . "fmt"`, `import _ "os"`
     Import {
         alias: Option<String>,

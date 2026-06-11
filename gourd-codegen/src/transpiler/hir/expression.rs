@@ -184,11 +184,20 @@ pub enum HirExprKind {
         target: Option<syn::Ident>,
     },
     /// Select statement: `select { case ... default: ... }`
+    /// nil comparison: `x == nil` or `x != nil` (maps to .is_none() or .is_empty())
+    NilComparison {
+        collection: Box<HirExpr>,
+        negative: bool,  // true for != nil
+    },
     #[allow(dead_code)]
     Select {
         cases: Vec<(Box<HirExpr>, HirBlock)>,
         default_body: Option<HirBlock>,
     },
+    /// Recover builtin: `recover()` - returns panic value inside deferred functions
+    #[allow(dead_code)]
+    Recover,
+
     /// Match expression: `match selector { arm1, arm2, ... }`
     Match {
         selector: Box<HirExpr>,

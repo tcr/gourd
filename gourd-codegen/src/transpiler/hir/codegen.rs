@@ -171,6 +171,9 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
         HirExprKind::StructLit { name, fields } => hir_struct_lit_to_rust(name, fields),
         HirExprKind::ChannelSend { channel, value } => hir_channel_send_to_rust(channel, value),
         HirExprKind::ChannelRecv { channel, target: _ } => hir_channel_recv_to_rust(channel),
+        HirExprKind::NilComparison { collection, negative } => {
+            hir_nil_comparison_to_rust(collection, *negative)
+        }
         HirExprKind::Select { cases, default_body } => {
             let default_body = default_body.as_ref().map(|b| b.clone());
             hir_select_to_rust(cases, default_body)
@@ -188,6 +191,11 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
         HirExprKind::Unsupported(msg) => quote! { compile_error!(concat!("HIR: unsupported: ", #msg)) },
         HirExprKind::MinMax { kind, values } => hir_minmax_to_rust(kind, values),
         HirExprKind::Panic(msg) => quote! { panic!(#msg) },
+        HirExprKind::Recover => {
+            // recover() in Go returns the panic value inside deferred functions
+            // In Rust: we use a thread-local slot set by catch_unwind panic handler
+            quote! { __GO_PANIC_VALUE.take() }
+        }
         HirExprKind::Delete { map, key } => hir_delete_to_rust(map, key),
     }
 }
@@ -959,6 +967,19 @@ pub fn hir_stmt_to_rust(stmt: &HirStatement, strip_returns: bool) -> TokenStream
                 }
             }
         }
+        HirStatement::VarDecl { name, type_hint } => {
+            // Bare var declaration: `var x T` → `let x: T = Default::default()`
+            let type_tokens = type_hint.as_ref()
+                .map(|t| t.to_rust_type())
+                .unwrap_or_else(|| quote! {});
+            let initializer = if type_hint.is_some() {
+                quote! { Default::default() }
+            } else {
+                // For inferred types, just use 0 as default (Go zero-value semantics)
+                quote! { 0 }
+            };
+            quote! { let mut #name: #type_tokens = #initializer; }
+        }
         HirStatement::Import { alias, path, dot, blank } => {
             if *blank {
                 // Blank import — side-effect only, nothing to emit
@@ -1219,6 +1240,38 @@ fn hir_channel_recv_to_rust(channel: &HirExpr) -> TokenStream {
     let ch_tok = hir_expr_to_rust(channel);
     quote! { ::gourd::GoChannel::recv(&#ch_tok) }
 }
+
+/// Convert a nil comparison to Rust tokens.
+/// Go `m == nil` on maps → `.is_empty()` (empty map check)
+/// Go `ch == nil` on channels → `.is_none()` (none channel check)  
+/// Go `x != nil` → negation of the above
+fn hir_nil_comparison_to_rust(collection: &HirExpr, negative: bool) -> TokenStream {
+    let coll_tokens = hir_expr_to_rust(collection);
+    let collection_type = get_expr_type(collection);
+    
+    // Detect map type for `.is_empty()` vs Option's `.is_none()`
+    let is_map = matches!(&collection_type.kind, super::types::HirTypeKind::Map(_, _));
+    let is_channel = matches!(&collection_type.kind, super::types::HirTypeKind::Channel(_));
+    
+    let check = if is_map {
+        quote! { #coll_tokens.is_empty() }
+    } else if is_channel {
+        // Channels in Go: nil channels cannot be used for send/recv
+        // In Rust, unbuffered channels are always valid (just never ready)
+        // We treat channel == nil as always false (channels are never "nil" in Rust)
+        quote! { false }
+    } else {
+        // Default: compare with None for Option-like semantics
+        quote! { #coll_tokens == None }
+    };
+    
+    if negative {
+        quote! { !(#check) }
+    } else {
+        check
+    }
+}
+
 
 /// Convert a select statement to Rust tokens.
 fn hir_select_to_rust(cases: &[(Box<HirExpr>, HirBlock)], default_body: Option<HirBlock>) -> TokenStream {

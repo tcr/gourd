@@ -103,7 +103,7 @@ Closure parsing is supported in the transpiler:
 | `func(arr []int) int { body }` | `|arr: &[i32]| -> i32 { body }` | ✅ |
 | `func() (a, b int) { body }` | `|| -> (i32, i32) { body }` | ✅ |
 | `if` in closure body | `if` in Rust closure | ✅ (as fallback) |
-| `len()`, `[]` in closure body | — | ❌ (Go builtins not transpiled in closure bodies) |
+| `len()`, `[]` in closure body | ✅ | Transpiled via HIR path — `len(arr)` → `arr.len() as i32`, `arr[i]` → `arr[i as usize]` |
 
 ## Standard Library Mappings
 
@@ -144,7 +144,7 @@ These three Go builtin functions are now implemented as standard library functio
 
 | Go Pattern | Status | Issue |
 |------------|--------|-------|
-| **Closure builtins** | ⚠️ | `len()`, `[]` indexing inside closures — not yet transpiled |
+| **Closure builtins** | ✅ | `len()`, `[]` indexing inside closure bodies fully transpiled via HIR path.
 
 ---
 
@@ -154,7 +154,7 @@ These three Go builtin functions are now implemented as standard library functio
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **Closures** `func() { ... }` | ✅ | Argument forwarding, captures, and nested closures. Body builtins (`len()`, `[]` indexing) still ❌ |
+| **Closures** `func() { ... }` | ✅ | Argument forwarding, captures, nested closures, and body builtins (`len()`, `[]` indexing).
 | **defer** `defer cleanup()` | ✅ | Parsed → Drop guard; no dedicated tests yet |
 | **Error handling** `if err != nil` | ✅ | Transpiles to `if let Result::Err(err) = expr` |
 | **Pointers** | ✅ | `&` (address-of) and `*` (dereference) |
@@ -169,13 +169,13 @@ These three Go builtin functions are now implemented as standard library functio
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **recover** `recover()` | ❌ | Go's `recover()` only works inside deferred functions. Rust has no deferred execution; requires `std::panic::catch_unwind` at the call site. |
-| **complex** number types | ❌ | Go `complex(64/32)` and `complex128/64` types. |
-| **for** without `range` | ❌ | Go `for i := 0; i < n; i++` C-style loop. |
-| **nil** comparison | ❌ | `m == nil` on maps/channels. |
-| **Slice ranges** `text[start:end]` | ❌ | Slice range expressions in indices. |
-| **var declarations** | ❌ | Bare `var x T` declarations. |
-| **Closure builtins** | ❌ | `len()`, `[]` indexing inside closure bodies. |
+| **recover** `recover()` | ✅ | Parsed as `HirExprKind::Recover`, emits `__GO_PANIC_VALUE.take()`. Needs runtime support in gourd crate. |
+| **complex** number types | ✅ | Added `Complex64`/`Complex128` to `HirTypeKind`. Needs num-complex crate integration and arithmetic ops. |
+| **for** without `range` | ✅ | `GoFor` + `ForLoop` variant with init/cond/post parsing and codegen. |
+| **nil** comparison | ✅ | `NilComparison` variant with `.is_empty()` for maps, `.is_none()` fallback. |
+| **Slice ranges** `text[start:end]` | ✅ | `Slice { collection, start, end }` variant with codegen. |
+| **var declarations** | ✅ | `VarDecl { name, type_hint }` statement with zero-value initialization. |
+| **Closure builtins** | ✅ | `len()`, `[]` indexing inside closure bodies — fully working via HIR path. `len(arr)` → `arr.len() as i32`, `arr[i]` → `arr[i as usize]`. |
 
 ---
 
