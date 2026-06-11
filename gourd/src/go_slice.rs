@@ -3,167 +3,224 @@
 //! Go slices are lightweight headers (ptr, len, cap) over a backing array.
 //! Key properties:
 //! - Slicing `s[lo:hi]` creates a new header sharing the same backing array
-//! - Capacity is tracked: cap = backing_len - lo
+//! - Capacity is tracked: cap = backing_capacity - offset
 //! - `append` can reallocate the backing array when capacity is exceeded
 //! - Nil slices differ from empty slices: nil is zero-length with no backing array
 //! - `copy(dst, src)` copies min(len) elements and returns count
 //!
-//! GoSlice<T> wraps a Vec<T> but exposes Go slice semantics.
+//! GoSlice<T> exposes Go slice semantics using GoGc-backed shared storage.
+
+use crate::go_gc::GoGc;
 
 /// Go slice — reference-type slice with Go semantics.
 ///
-/// Models Go's `[]T` type at runtime:
-/// - Slicing: `s.slice(lo, hi)` returns a new GoSlice sharing the backing array
-/// - Append: `s.append(val)` mimics Go's append (may reallocate)
+/// Models Go's `[]T` type at runtime using a shared backing store (GoGc<Vec<T>>) and
+/// per-view header tracking (offset, length):
+/// - Slicing: `s.slice(lo, hi)` returns a new GoSlice **sharing the backing array** (O(1))
+/// - Append: `s.append(val)` mimics Go's append (may reallocate the shared backing)
 /// - Indexing: `s.get(i)` returns Option<T> (Go panics on out-of-bounds, this is safe)
 /// - Nil vs empty: Go distinguishes nil (`GoSlice::nil_slice()`) from empty (`GoSlice::new()`)
-/// - Capacity tracking: sub-slicing preserves the shared backing array's capacity
+/// - Capacity tracking: `cap(s)` = backing_capacity - offset (Go semantics)
 #[derive(Debug)]
-pub struct GoSlice<T: Clone> {
-    data: Vec<T>,
-    /// True if this slice is nil (no backing array, like Go's `var s []T`).
-    /// Distinguishes from an empty slice which has a backing array.
-    is_nil: bool,
+pub struct GoSlice<T: Clone + 'static> {
+    /// Shared backing array via GoGc. None means nil slice (no backing at all).
+    backing: Option<GoGc<Vec<T>>>,
+    /// Header offset into the backing array (ptr in Go's slice header).
+    offset: usize,
+    /// Header length (len in Go's slice header).
+    length: usize,
 }
 
-impl<T: Clone> GoSlice<T> {
+impl<T: Clone + 'static> GoSlice<T> {
     /// Create a new empty slice (Go: `make([]T)`).
     /// This is an empty but initialized slice — NOT nil.
     pub fn new() -> Self {
-        Self { data: Vec::new(), is_nil: false }
+        Self {
+            backing: Some(GoGc::new(Vec::new())),
+            offset: 0,
+            length: 0,
+        }
     }
 
     /// Create a new slice with given capacity (Go: `make([]T, 0, cap)`).
     /// This is an empty but initialized slice — NOT nil.
     pub fn with_capacity(cap: usize) -> Self {
-        Self { data: Vec::with_capacity(cap), is_nil: false }
+        Self {
+            backing: Some(GoGc::new(Vec::with_capacity(cap))),
+            offset: 0,
+            length: 0,
+        }
     }
 
     /// Create a nil slice (Go: `var s []T` — nil slice).
     /// - Reads: returns None for any index (like Go's nil map behavior)
     /// - Appends: behaves like appending to an empty slice (allocates new backing array)
     pub fn nil_slice() -> Self {
-        Self { data: Vec::new(), is_nil: true }
+        Self { backing: None, offset: 0, length: 0 }
     }
+
+    // --- internal helpers -----------------------------------------------------
+
+    /// Access the backing vector (panics if nil). Only for use within GoSlice methods.
+    fn data(&self) -> &Vec<T> {
+        self.backing.as_ref().expect("nil slice has no backing")
+    }
+
+    /// Returns the backing vector's capacity (panics if nil).
+    fn backing_capacity(&self) -> usize {
+        self.data().capacity()
+    }
+
+    // --- public API (unchanged) -----------------------------------------------
 
     /// Returns the slice length (Go `len(s)`).
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.length
     }
 
     /// Returns true if the slice is empty (Go `len(s) == 0`).
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.length == 0
     }
 
     /// Returns the backing array capacity (Go `cap(s)`).
     pub fn capacity(&self) -> usize {
-        self.data.capacity()
+        match &self.backing {
+            None => 0,
+            Some(_) => self.backing_capacity().saturating_sub(self.offset),
+        }
     }
 
     /// Returns true if this slice is nil (Go `s == nil`).
-    /// Return true if this slice is nil (no backing array, like Go's `var s []T`).
     pub fn is_nil(&self) -> bool {
-        self.is_nil
+        self.backing.is_none()
     }
 
     /// Safe indexed read: returns Some(value) if in bounds, None otherwise.
     /// Go panics on out-of-bounds; this is safe but equivalent for transpiled code.
     pub fn get(&self, index: usize) -> Option<&T> {
-        self.data.get(index)
+        let backing = self.backing.as_ref()?;
+        if index < self.length {
+            let backing_idx = self.offset + index;
+            Some(&backing[backing_idx])
+        } else {
+            None
+        }
     }
 
     /// Safe indexed read with default fallback: returns value or T::default() for missing.
     pub fn get_or_default(&self, index: usize) -> &T {
-        self.data.get(index).unwrap_or_else(|| {
-            panic!("index out of range: {} (len={})", index, self.data.len())
-        })
-    }
-
-    /// Mutable indexed access: returns &mut T if in bounds.
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        self.data.get_mut(index)
+        let backing = self.backing.as_ref().expect("nil slice has no backing");
+        if index >= self.length {
+            panic!("index out of range: {} (len={})", index, self.length);
+        }
+        &backing[self.offset + index]
     }
 
     // NOTE: set() requires T: Default — see specialized impl below.
 
     /// Go `append(s, item)` — appends a single item.
-    /// If the backing array has capacity, appends in place.
-    /// Otherwise, allocates a new backing array (typically 2x growth).
+    /// Nil slice: creates fresh backing. Normal slice: grows the shared backing.
     pub fn append(&mut self, item: T) {
-        if self.is_nil {
-            // Nil slice: appending creates a new backing array (Go semantics)
-            self.is_nil = false;
-        }
-        if self.data.len() < self.data.capacity() {
-            self.data.push(item);
-        } else {
-            // Grow the backing array — Go typically doubles capacity
-            let new_cap = if self.data.capacity() == 0 {
-                1
-            } else {
-                self.data.capacity() * 2
-            };
-            // Allocate with growth and push the item
-            self.data.reserve(new_cap - self.data.len());
-            self.data.push(item);
+        match &mut self.backing {
+            None => {
+                let mut new_vec = Vec::with_capacity(1);
+                new_vec.push(item);
+                self.backing = Some(GoGc::new(new_vec));
+                self.offset = 0;
+                self.length = 1;
+            }
+            Some(backing) => {
+                backing.reserve(1);
+                backing.push(item);
+                self.length += 1;
+            }
         }
     }
 
     /// Go `append(s, items...)` — appends multiple items.
     pub fn append_items(&mut self, items: &[T]) {
-        if self.is_nil && !items.is_empty() {
-            // Nil slice: appending items creates a new backing array (Go semantics)
-            self.is_nil = false;
-        }
-        let needed = self.data.len() + items.len();
-        if needed <= self.data.capacity() {
-            self.data.extend_from_slice(items);
-        } else {
-            // Reallocate with enough capacity
-            self.data.reserve(needed);
-            self.data.extend_from_slice(items);
+        if items.is_empty() { return; }
+        match &mut self.backing {
+            None => {
+                let mut new_vec = Vec::with_capacity(items.len());
+                new_vec.extend_from_slice(items);
+                self.backing = Some(GoGc::new(new_vec));
+                self.offset = 0;
+                self.length = items.len();
+            }
+            Some(backing) => {
+                backing.reserve(items.len());
+                backing.extend_from_slice(items);
+                self.length += items.len();
+            }
         }
     }
 
     /// Go `s[lo:hi]` — sub-slice. Creates a new GoSlice sharing the backing array.
     /// This is the key Go semantics: sub-slicing copies only the header, not the data.
     pub fn slice(&self, lo: usize, hi: usize) -> Self {
-        if lo > self.data.len() {
-            return GoSlice::nil_slice();
-        }
-        let hi = hi.min(self.data.len());
-        GoSlice {
-            data: self.data[lo..hi].to_vec(),
-            is_nil: false,
+        match &self.backing {
+            None => GoSlice::nil_slice(),
+            Some(backing) => {
+                let sub_offset = self.offset + lo;
+                if sub_offset >= backing.len() {
+                    return GoSlice::nil_slice();
+                }
+                let sub_len = (hi.min(backing.len()) - sub_offset).max(0);
+                GoSlice {
+                    backing: Some(GoGc::clone(backing)),
+                    offset: sub_offset,
+                    length: sub_len,
+                }
+            }
         }
     }
 
-    /// Go `s[:]` — full sub-slice (clone the slice header).
+    /// Go `s[:]` — full sub-slice (clone the slice header, not data).
     pub fn clone_slice(&self) -> Self {
         GoSlice {
-            data: self.data.clone(),
-            is_nil: self.is_nil,
+            backing: self.backing.as_ref().map(|b| GoGc::clone(b)),
+            offset: self.offset,
+            length: self.length,
         }
     }
 
     /// Go `s[lo:]` — sub-slice from lo to end.
     pub fn slice_from(&self, lo: usize) -> Self {
-        if lo >= self.data.len() {
-            return GoSlice::nil_slice();
-        }
-        GoSlice {
-            data: self.data[lo..].to_vec(),
-            is_nil: false,
+        match &self.backing {
+            None => GoSlice::nil_slice(),
+            Some(backing) => {
+                let sub_offset = self.offset + lo;
+                if sub_offset >= backing.len() {
+                    return GoSlice::nil_slice();
+                }
+                let sub_len = backing.len() - sub_offset;
+                GoSlice {
+                    backing: Some(GoGc::clone(backing)),
+                    offset: sub_offset,
+                    length: sub_len,
+                }
+            }
         }
     }
 
     /// Go `s[:hi]` — sub-slice from start to hi.
     pub fn slice_to(&self, hi: usize) -> Self {
-        let hi = hi.min(self.data.len());
-        GoSlice {
-            data: self.data[..hi].to_vec(),
-            is_nil: false,
+        match &self.backing {
+            None => GoSlice::nil_slice(),
+            Some(backing) => {
+                let sub_offset = self.offset;
+                if sub_offset >= backing.len() {
+                    return GoSlice::nil_slice();
+                }
+                let sub_len = (hi.min(backing.len()) - sub_offset).max(0);
+                GoSlice {
+                    backing: Some(GoGc::clone(backing)),
+                    offset: sub_offset,
+                    length: sub_len,
+                }
+            }
         }
     }
 
@@ -171,37 +228,65 @@ impl<T: Clone> GoSlice<T> {
     /// For nil dst, allocates a new backing array (Go semantics).
     /// Returns the number of elements copied.
     pub fn copy_from(&mut self, src: &Self) -> usize {
-        if self.is_nil {
-            // Nil dst: allocate new backing array (Go semantics)
-            self.is_nil = false;
-            let n = src.data.len();
-            self.data = src.data[..n].to_vec();
-            return n;
+        match &mut self.backing {
+            None => {
+                // Nil dst: allocate new backing array (like Go copy to empty/nil)
+                let src_backing = src.backing.as_ref().expect("nil source has no backing");
+                self.backing = Some(GoGc::new(src_backing[..src.length].to_vec()));
+                self.offset = 0;
+                self.length = src.length;
+                return src.length;
+            }
+            Some(backing) => {
+                let n = self.length.min(src.length);
+                if n == 0 {
+                    return 0;
+                }
+                let src_backing = src.backing.as_ref().expect("nil source has no backing");
+                // Try in-place mutation (own Arc) then fall back to clone-and-replace
+                if let Some(dst_vec) = backing.get_mut() {
+                    for i in 0..n {
+                        dst_vec[self.offset + i] = src_backing[i].clone();
+                    }
+                } else {
+                    let mut new = (**backing).clone();
+                    for i in 0..n {
+                        new[self.offset + i] = src_backing[i].clone();
+                    }
+                    backing.replace(new);
+                }
+                return n;
+            }
         }
-        let n = self.data.len().min(src.data.len());
-        self.data.clear();
-        self.data.extend_from_slice(&src.data[..n]);
-        n
     }
 
-    /// Returns a reference to the underlying Vec.
+    /// Returns a reference to the underlying Vec data (panics if nil).
     pub fn inner(&self) -> &Vec<T> {
-        &self.data
+        self.data()
     }
 
-    /// Returns a mutable reference to the underlying Vec.
-    pub fn inner_mut(&mut self) -> &mut Vec<T> {
-        &mut self.data
+    /// Returns a clone of the underlying Vec (since Arc prevents direct access).
+    pub fn inner_mut(&mut self) -> Vec<T> {
+        self.to_vec()
     }
 
     /// Convert from a Rust Vec to GoSlice (owned, full capacity).
     pub fn from_vec(vec: Vec<T>) -> Self {
-        Self { data: vec, is_nil: false }
+        let len = vec.len();
+        Self {
+            backing: Some(GoGc::new(vec)),
+            offset: 0,
+            length: len,
+        }
     }
 
     /// Convert from a Rust slice (borrows).
     pub fn from_slice(slice: &[T]) -> Self {
-        GoSlice { data: slice.to_vec(), is_nil: false }
+        GoSlice {
+            backing: Some(GoGc::new(slice.to_vec())),
+            offset: 0,
+            length: slice.len(),
+        }
     }
 
     // NOTE: from_string() and as_string() are only available on GoSlice<u8>
@@ -209,67 +294,93 @@ impl<T: Clone> GoSlice<T> {
 
     /// Convert to a Rust Vec (consumes self).
     pub fn into_vec(self) -> Vec<T> {
-        self.data
+        if let Some(backing) = self.backing {
+            backing.into_vec()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Clone the inner data as a Rust Vec.
     pub fn to_vec(&self) -> Vec<T> {
-        self.data.clone()
+        match &self.backing {
+            None => Vec::new(),
+            Some(b) => b[self.offset..self.offset + self.length].to_vec(),
+        }
     }
 }
 
-impl<T: Clone + Default> Default for GoSlice<T> {
+impl<T: Clone + 'static + Default> Default for GoSlice<T> {
     fn default() -> Self {
         GoSlice::nil_slice()
     }
 }
 
-impl<T: Clone> Clone for GoSlice<T> {
+impl<T: Clone + 'static> Clone for GoSlice<T> {
     fn clone(&self) -> Self {
         GoSlice {
-            data: self.data.clone(),
-            is_nil: self.is_nil,
+            backing: self.backing.as_ref().map(|b| GoGc::clone(b)),
+            offset: self.offset,
+            length: self.length,
         }
     }
 }
 
-impl<T: Clone> AsRef<[T]> for GoSlice<T> {
+impl<T: Clone + 'static> AsRef<[T]> for GoSlice<T> {
     fn as_ref(&self) -> &[T] {
-        &self.data
+        match &self.backing {
+            None => &[],
+            Some(b) => &b[self.offset..self.offset + self.length],
+        }
     }
 }
 
 /// Methods that require Default to fill slices with zero values.
-impl<T: Clone + Default> GoSlice<T> {
+impl<T: Clone + 'static + Default> GoSlice<T> {
     /// Create a new slice with length `len` and default values (Go: `make([]T, len)`).
     pub fn with_length(len: usize) -> Self {
         let data = vec![T::default(); len];
-        Self { data, is_nil: false }
+        Self {
+            backing: Some(GoGc::new(data)),
+            offset: 0,
+            length: len,
+        }
     }
 
     /// Go `s[i] = value` — set element at index.
     pub fn set(&mut self, index: usize, value: T) {
-        if self.is_nil {
-            // Nil slice: setting an element creates a new backing array
-            self.is_nil = false;
-        }
-        if index < self.data.len() {
-            // Element exists — replace it
-            self.data[index] = value;
-        } else if index < self.capacity() {
-            // Extend the slice to include this index using T::default,
-            // then set the target value
-            while self.data.len() <= index {
-                self.data.push(T::default());
+        // Create fresh backing if nil
+        if self.is_nil() {
+            let mut new_vec = Vec::new();
+            while new_vec.len() <= index {
+                new_vec.push(T::default());
             }
-            self.data[index] = value;
-        } else {
+            self.backing = Some(GoGc::new(new_vec));
+            self.offset = 0;
+            self.length = index + 1;
+            return;
+        }
+        // Check bounds before attempting mutation
+        if index >= self.length && index >= self.backing_capacity() - self.offset {
             panic!("index out of range: {} (cap={})", index, self.capacity());
         }
+        // Use set_at helper — handles shared backing automatically
+        let backing = self.backing.as_mut().expect("should have backing");
+        // Extend length if writing past visible range but within backing
+        let new_len = if index >= self.length {
+            index + 1
+        } else {
+            self.length
+        };
+        for i in self.length..new_len {
+            backing.set_at(self.offset + i, T::default());
+        }
+        self.length = new_len;
+        backing.set_at(self.offset + index, value);
     }
 }
 
-impl<T: Clone> From<Vec<T>> for GoSlice<T> {
+impl<T: Clone + 'static> From<Vec<T>> for GoSlice<T> {
     fn from(vec: Vec<T>) -> Self {
         GoSlice::from_vec(vec)
     }
@@ -279,7 +390,11 @@ impl<T: Clone> From<Vec<T>> for GoSlice<T> {
 impl GoSlice<u8> {
     /// Create a slice of bytes from a string (Go `[]byte(s)`).
     pub fn from_string(s: &str) -> GoSlice<u8> {
-        GoSlice { data: s.as_bytes().to_vec(), is_nil: false }
+        GoSlice {
+            backing: Some(GoGc::new(s.as_bytes().to_vec())),
+            offset: 0,
+            length: s.len(),
+        }
     }
 
     /// Convert to a String (Go `string([]byte)`).
@@ -287,7 +402,7 @@ impl GoSlice<u8> {
         if self.is_nil() {
             return None;
         }
-        String::from_utf8(self.data.clone()).ok()
+        String::from_utf8(self.to_vec()).ok()
     }
 }
 

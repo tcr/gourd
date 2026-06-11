@@ -69,7 +69,7 @@ pub fn std_copy<T: Clone>(dst: &mut [T], src: &[T]) -> i32 {
 
 /// Go's `copy(dst, src)` for both Vec and GoSlice.
 /// Accepts either type via From trait (Vec<T> → GoSlice<T>).
-pub fn std_copy_slice<T: Clone>(mut dst: GoSlice<T>, src: &[T]) -> i32 {
+pub fn std_copy_slice<T: Clone + 'static>(mut dst: GoSlice<T>, src: &[T]) -> i32 {
     let n = src.len().min(dst.len());
     if n > 0 {
         let tmp = GoSlice::from_slice(src);
