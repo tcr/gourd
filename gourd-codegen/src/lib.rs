@@ -102,7 +102,7 @@ pub fn transpile_go(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream
                                 if has_receiver {
                                     result.extend(go_to_rust_receiver_fn_hir(subtree(&trees, i, true)));
                                 } else {
-                                    result.extend(go_to_rust_closure_hir(subtree(&trees, i, true)));
+                                    result.extend(go_to_rust_fn(subtree(&trees, i, true)));
                                 }
                                 i = skip_declaration(&trees, i);
                             } else {
