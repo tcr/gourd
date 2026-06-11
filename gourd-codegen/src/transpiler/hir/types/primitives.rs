@@ -192,6 +192,25 @@ impl HirType {
         }
     }
 
+    /// Return Go-style wrapper types for interface method signatures.
+    ///
+    /// In Go interfaces, strings and slices use wrapper types (GoString, GoSlice)
+    /// that provide proper Go semantics (reference-copy rather than move).
+    pub fn to_interface_type(&self) -> proc_macro2::TokenStream {
+        use proc_macro2::TokenStream;
+        use quote::quote;
+
+        match &self.kind {
+            HirTypeKind::StringTy => quote! { GoString },
+            HirTypeKind::Slice(_) | HirTypeKind::SliceRef(_) => {
+                // Slices in interfaces are GoSlice<u8>
+                quote! { GoSlice<u8> }
+            }
+            // All other types use the standard Rust mapping
+            _ => self.to_rust_type(),
+        }
+    }
+
     /// Check if this type is a primitive (scalar) type.
     pub fn is_primitive(&self) -> bool {
         matches!(&self.kind,

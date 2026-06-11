@@ -1253,16 +1253,22 @@ pub fn hir_interface_to_rust(name: &Ident, methods: &[HirInterfaceMethod]) -> To
         let method_id = syn::Ident::new(&snake_name, method.name.span());
 
         let param_tokens: Vec<_> = method.params.iter().map(|(param_name, param_type)| {
-            let ty = param_type.to_rust_type();
+            // For GoString params, use GoString wrapper; for slices use standard Rust types
+            let needs_go_wrapper = matches!(&param_type.kind, crate::transpiler::hir::types::primitives::HirTypeKind::StringTy);
+            let ty = if needs_go_wrapper {
+                param_type.to_interface_type()
+            } else {
+                param_type.to_rust_type()
+            };
             quote! { #param_name: #ty }
         }).collect();
         let return_tokens = if method.returns.is_empty() {
             quote! {}
         } else if method.returns.len() == 1 {
-            let ty = method.returns[0].to_rust_type();
+            let ty = method.returns[0].to_interface_type();
             quote! { -> #ty }
         } else {
-            let return_types: Vec<_> = method.returns.iter().map(|t| t.to_rust_type()).collect();
+            let return_types: Vec<_> = method.returns.iter().map(|t| t.to_interface_type()).collect();
             quote! { -> ( #(#return_types),* ) }
         };
         quote! { fn #method_id #(#param_tokens),* #return_tokens }

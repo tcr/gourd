@@ -27,13 +27,18 @@ pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
                     let id = &param.id;
                     match (&param.ty, &param.slice_elem) {
                         (None, None) => quote! { #id },
-                        (_, Some(slice_inner)) => {
-                            let mapped = map_go_types(slice_inner);
-                            quote! { #id: &[ #mapped ] }
+                        (_, Some(_slice_inner)) => {
+                            // Go interfaces use GoSlice for slice parameters
+                            quote! { #id: & [ u8 ] }
                         }
                         (Some(ty), None) => {
                             let mapped = map_go_types(ty);
-                            quote! { #id: #mapped }
+                            // For GoString in interfaces, use the wrapper type
+                            if quote! { #ty }.to_string().contains("string") || mapped.to_string() == "String" {
+                                quote! { #id: GoString }
+                            } else {
+                                quote! { #id: #mapped }
+                            }
                         }
                     }
                 }).collect();
@@ -47,6 +52,7 @@ pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
                         match mapped.len() {
                             1 => {
                                 let m = &mapped[0];
+                                // For GoString return, use wrapper type in interface
                                 if output.is_slice {
                                     if let Some(elem) = &output.elem_type {
                                         let mapped_elem = map_go_types(elem);
@@ -54,11 +60,23 @@ pub fn go_to_rust_interface(input: TokenStream) -> TokenStream {
                                     } else {
                                         quote! { -> Vec< #m > }
                                     }
+                                } else if m.to_string() == "String" {
+                                    quote! { -> GoString }
                                 } else {
                                     quote! { -> #m }
                                 }
                             }
-                            _ => quote! { -> ( #(#mapped),* ) },
+                            _ => {
+                                // Check if any return type is string
+                                let mapped_formatted: Vec<_> = mapped.iter().map(|m| {
+                                    if m.to_string() == "String" {
+                                        quote! { GoString }
+                                    } else {
+                                        quote! { #m }
+                                    }
+                                }).collect();
+                                quote! { -> ( #(#mapped_formatted),* ) }
+                            }
                         }
                     }
                 }).unwrap_or_else(|| quote! {});
