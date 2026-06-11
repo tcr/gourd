@@ -1,9 +1,9 @@
 use gourd_macro::go;
 use gourd::prelude::{Complex64, Complex128};
 
-// Test: complex64 construction and extraction
+// Test: complex() returns Complex128 (Go semantics)
 go! {
-    func goComplex64Basic() Complex64 {
+    func goComplexBasic() Complex128 {
         c := complex(1.0, 2.0)
         return c
     }
@@ -30,8 +30,8 @@ go! {
 }
 
 #[test]
-fn test_complex64_basic() {
-    let c = goComplex64Basic();
+fn test_complex_basic() {
+    let c = goComplexBasic();
     assert!((c.real - 1.0).abs() < 1e-6);
     assert!((c.imag - 2.0).abs() < 1e-6);
 }
@@ -39,7 +39,7 @@ fn test_complex64_basic() {
 #[test]
 fn test_complex_extract_parts() {
     let result = goComplexExtractParts();
-    assert!((result - 7.0).abs() < 1e-6); // real=3, imag=4, 3+4=7
+    assert!((result - 7.0).abs() < 1e-12); // real=3, imag=4, 3+4=7
 }
 
 #[test]

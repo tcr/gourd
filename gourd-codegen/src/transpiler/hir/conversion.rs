@@ -488,12 +488,13 @@ fn hir_call_to_hir(call: &ExprCall) -> HirExpr {
                     return HirExpr::new(HirExprKind::Panic("panic()".to_string()));
                 }
             }
-            // complex(real, imag) → Complex64::new(real, imag)
+            // complex(real, imag) → Complex128::new(real, imag)
+            // In Go, complex() always returns complex128
             if name_str == "complex" {
                 if call.args.len() == 2 {
                     let real_expr = Box::new(go_ast_expr_to_hir(&call.args[0]));
                     let imag_expr = Box::new(go_ast_expr_to_hir(&call.args[1]));
-                    return HirExpr::new(HirExprKind::Complex64 { real: real_expr, imag: imag_expr });
+                    return HirExpr::new(HirExprKind::Complex128 { real: real_expr, imag: imag_expr });
                 }
             }
             // complex128(real, imag) → Complex128::new(real, imag)
@@ -502,6 +503,14 @@ fn hir_call_to_hir(call: &ExprCall) -> HirExpr {
                     let real_expr = Box::new(go_ast_expr_to_hir(&call.args[0]));
                     let imag_expr = Box::new(go_ast_expr_to_hir(&call.args[1]));
                     return HirExpr::new(HirExprKind::Complex128 { real: real_expr, imag: imag_expr });
+                }
+            }
+            // complex64(real, imag) → Complex64::new(real, imag)
+            if name_str == "complex64" {
+                if call.args.len() == 2 {
+                    let real_expr = Box::new(go_ast_expr_to_hir(&call.args[0]));
+                    let imag_expr = Box::new(go_ast_expr_to_hir(&call.args[1]));
+                    return HirExpr::new(HirExprKind::Complex64 { real: real_expr, imag: imag_expr });
                 }
             }
             // real(c) → extract real part of complex number

@@ -172,6 +172,20 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                     return quote! { ::gourd::prelude::max( #(#args),* ) };
                 }
             }
+            "real" => {
+                // real(c) → c.real() (complex extraction)
+                if args.len() == 1 {
+                    let arg = &args[0];
+                    return quote! { (#arg).real() };
+                }
+            }
+            "imag" => {
+                // imag(c) → c.imag() (complex extraction)
+                if args.len() == 1 {
+                    let arg = &args[0];
+                    return quote! { (#arg).imag() };
+                }
+            }
             _ => {}
         }
     }
