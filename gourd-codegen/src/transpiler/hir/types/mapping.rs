@@ -34,6 +34,8 @@ pub fn go_type_to_hir(name: &str) -> HirType {
         "string" => HirType::new(HirTypeKind::StringTy),
         "bool"   => HirType::new(HirTypeKind::Bool),
         "error"  => HirType::new(HirTypeKind::Error),
+        "complex64"  => HirType::new(HirTypeKind::Complex64),
+        "complex128" => HirType::new(HirTypeKind::Complex128),
         _ => HirType::new(HirTypeKind::Unknown(name.to_string())),
     }
 }

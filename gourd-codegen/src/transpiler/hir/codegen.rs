@@ -197,6 +197,10 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
             quote! { __GO_PANIC_VALUE.take() }
         }
         HirExprKind::Delete { map, key } => hir_delete_to_rust(map, key),
+        HirExprKind::Complex64 { real, imag } => hir_complex64_to_rust(real, imag),
+        HirExprKind::Complex128 { real, imag } => hir_complex128_to_rust(real, imag),
+        HirExprKind::ComplexReal(expr) => hir_complex_real_to_rust(expr),
+        HirExprKind::ComplexImag(expr) => hir_complex_imag_to_rust(expr),
     }
 }
 
@@ -1162,6 +1166,58 @@ fn hir_delete_to_rust(map: &HirExpr, key: &HirExpr) -> TokenStream {
     let map_tokens = hir_expr_to_rust(map);
     let key_tokens = hir_expr_to_rust(key);
     quote! { #map_tokens.remove(&#key_tokens); }
+}
+
+/// Convert complex64 construction to Rust.
+fn hir_complex64_to_rust(real: &HirExpr, imag: &HirExpr) -> TokenStream {
+    let real_tokens = hir_expr_to_rust(real);
+    let imag_tokens = hir_expr_to_rust(imag);
+    quote! { ::gourd::prelude::Complex64::new(#real_tokens as f32, #imag_tokens as f32) }
+}
+
+/// Convert complex128 construction to Rust.
+fn hir_complex128_to_rust(real: &HirExpr, imag: &HirExpr) -> TokenStream {
+    let real_tokens = hir_expr_to_rust(real);
+    let imag_tokens = hir_expr_to_rust(imag);
+    quote! { ::gourd::prelude::Complex128::new(#real_tokens, #imag_tokens) }
+}
+
+/// Extract real part from complex number (Go `real()` builtin).
+fn hir_complex_real_to_rust(expr: &HirExpr) -> TokenStream {
+    let expr_tokens = hir_expr_to_rust(expr);
+    // Detect complex64 vs complex128 by type
+    let coll_type = get_expr_type(expr);
+    match &coll_type.kind {
+        super::types::HirTypeKind::Complex64 => {
+            quote! { ::gourd::prelude::real64(#expr_tokens) }
+        }
+        super::types::HirTypeKind::Complex128 => {
+            quote! { ::gourd::prelude::real128(#expr_tokens) }
+        }
+        _ => {
+            // Fallback to method call
+            quote! { #expr_tokens.real() }
+        }
+    }
+}
+
+/// Extract imaginary part from complex number (Go `imag()` builtin).
+fn hir_complex_imag_to_rust(expr: &HirExpr) -> TokenStream {
+    let expr_tokens = hir_expr_to_rust(expr);
+    // Detect complex64 vs complex128 by type
+    let coll_type = get_expr_type(expr);
+    match &coll_type.kind {
+        super::types::HirTypeKind::Complex64 => {
+            quote! { ::gourd::prelude::imag64(#expr_tokens) }
+        }
+        super::types::HirTypeKind::Complex128 => {
+            quote! { ::gourd::prelude::imag128(#expr_tokens) }
+        }
+        _ => {
+            // Fallback to method call
+            quote! { #expr_tokens.imag() }
+        }
+    }
 }
 
 /// Generate Rust match expression from HIR match.

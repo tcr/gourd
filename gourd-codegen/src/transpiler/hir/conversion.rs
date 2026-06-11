@@ -488,6 +488,36 @@ fn hir_call_to_hir(call: &ExprCall) -> HirExpr {
                     return HirExpr::new(HirExprKind::Panic("panic()".to_string()));
                 }
             }
+            // complex(real, imag) → Complex64::new(real, imag)
+            if name_str == "complex" {
+                if call.args.len() == 2 {
+                    let real_expr = Box::new(go_ast_expr_to_hir(&call.args[0]));
+                    let imag_expr = Box::new(go_ast_expr_to_hir(&call.args[1]));
+                    return HirExpr::new(HirExprKind::Complex64 { real: real_expr, imag: imag_expr });
+                }
+            }
+            // complex128(real, imag) → Complex128::new(real, imag)
+            if name_str == "complex128" {
+                if call.args.len() == 2 {
+                    let real_expr = Box::new(go_ast_expr_to_hir(&call.args[0]));
+                    let imag_expr = Box::new(go_ast_expr_to_hir(&call.args[1]));
+                    return HirExpr::new(HirExprKind::Complex128 { real: real_expr, imag: imag_expr });
+                }
+            }
+            // real(c) → extract real part of complex number
+            if name_str == "real" {
+                if let Some(arg) = call.args.first() {
+                    let arg_expr = Box::new(go_ast_expr_to_hir(arg));
+                    return HirExpr::new(HirExprKind::ComplexReal(arg_expr));
+                }
+            }
+            // imag(c) → extract imaginary part of complex number
+            if name_str == "imag" {
+                if let Some(arg) = call.args.first() {
+                    let arg_expr = Box::new(go_ast_expr_to_hir(arg));
+                    return HirExpr::new(HirExprKind::ComplexImag(arg_expr));
+                }
+            }
             // make(type, len) or make(type, len, cap) → Vec/HashMap/Channel creation
             if name_str == "make" {
                 if call.args.len() >= 2 {

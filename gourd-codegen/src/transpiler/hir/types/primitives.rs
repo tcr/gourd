@@ -49,6 +49,10 @@ pub enum HirTypeKind {
     Pointer(Box<HirType>),   // `*T` (Go pointer)
     Channel(Box<HirType>),   // `chan T`
 
+    // Complex number types (Go complex64/complex128)
+    Complex64,                // `complex64` → gourd::prelude::Complex64
+    Complex128,               // `complex128` → gourd::prelude::Complex128
+
     // Generic / trait types (used at runtime)
     GenericHirVec(Box<HirType>), // `Vec<T>`
     GenericHirHashMap, // `HashMap<K, V>` (keys/values stored separately)
@@ -140,6 +144,8 @@ impl HirType {
                 let elem_ty = elem.to_rust_type();
                 quote! { GoChannel<#elem_ty> }
             }
+            HirTypeKind::Complex64 => quote! { ::gourd::prelude::Complex64 },
+            HirTypeKind::Complex128 => quote! { ::gourd::prelude::Complex128 },
             HirTypeKind::GenericHirVec(elem) => {
                 let elem_ty = elem.to_rust_type();
                 quote! { Vec<#elem_ty> }
@@ -305,6 +311,8 @@ impl HirTypeKind {
             HirTypeKind::Channel(_) => "channel".to_string(),
             HirTypeKind::GenericHirVec(_) => "Vec".to_string(),
             HirTypeKind::GenericHirHashMap => "HashMap".to_string(),
+            HirTypeKind::Complex64 => "complex64".to_string(),
+            HirTypeKind::Complex128 => "complex128".to_string(),
             HirTypeKind::Error => "error".to_string(),
             HirTypeKind::Unit => "unit".to_string(),
             HirTypeKind::Unknown(n) => n.clone(),

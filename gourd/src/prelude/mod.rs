@@ -47,6 +47,7 @@ pub mod fmt_ops;
 pub mod rand;
 pub mod std;
 pub mod sync;
+pub mod complex;
 
 // ─── Package emulation (re-exported from packages module) ──────────────────
 
@@ -84,6 +85,21 @@ pub use defer_guard::GoDeferGuard;
 
 // Synchronization
 pub use sync::{GoMutex, GoMutexGuard, GoRc, GoOnce, GoOnceArgs, GoWaitGroup, GoRWMutex, GoRwReadGuard, GoRwWriteGuard};
+
+// Complex number types (Go complex64 / complex128)
+pub use complex::{Complex64, Complex128};
+
+/// Extract the real part of a complex64 number.
+pub fn real64(c: Complex64) -> f32 { c.real() }
+
+/// Extract the imaginary part of a complex64 number.
+pub fn imag64(c: Complex64) -> f32 { c.imag() }
+
+/// Extract the real part of a complex128 number.
+pub fn real128(c: Complex128) -> f64 { c.real() }
+
+/// Extract the imaginary part of a complex128 number.
+pub fn imag128(c: Complex128) -> f64 { c.imag() }
 
 // Error handling
 pub use error::{GoError, recover};

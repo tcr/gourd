@@ -216,6 +216,22 @@ pub enum HirExprKind {
         map: Box<HirExpr>,
         key: Box<HirExpr>,
     },
+    /// complex64 construction: `complex(real, imag)` → Complex64::new(real, imag)
+    Complex64 {
+        real: Box<HirExpr>,
+        imag: Box<HirExpr>,
+    },
+    /// complex128 construction: `complex128(real, imag)` → Complex128::new(real, imag)
+    Complex128 {
+        real: Box<HirExpr>,
+        imag: Box<HirExpr>,
+    },
+    /// real(c) → extract real part of complex number
+    #[allow(dead_code)]
+    ComplexReal(Box<HirExpr>),
+    /// imag(c) → extract imaginary part of complex number
+    #[allow(dead_code)]
+    ComplexImag(Box<HirExpr>),
 }
 
 /// A HIR literal value.
