@@ -193,8 +193,8 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
         HirExprKind::Panic(msg) => quote! { panic!(#msg) },
         HirExprKind::Recover => {
             // recover() in Go returns the panic value inside deferred functions
-            // In Rust: we use a thread-local slot set by catch_unwind panic handler
-            quote! { __GO_PANIC_VALUE.take() }
+            // Calls ::gourd::prelude::recover() which reads the thread-local slot
+            quote! { ::gourd::prelude::recover() }
         }
         HirExprKind::Delete { map, key } => hir_delete_to_rust(map, key),
         HirExprKind::Complex64 { real, imag } => hir_complex64_to_rust(real, imag),

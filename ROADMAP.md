@@ -70,7 +70,7 @@ Name preservation: Go camelCase names stay camelCase. `clippy` warnings suppress
 | `copy` | ✅ `std_copy` in prelude |
 | `delete` | ✅ `std_delete` in prelude |
 | `defer` | ✅ Inline Drop guard generation |
-| `recover` | ❌ |
+| `recover` | ✅ | Thread-local panic slot + `go_with_panic_slot` wrapper for `catch_unwind` integration.
 | `complex` | ❌ |
 | `min` / `max` | ✅ `min(a, b)`, `max(a, b)` with `<T: PartialOrd>` |
 
@@ -169,7 +169,7 @@ These three Go builtin functions are now implemented as standard library functio
 
 | Go Pattern | Status | Impact |
 |------------|--------|--------|
-| **recover** `recover()` | ✅ | Parsed as `HirExprKind::Recover`, emits `__GO_PANIC_VALUE.take()`. Needs runtime support in gourd crate. |
+| **recover** `recover()` | ✅ | Parsed via conversion, emits `::gourd::prelude::recover()`. Runtime: thread-local slot + `go_with_panic_slot` wrapper. |
 | **complex** number types | ✅ | Added `Complex64`/`Complex128` to `HirTypeKind`. Needs num-complex crate integration and arithmetic ops. |
 | **for** without `range` | ✅ | `GoFor` + `ForLoop` variant with init/cond/post parsing and codegen. |
 | **nil** comparison | ✅ | `NilComparison` variant with `.is_empty()` for maps, `.is_none()` fallback. |

@@ -488,6 +488,10 @@ fn hir_call_to_hir(call: &ExprCall) -> HirExpr {
                     return HirExpr::new(HirExprKind::Panic("panic()".to_string()));
                 }
             }
+            // recover() → `__GO_PANIC_VALUE.take()` (reads thread-local panic slot)
+            if name_str == "recover" {
+                return HirExpr::new(HirExprKind::Recover);
+            }
             // complex(real, imag) → Complex128::new(real, imag)
             // In Go, complex() always returns complex128
             if name_str == "complex" {
