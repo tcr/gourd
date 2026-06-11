@@ -54,7 +54,7 @@ pub mod sync;
 // `::gourd::prelude::os_open(...)` etc. works.
 pub use crate::packages::{
     // Strings operations
-    index, join, slice_sub, sort, reverse, contains, split,
+    index, join, slice_sub, contains, split,
     contains_str, index_str, trim, trim_left, trim_right, to_upper, to_lower, repeat, fields,
     // Strings helpers
     strings_replace, strings_replace_all, has_prefix, has_suffix, last_index_str,
@@ -86,7 +86,7 @@ pub use defer_guard::GoDeferGuard;
 pub use sync::{GoMutex, GoMutexGuard, GoRc, GoOnce, GoOnceArgs, GoWaitGroup, GoRWMutex, GoRwReadGuard, GoRwWriteGuard};
 
 // Error handling
-pub use error::{GoError, make_error, check_error, recover};
+pub use error::{GoError, recover};
 
 // Any (interface{})
 pub use any::Any;
@@ -96,7 +96,7 @@ pub use std::{len, cap, append, make_slice, copy, min, max, std_copy, std_copy_s
 pub use ::std::collections::HashMap;
 
 // Deprecated: map helper functions (use GoMap::get/set/delete instead)
-pub use std::{make_map, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, display_map, std_delete};
+pub use std::{make_map, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, std_delete};
 
 // Random
 pub use rand::GoRand;

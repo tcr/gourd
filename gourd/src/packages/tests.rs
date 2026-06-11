@@ -23,20 +23,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sort() {
-        let mut v = vec![3, 1, 2];
-        sort(&mut v);
-        assert_eq!(v, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn test_reverse() {
-        let mut v = vec![1, 2, 3];
-        reverse(&mut v);
-        assert_eq!(v, vec![3, 2, 1]);
-    }
-
-    #[test]
     fn test_contains() {
         assert!(contains(&[1, 2, 3], &2));
         assert!(!contains(&[1, 2, 3], &5));
@@ -292,87 +278,4 @@ mod tests {
 
     // ─── log tests ────────────────────────────────────────────────────────
 
-    #[test]
-    fn test_log_print() {
-        log_print("test message".to_string());
-        // Should not panic
-    }
-
-    #[test]
-    fn test_log_printf() {
-        let result = log_printf("Hello, {}!".to_string(), vec!["world".to_string()]);
-        assert_eq!(result, "Hello, world!");
-    }
-
-    #[test]
-    fn test_log_println() {
-        log_println("test message".to_string());
-        // Should not panic
-    }
-
-    #[test]
-    fn test_log_fatal() {
-        log_fatal("fatal error".to_string());
-        // Should not panic in test
-    }
-
-    #[test]
-    fn test_logf_fatal() {
-        let result = logf_fatal("error: {}".to_string(), vec!["something failed".to_string()]);
-        assert_eq!(result, "error: something failed");
-    }
-
-    #[test]
-    fn test_logln_fatal() {
-        logln_fatal("fatal error".to_string());
-        // Should not panic in test
-    }
-
-    #[test]
-    fn test_set_prefix() {
-        let result = set_prefix("[myapp] ".to_string());
-        assert_eq!(result, "[myapp] ");
-    }
-
-    #[test]
-    fn test_prefix() {
-        let result = prefix();
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn test_flags() {
-        let result = flags();
-        assert_eq!(result, 0x00123);
-    }
-
-    #[test]
-    fn test_set_flags() {
-        let result = set_flags(0x00123);
-        assert!(result.contains("Ldate"));
-    }
-
-    #[test]
-    fn test_output() {
-        let result = output(1, "output message".to_string());
-        assert_eq!(result, "output message");
-    }
-
-    #[test]
-    fn test_set_output() {
-        let result = set_output("stderr".to_string());
-        assert!(result.contains("Writer:"));
-    }
-
-    #[test]
-    fn test_init() {
-        init();
-        // Should not panic
-    }
-
-    #[test]
-    fn test_set_panic() {
-        let result = set_panic(true);
-        assert_eq!(result, "Panic enabled");
-    }
 }

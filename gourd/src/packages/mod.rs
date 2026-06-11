@@ -7,8 +7,6 @@
 //! |--------|-----------|----------|
 //! | `strings_impl` | `strings` | `strings_replace`, `strings_replace_all`, `has_prefix`, `has_suffix` |
 //! | `strings_ops` | `strings` | `index`, `contains`, `join`, `split`, `trim`, etc. |
-//! | `sort_ops` | `sort` | `sort`, `reverse`, `is_sorted`, `search`, `search_strings` |
-//! | `log_impl` | `log` | `log_print`, `log_printf`, `log_println`, `log_fatal`, etc. |
 //! | `strings` | `strings` | re-export from both above |
 //! | `os_impl` | `os` | `os_open`, `os_read_file`, etc. |
 //! | `os` | `os` | re-export from `os_impl` |
@@ -24,18 +22,14 @@ pub mod byte_ops;
 pub mod bytes_ops;
 pub mod io_ops;
 pub mod json_ops;
-pub mod log_impl;
 pub mod math_ops;
 pub mod os;
 pub mod os_impl;
-pub mod sort_ops;
-pub mod strconv_ops;
 pub mod strings;
 pub mod strings_impl;
 pub mod strings_ops;
 pub mod time;
 pub mod time_impl;
-pub mod unicode_ops;
 
 // ─── Flat re-exports (for backward compatibility) ──────────────────────────
 
@@ -64,17 +58,6 @@ pub use math_ops::{abs_i32, abs_i64, abs_f64, sqrt, floor, ceil, round, min_f64,
 // Byte/rune operations
 pub use byte_ops::{byte_of, rune_of, string_to_bytes, bytes_to_string};
 
-// strconv operations
-pub use strconv_ops::{parse_int, parse_float, parse_bool, itoa, format_float, format_int, format_byte, format_rune, format_bool, append_int, append_float, append_bool};
-
-// unicode operations
-pub use unicode_ops::{is_letter, is_digit, is_lower, is_upper, is_space, is_control, to_upper as unicode_to_upper, to_lower as unicode_to_lower, is_valid};
-
-// Sort operations
-pub use sort_ops::{sort, reverse, is_sorted, search, search_strings};
-
-// Log operations
-pub use log_impl::{log_print, log_printf, log_println, log_fatal, logf_fatal, logln_fatal, set_prefix, prefix, flags, set_flags, output, set_output, init, set_panic};
 
 #[cfg(test)]
 mod tests;

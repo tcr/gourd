@@ -149,38 +149,3 @@ pub fn map_set_val<K: Hash + Eq + Clone, V: Clone>(map: &mut HashMap<K, V>, key:
     map.insert(key, val);
 }
 
-/// Helper for fmt functions to display HashMap<String, i32> values.
-#[deprecated(since = "0.2.0", note = "Use GoMap display or format manually")]
-pub fn display_map(m: HashMap<String, i32>) -> String {
-    let mut result = String::from("{");
-    let mut first = true;
-    for (k, v) in m.iter() {
-        if !first {
-            result.push_str(", ");
-        }
-        result.push_str(k);
-        result.push(':');
-        result.push_str(&v.to_string());
-        first = false;
-    }
-    result.push('}');
-    result
-}
-
-/// Display a GoMap<String, i32> as a formatted string.
-#[deprecated(since = "0.2.0", note = "Use GoMap display or format manually")]
-pub fn display_go_map(m: &crate::GoMap<String, i32>) -> String {
-    let mut result = String::from("{");
-    let mut first = true;
-    for (k, v) in m.inner().iter() {
-        if !first {
-            result.push_str(", ");
-        }
-        result.push_str(k);
-        result.push(':');
-        result.push_str(&v.to_string());
-        first = false;
-    }
-    result.push('}');
-    result
-}

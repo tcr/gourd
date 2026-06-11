@@ -1,6 +1,6 @@
 //! Go's `error` interface and error handling.
 //!
-//! Provides `GoError`, `make_error`, `check_error`, and `recover`.
+//! Provides `GoError` and `recover`.
 
 /// Go's `error` interface — boxed error trait.
 #[derive(Debug)]
@@ -29,18 +29,6 @@ impl std::fmt::Display for GoError {
 }
 
 impl std::error::Error for GoError {}
-
-/// Creates a new error (Go `errors.New()`).
-pub fn make_error(message: &str) -> Box<dyn std::error::Error> {
-    Box::new(GoError::new(message))
-}
-
-/// Panics if the error is not nil (Go `if err != nil { panic(err) }`).
-pub fn check_error(err: Option<&dyn std::error::Error>) {
-    if let Some(e) = err {
-        panic!("Go runtime error: {}", e);
-    }
-}
 
 /// Recovers from a panic and returns the panic payload as an error string.
 /// Mirrors Go's `defer recover()` pattern.
