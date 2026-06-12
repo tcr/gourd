@@ -123,8 +123,14 @@ impl HirType {
             }
             HirTypeKind::SliceRef(elem) => {
                 // Borrowed slice in parameter position → &[T]
+                // Special case: GoString slices use GoSlice for safe element access
                 let elem_ty = elem.to_rust_type();
-                quote! { &[#elem_ty] }
+                let elem_str = quote! { #elem_ty }.to_string();
+                if elem_str.contains("GoString") || matches!(&elem.kind, HirTypeKind::StringTy) {
+                    quote! { & :: gourd :: GoSlice < :: gourd :: GoString > }
+                } else {
+                    quote! { &[#elem_ty] }
+                }
             }
             HirTypeKind::Array(elem, n) => {
                 let elem_ty = elem.to_rust_type();
@@ -134,7 +140,7 @@ impl HirType {
             HirTypeKind::Map(key, val) => {
                 let key_ty = key.to_rust_type();
                 let val_ty = val.to_rust_type();
-                quote! { ::gourd::prelude::HashMap<#key_ty, #val_ty> }
+                quote! { ::gourd::GoMap<#key_ty, #val_ty> }
             }
             HirTypeKind::Pointer(elem) => {
                 let elem_ty = elem.to_rust_type();

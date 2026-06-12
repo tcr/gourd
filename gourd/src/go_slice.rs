@@ -406,6 +406,14 @@ impl GoSlice<u8> {
     }
 }
 
+impl<T: Clone> std::ops::Index<usize> for GoSlice<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        self.get(index).unwrap_or_else(|| panic!("index out of range: {} (len={})", index, self.len()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

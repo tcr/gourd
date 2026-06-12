@@ -109,7 +109,7 @@ pub fn hir_expr_to_rust(expr: &HirExpr) -> TokenStream {
             // std::append(slice, items...) → std_append(slice, &[items])
             let rust_fn = match func_name.as_str() {
                 "copy" => "std_copy_slice",
-                "delete" => "std_delete",
+                "delete" => "std_delete_go_map",
                 "append" => "std_append",
                 _ => return emit_todo(&format!("std::{} is not supported", func_name)),
             };
@@ -353,7 +353,7 @@ fn hir_call_to_rust(func: &HirExpr, args: &[HirExpr]) -> TokenStream {
             if arg_tokens.len() > 1 {
                 let first = arg_tokens[0].clone();
                 let rest: Vec<TokenStream> = arg_tokens.into_iter().skip(1).collect();
-                return quote! { ::gourd::prelude::fmt_printf(#first, #(#rest),*) };
+                return quote! { ::gourd::prelude::fmt_printf(#first, #(#rest.to_string()),*) }
             }
         }
     }
@@ -755,7 +755,7 @@ pub fn hir_stmt_to_rust(stmt: &HirStatement, strip_returns: bool) -> TokenStream
                 if heuristics::heuristic_should_use_map_set(&collection_str) {
                     let idx_tokens = hir_expr_to_rust(index);
                     let val_tokens = hir_expr_to_rust(value);
-                    return quote! { (*(#collection_tokens).set(#idx_tokens)) = #val_tokens };
+                    return quote! { * #collection_tokens .set( #idx_tokens.clone() ) = #val_tokens };
                 }
             }
             let target_tokens = hir_expr_to_rust(target);
@@ -1260,15 +1260,15 @@ fn hir_slice_literal_to_rust(elements: &[HirExpr]) -> TokenStream {
 
 /// Convert a map literal to Rust tokens.
 fn hir_map_literal_to_rust(entries: &[(Box<HirExpr>, Box<HirExpr>)]) -> TokenStream {
-    let pairs: Vec<TokenStream> = entries.iter().map(|(k, v)| {
+    let set_calls: Vec<TokenStream> = entries.iter().map(|(k, v)| {
         let k_tok = hir_expr_to_rust(k);
         let v_tok = hir_expr_to_rust(v);
-        quote! { ::std::collections::Entry::Vacant(m.entry(#k_tok)) => { #v_tok } }
+        quote! { ::gourd::GoMap::set(&mut m, #k_tok) = #v_tok; }
     }).collect();
     quote! {
         {
-            let mut m = ::std::collections::HashMap::default();
-            #(#pairs)*
+            let mut m = ::gourd::GoMap::new();
+            #(#set_calls)*
             m
         }
     }

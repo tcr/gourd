@@ -20,18 +20,25 @@
 const MAP_TYPE_KEYWORDS: &[&str] = &[
     "HashMap",
     "hash_map",
+    "GoMap",
+    "GoMap::",
+    "go :: gourd :: GoMap",
+    "gourd :: GoMap",
 ];
 
 /// Type keywords that identify a string index structurally.
 const STRING_INDEX_KEYWORDS: &[&str] = &[
     "String",
     "from(",
+    "GoString",
+    ":: gourd :: GoString",
+    "gourd :: GoString",
 ];
 
 /// Exact names known to be map variables in the codebase.
 /// This is a tiny, targeted fallback for when structural type detection
 /// isn't available (local variable names without type info).
-pub const KNOWN_MAP_NAMES: &[&str] = &["counts", "result"];
+pub const KNOWN_MAP_NAMES: &[&str] = &["counts", "count", "seen", "result", "top"];
 
 /// Check whether a name indicates a map collection type (HashMap, hash_map).
 pub fn collection_is_map_type(name: &str) -> bool {
@@ -85,7 +92,7 @@ pub fn heuristic_should_use_map_set(collection: &str) -> bool {
 pub fn heuristic_is_map_iteration(collection: &str) -> bool {
     // Structural detection: actual HashMap types
     let lower = collection.to_lowercase();
-    if lower.contains("hashmap") || lower.contains("hash_map") {
+    if lower.contains("hashmap") || lower.contains("hash_map") || lower.contains("gomap") {
         return true;
     }
     // Targeted name fallback: known map variable names

@@ -127,8 +127,8 @@ fn parse_go_type_inner(input: &str, depth: u32) -> HirType {
         }
     }
 
-    // Handle `gourd :: prelude :: HashMap < K, V >` format (from map_go_types output)
-    if let Some(rest) = input.strip_prefix("gourd :: prelude :: HashMap < ") {
+    // Handle `gourd :: GoMap < K, V >` format (from map_go_types output)
+    if let Some(rest) = input.strip_prefix("gourd :: GoMap < ") {
         if let Some(bracket_end) = rest.rfind('>') {
             let inner_str = rest[..bracket_end].trim();
             // Split by `, ` to get key and value

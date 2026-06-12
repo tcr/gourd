@@ -101,6 +101,22 @@ where
     deleted
 }
 
+/// Go's `delete(m, key)` for GoMap — removes a key, returns the removed value if any.
+/// Deprecated: use GoMap::delete() instead.
+#[deprecated(since = "0.2.0", note = "Use GoMap::delete() instead")]
+pub fn std_delete_go_map<K: Hash + Eq + Clone, V: Default + Clone>(
+    mut map: crate::GoMap<K, V>,
+    key: K,
+) -> Option<V>
+where
+    K: PartialEq + Clone,
+{
+    if map.is_nil() {
+        return None;
+    }
+    map.delete(key)
+}
+
 /// Go's `append(slice, items...)` — appends items to a slice and returns the new slice.
 /// Go `append(slice, items...)` — appends items to a Vec.
 /// Deprecated: use GoSlice::append_items() instead.

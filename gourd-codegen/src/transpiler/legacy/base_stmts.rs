@@ -401,9 +401,9 @@ fn match_make(normalized: &str) -> TokenStream {
                 let val_str = s[bracket_end + 1..].trim();
                 let key_type = map_go_type_str(key_str);
                 let val_type = map_go_type_str(val_str);
-                quote! { ::gourd::prelude::HashMap::<#key_type, #val_type>::default() }
+                quote! { ::gourd::GoMap::<#key_type, #val_type>::new() }
             } else {
-                quote! { ::gourd::prelude::HashMap::default() }
+                quote! { ::gourd::GoMap::<std::string::String, i32>::new() }
             }
         }
         s if s.starts_with("[]") => {

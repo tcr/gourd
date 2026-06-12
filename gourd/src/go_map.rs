@@ -80,6 +80,13 @@ impl<K: Hash + Eq, V: Default + Clone> GoMap<K, V> {
         self.map.entry(key).or_insert_with(V::default)
     }
 
+    /// Insert a key-value pair (HashMap-style API for compatibility).
+    /// Returns the old value at key if it existed, None otherwise.
+    pub fn insert(&mut self, key: K, val: V) -> Option<V> {
+        assert!(self.initialized, "cannot write to nil map");
+        self.map.insert(key, val)
+    }
+
     /// Go `delete(m, key)` — removes entry, returns value if present.
     /// If nil map, does nothing and returns None (matching Go behavior).
     pub fn delete(&mut self, key: K) -> Option<V> {
@@ -112,6 +119,25 @@ impl<K: Hash + Eq, V: Default + Clone> GoMap<K, V> {
     /// Returns a mutable reference to the underlying HashMap.
     pub fn inner_mut(&mut self) -> &mut HashMap<K, V> {
         &mut self.map
+    }
+
+    /// Go `for k, v := range map` — iterator over key-value pairs.
+    /// Returns an empty iterator for nil maps (matching Go behavior).
+    pub fn iter(&self) -> Box<dyn Iterator<Item = (&K, &V)> + '_> {
+        if !self.initialized {
+            Box::new(std::iter::empty())
+        } else {
+            Box::new(self.map.iter())
+        }
+    }
+
+    /// Go `for k := range map` — iterator over keys only.
+    pub fn keys(&self) -> Box<dyn Iterator<Item = &K> + '_> {
+        if !self.initialized {
+            Box::new(std::iter::empty())
+        } else {
+            Box::new(self.map.keys())
+        }
     }
 
     /// Clone the map but keep it as nil if the original was nil.
@@ -152,6 +178,24 @@ impl<K: Hash + Eq + Clone, V: Default + Clone> Clone for GoMap<K, V> {
 impl<K: Hash + Eq, V: Default + Clone> Default for GoMap<K, V> {
     fn default() -> Self {
         GoMap::nil_map()
+    }
+}
+
+impl<K: Hash + Eq + std::fmt::Display, V: Default + Clone + std::fmt::Display> std::fmt::Display for GoMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_nil() {
+            return write!(f, "nil map");
+        }
+        let inner = self.inner();
+        write!(f, "{{")?;
+        let mut first = true;
+        for (k, v) in inner {
+            if !first { write!(f, ", ")?; }
+            write!(f, "{}: {}", k, v)?;
+            first = false;
+        }
+        write!(f, "}}")?;
+        Ok(())
     }
 }
 

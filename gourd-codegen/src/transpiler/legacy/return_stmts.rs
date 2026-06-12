@@ -104,9 +104,9 @@ pub(crate) fn parse_go_return(input: ParseStream, stmts: &mut Vec<GoStmt>) -> sy
                     let val_str = s[bracket_end + 1..].trim();
                     let key_type = map_go_type_str(key_str);
                     let val_type = map_go_type_str(val_str);
-                    quote! { return ::gourd::prelude::HashMap::<#key_type, #val_type>::default() }
+                    quote! { return ::gourd::GoMap::<#key_type, #val_type>::new() }
                 } else {
-                    quote! { return ::gourd::prelude::HashMap::default() }
+                    quote! { return ::gourd::GoMap::<::gourd::GoString, i32>::new() }
                 }
             }
             s if s.starts_with("[]") => {

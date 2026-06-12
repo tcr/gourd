@@ -6,7 +6,7 @@
 //! HIR-based transpilation is available via `go_to_rust_fn_hir()`.
 
 use crate::transpiler::parsing::{GoFn, GoStruct};
-use super::super::types::map_go_types;
+use super::super::hir::types::map_go_types;
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -106,7 +106,13 @@ pub fn go_to_rust_fn(input: TokenStream) -> TokenStream {
                     }
                     (_, Some(slice_inner)) => {
                         let mapped = map_go_types(slice_inner);
-                        all_params.push(quote! { #id: &[ #mapped ]});
+                        // String slices use GoSlice for safe element access
+                        let mapped_str = quote! { #mapped }.to_string();
+                        if mapped_str.contains("GoString") {
+                            all_params.push(quote! { #id: &::gourd::GoSlice::<::gourd::GoString> });
+                        } else {
+                            all_params.push(quote! { #id: &[ #mapped ]});
+                        }
                     }
                     (Some(ty), None) => {
                         let mapped = map_go_types(ty);

@@ -141,6 +141,14 @@ impl AsRef<str> for GoString {
     }
 }
 
+impl From<GoString> for String {
+    fn from(s: GoString) -> Self {
+        // SAFETY: GoString is always UTF-8 encoded when created via from_str/from/
+        // constructors. We trust the invariant.
+        String::from_utf8(s.bytes).unwrap_or_else(|_| String::from("\u{FFFD}"))
+    }
+}
+
 use std::ops::Deref;
 
 impl Deref for GoString {
@@ -205,6 +213,53 @@ impl PartialEq<GoString> for [u8] {
         self == other.as_bytes()
     }
 }
+
+impl std::ops::Add for GoString {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        let mut bytes = self.bytes;
+        bytes.extend(rhs.bytes);
+        GoString { bytes }
+    }
+}
+
+impl std::ops::Add<&GoString> for GoString {
+    type Output = Self;
+    fn add(self, rhs: &GoString) -> Self {
+        let mut bytes = self.bytes;
+        bytes.extend(&rhs.bytes);
+        GoString { bytes }
+    }
+}
+
+impl std::ops::Add<&GoString> for &GoString {
+    type Output = GoString;
+    fn add(self, rhs: &GoString) -> GoString {
+        let mut bytes = self.bytes.clone();
+        bytes.extend(&rhs.bytes);
+        GoString { bytes }
+    }
+}
+
+impl std::ops::Add<&str> for GoString {
+    type Output = Self;
+    fn add(self, rhs: &str) -> Self {
+        let mut bytes = self.bytes;
+        bytes.extend(rhs.as_bytes());
+        GoString { bytes }
+    }
+}
+
+impl std::ops::Add<&GoString> for &str {
+    type Output = GoString;
+    fn add(self, rhs: &GoString) -> GoString {
+        let mut bytes = self.as_bytes().to_vec();
+        bytes.extend(&rhs.bytes);
+        GoString { bytes }
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {

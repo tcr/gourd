@@ -317,11 +317,10 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                                 if let syn::GenericArgument::Type(val_ty) = &keys[1] {
                                     let mapped_key = map_go_types(key_ty);
                                     let mapped_val = map_go_types(val_ty);
-                                    // Build gourd::prelude::HashMap<K, V>
+                                    // Build gourd::GoMap<K, V>
                                     let mut map_path = syn::Path::from(syn::Ident::new("gourd", proc_macro2::Span::call_site()));
-                                    map_path.segments.push(syn::PathSegment::from(syn::Ident::new("prelude", proc_macro2::Span::call_site())));
                                     map_path.segments.push(syn::PathSegment {
-                                        ident: syn::Ident::new("HashMap", proc_macro2::Span::call_site()),
+                                        ident: syn::Ident::new("GoMap", proc_macro2::Span::call_site()),
                                         arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
                                             colon2_token: None,
                                             lt_token: Token![<](proc_macro2::Span::call_site()),
@@ -352,31 +351,44 @@ pub(crate) fn map_go_types(ty: &syn::Type) -> syn::Type {
                     | "byte" | "rune" | "float32" | "float64" | "error"
                 ) {
                     // Replace with the mapped Go type
-                    let mapped_ident = match first_name.as_str() {
-                        "bool" => "bool",
-                        "string" => "String",
-                        "int" => "i32",
-                        "int8" => "i8",
-                        "int16" => "i16",
-                        "int32" => "i32",
-                        "int64" => "i64",
-                        "uint" => "u32",
-                        "uint8" => "u8",
-                        "uint16" => "u16",
-                        "uint32" => "u32",
-                        "uint64" => "u64",
-                        "uintptr" => "usize",
-                        "byte" => "u8",
-                        "rune" => "char",
-                        "float32" => "f32",
-                        "float64" => "f64",
-                        "error" => "Box<dyn std::error::Error>",
-                        _ => unreachable!(),
-                    };
-                    return syn::Type::Path(syn::TypePath {
-                        path: syn::Path::from(syn::Ident::new(mapped_ident, proc_macro2::Span::call_site())),
-                        qself: None,
-                    });
+                    match first_name.as_str() {
+                        "string" => {
+                            // Construct fully qualified path for GoString
+                            return syn::Type::Path(syn::TypePath {
+                                qself: None,
+                                path: syn::Path { leading_colon: Some(Default::default()), segments: [
+                                    syn::PathSegment { ident: syn::Ident::new("gourd", proc_macro2::Span::call_site()), arguments: syn::PathArguments::None },
+                                    syn::PathSegment { ident: syn::Ident::new("GoString", proc_macro2::Span::call_site()), arguments: syn::PathArguments::None },
+                                ].into_iter().collect() },
+                            });
+                        }
+                        _ => {
+                            let mapped_ident = match first_name.as_str() {
+                                "bool" => "bool",
+                                "int" => "i32",
+                                "int8" => "i8",
+                                "int16" => "i16",
+                                "int32" => "i32",
+                                "int64" => "i64",
+                                "uint" => "u32",
+                                "uint8" => "u8",
+                                "uint16" => "u16",
+                                "uint32" => "u32",
+                                "uint64" => "u64",
+                                "uintptr" => "usize",
+                                "byte" => "u8",
+                                "rune" => "char",
+                                "float32" => "f32",
+                                "float64" => "f64",
+                                "error" => "Box<dyn std::error::Error>",
+                                _ => unreachable!(),
+                            };
+                            return syn::Type::Path(syn::TypePath {
+                                path: syn::Path::from(syn::Ident::new(mapped_ident, proc_macro2::Span::call_site())),
+                                qself: None,
+                            });
+                        }
+                    }
                 }
             }
 

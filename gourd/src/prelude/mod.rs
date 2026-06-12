@@ -112,7 +112,7 @@ pub use std::{len, cap, append, make_slice, copy, min, max, std_copy, std_copy_s
 pub use ::std::collections::HashMap;
 
 // Deprecated: map helper functions (use GoMap::get/set/delete instead)
-pub use std::{make_map, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, std_delete};
+pub use std::{make_map, map_get, map_get_ref, map_set_mut, map_set_mut_ref, map_set_val, std_delete, std_delete_go_map};
 
 // Random
 pub use rand::GoRand;

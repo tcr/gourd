@@ -38,10 +38,10 @@ fn test_triple_return() {
 // Test string-keyed map literal
 #[verify_rust_output({fn goMapSize(_a: ::gourd::GoString) -> i32 {
     let m = {
-        let mut m = ::gourd::prelude::HashMap::new();
-        m.insert(::gourd::GoString::from("a"), 1);
-        m.insert(::gourd::GoString::from("b"), 2);
-        m.insert(::gourd::GoString::from("c"), 3);
+        let mut m = ::gourd::GoMap::<::gourd::GoString, i32>::new();
+        *m.set(::gourd::GoString::from("a")) = 1;
+        *m.set(::gourd::GoString::from("b")) = 2;
+        *m.set(::gourd::GoString::from("c")) = 3;
         m
     };
     ;
@@ -63,8 +63,8 @@ fn test_map_literal() {
 // Test map length
 #[verify_rust_output({fn goEmptyMap() -> i32 {
     let m = {
-        let mut m = ::gourd::prelude::HashMap::new();
-        m.insert(::gourd::GoString::from("x"), 0);
+        let mut m = ::gourd::GoMap::<::gourd::GoString, i32>::new();
+        *m.set(::gourd::GoString::from("x")) = 0;
         m
     };
     ;

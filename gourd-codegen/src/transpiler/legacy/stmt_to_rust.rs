@@ -186,9 +186,9 @@ pub(crate) fn go_stmt_to_rust(stmt: &GoStmt) -> TokenStream {
                         // Consolidated map detection: type-based + name-based heuristics.
                         let iter_str = quote! { #iterable }.to_string();
                         if heuristics::heuristic_should_use_map_get_ref(&iter_str, "") {
-                            // Map iteration: for k, v := range map
+                            // Map iteration: for k, v := range map — iterate over keys only
                             quote! {
-                                for ( #i_ident , #v_ident ) in #iterable . iter () { #body_block }
+                                for #i_ident in #iterable .keys() { let #v_ident = ( #iterable ).get( #i_ident ); #body_block }
                             }
                         } else {
                             // Slice iteration: for i, v := range slice
@@ -310,7 +310,7 @@ fn go_go_make(raw_args: &str) -> TokenStream {
             quote! { GoChannel::<#chan_type>::new() }
         }
     } else if normalized.starts_with("map[") {
-        quote! { ::gourd::prelude::HashMap::new() }
+        quote! { ::gourd::GoMap::<std::string::String, i32>::new() }
     } else if normalized.starts_with("[]") {
         let slice_args: Vec<&str> = normalized.splitn(2, ',').collect();
         let slice_type_str = slice_args[0].trim().trim_start_matches("[]").trim();
@@ -336,21 +336,21 @@ fn go_stmt_to_rust_map(
 ) -> TokenStream {
     if entries.is_empty() {
         if ident.is_empty() {
-            return quote! { ::gourd::prelude::HashMap::default() };
+            return quote! { ::gourd::GoMap::<std::string::String, i32>::new() };
         }
         let name: syn::Ident = syn::parse_str(ident).unwrap();
         if let (Some(kt), Some(vt)) = (key_type, val_type) {
             let kt = map_go_types(kt);
             let vt = map_go_types(vt);
-            return quote! { let #name = ::gourd::prelude::HashMap::<#kt, #vt>::default(); };
+            return quote! { let #name = ::gourd::GoMap::<#kt, #vt>::new(); };
         }
-        return quote! { let #name = ::gourd::prelude::HashMap::default() };
+        return quote! { let #name = ::gourd::GoMap::<::gourd::GoString, i32>::default() };
     }
 
     let insertions: Vec<_> = entries.iter().map(|(k, v)| {
         let key = go_to_rust(k);
         let val = go_to_rust(v);
-        quote! { m.insert(#key, #val); }
+        quote! { *m.set(#key) = #val; }
     }).collect();
 
     let block = if let (Some(kt), Some(vt)) = (key_type, val_type) {
@@ -358,7 +358,7 @@ fn go_stmt_to_rust_map(
         let vt = map_go_types(vt);
         quote! {
             {
-                let mut m = ::gourd::prelude::HashMap::<#kt, #vt>::new();
+                let mut m = ::gourd::GoMap::<#kt, #vt>::new();
                 #(#insertions)*
                 m
             }
@@ -366,7 +366,7 @@ fn go_stmt_to_rust_map(
     } else {
         quote! {
             {
-                let mut m = ::gourd::prelude::HashMap::new();
+                let mut m = ::gourd::GoMap::<::gourd::GoString, i32>::new();
                 #(#insertions)*
                 m
             }

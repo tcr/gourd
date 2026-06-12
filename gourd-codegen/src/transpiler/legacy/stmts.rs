@@ -95,7 +95,7 @@ fn parse_body_from_group_debug(ts: &proc_macro2::TokenStream) -> syn::Result<GoB
                     stmts.push(GoStmt::RawStmt(quote::quote! { return GoChannel::<#chan_type>::new() }));
                 }
             } else if args_str.starts_with("map[") {
-                stmts.push(GoStmt::RawStmt(quote::quote! { return ::gourd::prelude::HashMap::new() }));
+                stmts.push(GoStmt::RawStmt(quote::quote! { return ::gourd::GoMap::<std::string::String, i32>::new() }));
             } else if args_str.starts_with("[]") {
                 let len: Option<syn::LitInt> = syn::parse_str(args_str.trim_start_matches("[]").trim()).ok();
                 if let Some(l) = len {

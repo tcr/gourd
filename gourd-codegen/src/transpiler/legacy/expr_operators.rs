@@ -134,18 +134,13 @@ pub fn transpile_assign(input: &ExprAssign) -> TokenStream {
                     let map_var = quote! { #first_seg };
                     let map_name = first_seg.ident.to_string().to_lowercase();
                     let is_map_named = heuristics::heuristic_should_use_map_set(&map_name);
-                    // Check if the index is a simple path (identifier) — suggests HashMap iteration key
-                    let idx_is_simple_path = matches!(&*idx.index, syn::Expr::Path(_));
                     let key = crate::transpiler::legacy::expr_dispatch::go_to_rust(&idx.index);
                     let rhs = crate::transpiler::legacy::expr_dispatch::go_to_rust(&input.right);
-                    // Use map_set_mut_ref when iterating over a map (key is already a reference)
-                    // Pass key directly; map_set_mut_ref expects &K
-                    if is_map_named && idx_is_simple_path {
-                        // Normal map assignment: pass value directly
-                        return quote! { *::gourd::prelude::map_set_mut_ref( &mut #map_var , &#key ) = #rhs };
+                    // Use GoMap::set when the collection is a map type
+                    if is_map_named {
+                        // Clone key for owned .set(), dereference value for assignment
+                        return quote! { * #map_var .set( #key.clone() ) = #rhs };
                     }
-                    // Pass key by reference to map_set_mut_ref (expects &K)
-                    return quote! { *::gourd::prelude::map_set_mut_ref( &mut #map_var , &#key ) = #rhs };
                 }
             }
         }

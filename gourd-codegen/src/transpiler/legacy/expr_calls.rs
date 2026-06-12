@@ -62,7 +62,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             return quote! { ::gourd::prelude::std_copy_slice( #(#func),* ) };
         }
         if let Some(_func_name) = try_parse_std_delete(path) {
-            return quote! { ::gourd::prelude::std_delete( #(#args),* ) };
+            return quote! { ::gourd::prelude::std_delete_go_map( #(#args),* ) };
         }
     }
 
@@ -84,7 +84,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             return quote! { #slice.clone().to_vec() };
         }
         let rest = &args[1..];
-        // Append elements — use GoSlice::append() for each item.
+        // Append elements — use .push() for each item (works on both Vec and GoSlice)
         let appended = rest.iter().map(|a| {
             let ts = quote! { #a };
             let s = ts.to_string();
@@ -97,10 +97,10 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                 quote! { #a .clone() }
             }
         });
-        // Wrap in append chain: __s.append(val); __s.append(val2); ...
+        // Wrap in push chain: __s.push(val); __s.push(val2); ...
         return quote! {
             { let mut __gourd_append_result = (#slice).clone();
-              #(__gourd_append_result.append(#appended);)*
+              #(__gourd_append_result.push(#appended);)*
               __gourd_append_result }
         };
     }
@@ -278,7 +278,7 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
             .collect();
         return quote! { {
             let mut __gourd_append_result = #slice;
-            __gourd_append_result.append_items(&[#(#items),*]);
+            __gourd_append_result.extend(vec![#(#items),*].as_slice());
             __gourd_append_result
         }};
     }
@@ -313,9 +313,9 @@ pub fn transpile_call(input: &syn::ExprCall) -> TokenStream {
                     let val_str = type_str[bracket_end + 1..].trim();
                     let key_type = super::super::types::map_go_type_str(key_str);
                     let val_type = super::super::types::map_go_type_str(val_str);
-                    return quote! { ::gourd::prelude::HashMap::<#key_type, #val_type>::default() };
+                    return quote! { ::gourd::GoMap::<#key_type, #val_type>::new() };
                 }
-                return quote! { ::gourd::prelude::HashMap::default() };
+                return quote! { ::gourd::GoMap::<std::string::String, i32>::new() };
             }
             if type_str.starts_with("[]") {
                 // make([]T, len) → GoSlice::with_length(len)
@@ -464,7 +464,7 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
         || matches!(&*input.index, Expr::Range(_));
     if !is_num_or_range {
         if heuristics::heuristic_should_use_map_get_ref(&seq_str, &idx_str) {
-            return quote! { ::gourd::prelude::map_get_ref( &#seq, &#idx ) };
+            return quote! { #seq .get( &#idx ) };
         }
     }
     // Detect string byte indexing: Go `str[i]` where str is a String.
@@ -482,6 +482,22 @@ pub fn transpile_index(input: &ExprIndex) -> TokenStream {
                 return quote! { #seq.as_bytes()[ #idx as usize] };
             }
         }
+    }
+
+    // Detect GoSlice access: when seq is a GoSlice type, use .get(i).unwrap().clone()
+    // to avoid moving non-Copy elements out of the slice.
+    if seq_str.contains("GoSlice") {
+        let idx = quote! { #idx as usize };
+        return quote! { #seq .get( #idx ) . unwrap() . clone() };
+    }
+    // Heuristic: integer-indexed access into known string-slice param names
+    // uses GoSlice API to avoid moving non-Copy elements out of a GoSlice<GoString>.
+    let STR_PARAM_NAMES: &[&str] = &["data", "text", "input", "msg", "phrase"];
+    if STR_PARAM_NAMES.iter().any(|&name| seq_lower.contains(name))
+        && matches!(&*input.index, Expr::Path(_))
+    {
+        // Use GoSlice API for owned access to avoid move errors with non-Copy types
+        return quote! { #seq .get( #idx as usize ) . unwrap() . clone() };
     }
 
     // Index expressions need usize for Rust slices; if the index is i32 (Go int),
