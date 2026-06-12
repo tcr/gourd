@@ -32,7 +32,3 @@ log = "0.4"
 
 [dev-dependencies]
 gourd-macro = { path = "../gourd-macro" }
-gourd-codegen = { path = "../gourd-codegen" }
-syn = { version = "2", features = ["full"] }
-quote = "1"
-proc-macro2 = "1"

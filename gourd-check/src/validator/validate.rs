@@ -110,35 +110,42 @@ pub fn validate_go(blocks: &[GoBlock]) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
     for (_file, group_blocks) in file_groups {
-        // Combine all blocks from the same file into one Go source
-        let combined = group_blocks
-            .iter()
-            .map(|b| b.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        // Normalize Go dialect before validation
-        let normalized = normalize_go_code(&combined);
-
-        // Validate all blocks from this file together
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("go.mod"), "module gourd-test\ngo 1.21\n").ok();
-        let go_result = run_go_build(tmp.path(), &normalized);
-
-        // Assign the validation result to each individual block
-        for block in group_blocks {
-            results.push(CheckResult {
-                file: block.file.clone(),
-                line: block.line,
-                go_code: block.content.clone(),
-                go_valid: match &go_result {
-                    Ok(()) => Some(Validation::Ok),
-                    Err(e) => Some(Validation::Error(e.to_string())),
-                },
-                rust_valid: None,
-            });
-        }
+        results.extend(validate_go_file_group(&group_blocks));
     }
 
     results
+}
+
+/// Validate a single file's worth of Go blocks.
+/// Returns per-block results. Called per file group (serially or in parallel).
+pub fn validate_go_file_group(group_blocks: &[&GoBlock]) -> Vec<CheckResult> {
+    // Combine all blocks from the same file into one Go source
+    let combined = group_blocks
+        .iter()
+        .map(|b| b.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    // Normalize Go dialect before validation
+    let normalized = normalize_go_code(&combined);
+
+    // Validate all blocks from this file together
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module gourd-test\ngo 1.21\n").ok();
+    let go_result = run_go_build(tmp.path(), &normalized);
+
+    // Assign the validation result to each individual block
+    group_blocks
+        .iter()
+        .map(|block| CheckResult {
+            file: block.file.clone(),
+            line: block.line,
+            go_code: block.content.clone(),
+            go_valid: match &go_result {
+                Ok(()) => Some(Validation::Ok),
+                Err(e) => Some(Validation::Error(e.to_string())),
+            },
+            rust_valid: None,
+        })
+        .collect()
 }

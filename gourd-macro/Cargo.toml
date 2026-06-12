@@ -14,7 +14,5 @@ quote = "1"
 proc-macro2 = "1"
 
 [dev-dependencies]
-gourd-codegen = { path = "../gourd-codegen" }
 gourd = { path = "../gourd" }
 syn = { version = "2", features = ["full"] }
-proc-macro2 = "1"

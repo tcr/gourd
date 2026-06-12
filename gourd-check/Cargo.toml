@@ -19,3 +19,6 @@ quote = "1"
 syn = { version = "2", features = ["full", "parsing"] }
 tempfile = "3"
 toml = "0.8"
+
+[dev-dependencies]
+rayon = "1"
